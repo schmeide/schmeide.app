@@ -18,7 +18,7 @@ import type {
   stopWorkflow,
 } from "../temporal/workflows.ts";
 import { appendEvent, finishBuild } from "./builds.ts";
-import { ConflictError, NotFoundError } from "./errors.ts";
+import { BuildRunningError, ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
@@ -192,7 +192,7 @@ const startBuild = async (
     .where(eq(builds.status, "running"))
     .limit(1);
   if (running)
-    throw new ConflictError(`Build ${running.id} is still running; wait for it to finish`);
+    throw new BuildRunningError(`Build ${running.id} is still running; wait for it to finish`);
   return db.transaction(async (tx) => {
     const project = await transition(tx as unknown as Db, id, from, { status: "building" });
     const [build] = await tx

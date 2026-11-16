@@ -8,7 +8,7 @@ import {
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { listEvents } from "./services/builds.ts";
-import { ConflictError, NotFoundError } from "./services/errors.ts";
+import { BuildRunningError, ConflictError, NotFoundError } from "./services/errors.ts";
 import {
   approveSpec,
   createProject,
@@ -24,7 +24,17 @@ import {
 
 export type Context = Deps;
 
-const t = initTRPC.context<Context>().create({ transformer: superjson });
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  // `reason` tells conflicts the UI treats differently apart without matching message text.
+  errorFormatter: ({ shape, error }) => ({
+    ...shape,
+    data: {
+      ...shape.data,
+      ...(error.cause instanceof BuildRunningError && { reason: "buildRunning" as const }),
+    },
+  }),
+});
 
 const procedure = t.procedure.use(async ({ next }) => {
   const result = await next();
@@ -33,7 +43,7 @@ const procedure = t.procedure.use(async ({ next }) => {
     if (cause instanceof NotFoundError)
       throw new TRPCError({ code: "NOT_FOUND", message: cause.message });
     if (cause instanceof ConflictError)
-      throw new TRPCError({ code: "CONFLICT", message: cause.message });
+      throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
   }
   return result;
 });

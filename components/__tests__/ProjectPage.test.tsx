@@ -87,7 +87,7 @@ describe("ProjectPage", () => {
     renderWithApi(<ProjectPage id={7} />, {
       ...projectServer({ project: aProject({ status: "spec_ready", features: "a", spec: SPEC }) }),
       "projects.approveSpec": () => {
-        throw new ApiFailure("CONFLICT", "Build 2 is still running; wait for it to finish");
+        throw new ApiFailure("CONFLICT", "Build 2 is busy", "buildRunning");
       },
     });
     await userEvent.click(await screen.findByRole("button", { name: copy.project.approve }));
