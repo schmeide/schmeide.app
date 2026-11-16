@@ -312,8 +312,9 @@ The Claude Agent SDK runs the locally installed, logged-in `claude` binary (your
   setting sources, so it is excluded explicitly. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` as well.
   `--bare` is not used: it drops the subscription login.
 - `permissionMode: "dontAsk"` with an allowlist: `Read`, `Glob`, `Grep`, `TodoWrite`, `Edit`/`Write`
-  inside the workspace, and Bash limited to `make`, `npm`, `npx`, `node`, `git`, and basic file
-  commands. Anything else is denied without a prompt and logged as a `Denied ...` event.
+  inside the workspace, `Skill` for the design skills the template vendors in `.claude/skills/`, and
+  Bash limited to `make`, `npm`, `npx`, `node`, `git`, and basic file commands. Anything else is
+  denied without a prompt and logged as a `Denied ...` event.
 - The project environment: `COMPOSE_PROJECT_NAME`, `WEB_PORT`, `TEST_DB_PORT`, GNU make first on
   `PATH`, and the server's own variables (`DATABASE_URL`, `MAKEFLAGS`, ...) removed.
 
