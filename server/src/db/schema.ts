@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -18,10 +19,12 @@ import { z } from "zod";
 
 // Tables are the single source: validation and API types derive from them.
 
-// ponytail: one seeded tenant (`demo`) and no auth; add accounts and tenant-scoped sessions for production
+// A business, in customer copy. Everything a person makes belongs to one; `memberships` says who
+// may work in it. The seeded `demo` tenant holds what was built before sign-in existed.
 export const tenants = pgTable("tenants", {
   id: serial("id").primaryKey(),
   slug: varchar("slug", { length: 64 }).notNull().unique(),
+  name: varchar("name", { length: 120 }).notNull().default(""),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -330,10 +333,30 @@ export const rateLimits = pgTable("rate_limits", {
   lastRequest: bigint("last_request", { mode: "number" }).notNull(),
 });
 
+export const memberRole = pgEnum("member_role", ["owner", "editor"]);
+
+// Who may work in which business.
+export const memberships = pgTable(
+  "memberships",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    role: memberRole("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.userId, table.tenantId] })]
+);
+
 // Prelaunch: only these addresses (lowercase) may have an account or a session. Delete the table
 // and its checks (services/access.ts) to open sign-up to everyone.
 export const approvedEmails = pgTable("approved_emails", {
   email: text("email").primaryKey(),
+  // The business this person joins on first sign-in; null gives them a new one of their own.
+  tenantId: integer("tenant_id").references(() => tenants.id),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

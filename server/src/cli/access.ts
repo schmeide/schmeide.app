@@ -3,8 +3,9 @@
 import { createDb } from "../db/client.ts";
 import { approveEmail, INVITE_DAYS, listApproved, removeApproval } from "../services/access.ts";
 import { authConfigFromEnv } from "../services/auth.ts";
+import { findTenantBySlug } from "../services/businesses.ts";
 
-const [command, email] = process.argv.slice(2);
+const [command, email, tenant] = process.argv.slice(2);
 const db = createDb(
   process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide"
 );
@@ -17,9 +18,15 @@ const needEmail = (): string => {
 try {
   if (command === "approve") {
     const { publicUrl } = authConfigFromEnv(process.env);
-    const approved = await approveEmail(db, needEmail());
+    const tenantId = tenant ? await findTenantBySlug(db, tenant) : undefined;
+    const approved = await approveEmail(db, needEmail(), { tenantId });
     console.log(
       `${approved.email} is approved. They can sign in with Google, Microsoft, or Apple.`
+    );
+    console.log(
+      tenant
+        ? `They work in the "${tenant}" business.`
+        : "They get a business of their own the first time they sign in."
     );
     console.log(`To set a password, send them this link (one use, ${INVITE_DAYS} days):`);
     console.log(`${publicUrl}/set-password?token=${approved.token}`);

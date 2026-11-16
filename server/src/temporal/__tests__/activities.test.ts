@@ -20,6 +20,7 @@ import {
   type Config,
   type Query,
 } from "../activities.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -71,7 +72,7 @@ const setup = () => {
 };
 
 const newBuild = async () => {
-  const project = await createProject(db, { name: `a ${randomUUID()}` });
+  const project = await createProject(db, { name: `a ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)

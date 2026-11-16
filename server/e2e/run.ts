@@ -1,13 +1,17 @@
 // `make e2e` / `make e2e/fake`: drives the to-do fixture from features to a live app against a
 // running server, then deletes the project (deployment, volumes, workspace, rows) unless KEEP=1.
-// Exits non-zero on failure. E2E_CONCURRENT=1 (set by `make e2e/fake`) builds two projects at once
+// It signs in as an approved account it makes for the run and removes afterwards. Exits non-zero on failure. E2E_CONCURRENT=1 (set by `make e2e/fake`) builds two projects at once
 // and queues a change on the first while its build runs; the second then gets a page title and icon,
 // checked on the deployed app.
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createTRPCClient, httpLink } from "@trpc/client";
+import { eq } from "drizzle-orm";
 import superjson from "superjson";
+import { createDb } from "../src/db/client.ts";
+import { tenants, users } from "../src/db/schema.ts";
 import type { AppRouter } from "../src/router.ts";
+import { approveEmail, removeApproval } from "../src/services/access.ts";
 
 const base = process.env.SCHMEIDE_URL ?? `http://localhost:${process.env.PORT ?? 3100}`;
 const keep = process.env.KEEP === "1";
@@ -15,9 +19,22 @@ const concurrent = process.env.E2E_CONCURRENT === "1";
 const timeoutMs = Number(process.env.E2E_TIMEOUT_MIN ?? 60) * 60_000;
 const features = readFileSync(new URL("./todo-features.txt", import.meta.url), "utf8").trim();
 
+// The run signs in as an approved account it makes for itself (below) and sends its cookie.
+let cookie = "";
 const api = createTRPCClient<AppRouter>({
-  links: [httpLink({ url: `${base}/api/trpc`, transformer: superjson })],
+  links: [
+    httpLink({ url: `${base}/api/trpc`, transformer: superjson, headers: () => ({ cookie }) }),
+  ],
 });
+const db = createDb(
+  process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide"
+);
+// Sign-in checks that a request comes from the app's own address.
+const origin = process.env.SCHMEIDE_PUBLIC_URL ?? "http://localhost:5173";
+const account = {
+  email: `e2e-${randomBytes(4).toString("hex")}@schmeide.test`,
+  password: randomBytes(18).toString("base64url"),
+};
 const started = Date.now();
 const elapsed = () => `${Math.round((Date.now() - started) / 1000)}s`;
 const logAs = (projectId: number) => (message: string) =>
@@ -148,6 +165,32 @@ if (!health?.ok) {
   process.exit(1);
 }
 
+// Approves the run's account, sets its password through its invite link, and signs in.
+const signIn = async () => {
+  const { token } = await approveEmail(db, account.email);
+  await api.invites.accept.mutate({ token, name: "E2E run", password: account.password });
+  const response = await fetch(`${base}/api/auth/sign-in/email`, {
+    method: "POST",
+    headers: { "content-type": "application/json", origin },
+    body: JSON.stringify(account),
+  });
+  if (!response.ok) throw new Error(`sign-in as ${account.email} answered ${response.status}`);
+  cookie = response.headers
+    .getSetCookie()
+    .map((value) => value.split(";")[0])
+    .join("; ");
+};
+
+// Takes the run's account, and the business made for it, away again.
+const signOutForGood = async () => {
+  const { businesses } = await api.session.get.query();
+  await removeApproval(db, account.email);
+  await db.delete(users).where(eq(users.email, account.email));
+  for (const { id } of businesses) await db.delete(tenants).where(eq(tenants.id, id));
+};
+
+await signIn();
+
 // Creates a project, drives it to live, and cleans up. Resolves to whether it passed.
 const runProject = async (queueChange: boolean): Promise<boolean> => {
   const created = await api.projects.create.mutate({
@@ -160,9 +203,9 @@ const runProject = async (queueChange: boolean): Promise<boolean> => {
     log(`passed: ${url}`);
     if (keep) {
       console.log(
-        `KEEP=1: left running at ${url}. Remove it with:\n` +
-          `  curl -s -H content-type:application/json http://localhost:3100/api/trpc/projects.delete -d '{"json":{"id":${created.id}}}'\n` +
-          "  (needs `make serve` or `make serve/server` running)"
+        `KEEP=1: left running at ${url}. To remove it, sign in at ${origin} as ${account.email} ` +
+          `with the password ${account.password}, open the project's settings, and delete it. ` +
+          `Then run \`make access/remove EMAIL=${account.email}\`.`
       );
     }
     return true;
@@ -181,6 +224,8 @@ if (concurrent && !overlapped) {
   console.error("e2e FAILED: the two projects never built at the same time");
   results.push(false);
 }
+if (!keep) await signOutForGood().catch((error: unknown) => console.error("cleanup:", error));
+await db.$client.end();
 if (results.every(Boolean)) {
   console.log(`e2e passed in ${elapsed()}`);
 } else {

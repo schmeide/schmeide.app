@@ -26,6 +26,7 @@ import {
   transition,
   type Deps,
 } from "../projects.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 // Tests share one database, so they assert only on rows they created.
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -44,7 +45,7 @@ const startArgs = (workflows: ReturnType<typeof fakeWorkflows>["workflows"]) =>
   workflows.start.mock.calls.map((call: readonly unknown[]) => call[0]);
 
 const specReady = async () => {
-  const project = await createProject(db, { name: `p ${randomUUID()}` });
+  const project = await createProject(db, { name: `p ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   await setFeatures(db, { id: project.id, features: "a list of to-dos" });
   return transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
 };
@@ -65,8 +66,8 @@ describe("createProject", () => {
   it("gives repeated names distinct slugs and each project its own ports", async () => {
     const name = `Same ${randomUUID()}`;
 
-    const first = await createProject(db, { name });
-    const second = await createProject(db, { name });
+    const first = await createProject(db, { name, tenantId: DEMO_TENANT_ID });
+    const second = await createProject(db, { name, tenantId: DEMO_TENANT_ID });
 
     expect(first.slug).toBe(slugify(name));
     expect(second.slug).toBe(`${slugify(name)}-2`);
@@ -79,7 +80,9 @@ describe("createProject", () => {
   it("survives concurrent creates racing for the same slug and port", async () => {
     const name = `Race ${randomUUID()}`;
 
-    const created = await Promise.all(Array.from({ length: 4 }, () => createProject(db, { name })));
+    const created = await Promise.all(
+      Array.from({ length: 4 }, () => createProject(db, { name, tenantId: DEMO_TENANT_ID }))
+    );
 
     expect(new Set(created.map((project) => project.slug)).size).toBe(4);
     expect(new Set(created.map((project) => project.webPort)).size).toBe(4);
@@ -88,7 +91,10 @@ describe("createProject", () => {
 
 describe("getProject", () => {
   it("reports zero usage and no build for a new project", async () => {
-    const project = await createProject(db, { name: `g ${randomUUID()}` });
+    const project = await createProject(db, {
+      name: `g ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
 
     const detail = await getProject(db, project.id);
 
@@ -107,7 +113,10 @@ describe("getProject", () => {
 describe("project state machine", () => {
   it("generates a spec only from features", async () => {
     const { deps, workflows } = fakeWorkflows();
-    const project = await createProject(db, { name: `p ${randomUUID()}` });
+    const project = await createProject(db, {
+      name: `p ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
 
     await expect(generateSpec(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
     await setFeatures(db, { id: project.id, features: "a list of to-dos" });
@@ -130,7 +139,7 @@ describe("project state machine", () => {
 
   it("approves only a ready spec, starts a build, and lets other projects build too", async () => {
     const { deps, workflows } = fakeWorkflows();
-    const draft = await createProject(db, { name: `p ${randomUUID()}` });
+    const draft = await createProject(db, { name: `p ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
     await expect(approveSpec(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
 
     const ready = await specReady();
@@ -184,7 +193,7 @@ describe("project state machine", () => {
     await stopProject(deps, ready.id);
     expect(startArgs(workflows)).toContain("stopWorkflow");
 
-    const draft = await createProject(db, { name: `p ${randomUUID()}` });
+    const draft = await createProject(db, { name: `p ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
     await expect(stopProject(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
   });
 });

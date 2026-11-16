@@ -21,6 +21,7 @@ import { getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
 import { MAX_FIX_ATTEMPTS, buildWorkflow } from "../workflows.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 let env: TestWorkflowEnvironment;
@@ -111,7 +112,7 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
 const runBuild = async (options: Options) => {
   const taskQueue = `test-${randomUUID()}`;
   const { activities, runPrompts } = setup(options, taskQueue);
-  const project = await createProject(db, { name: `wf ${randomUUID()}` });
+  const project = await createProject(db, { name: `wf ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)

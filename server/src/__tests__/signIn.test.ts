@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
@@ -7,7 +6,14 @@ import { invites } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { approveEmail, listApproved, removeApproval } from "../services/access.ts";
 import { admit, authConfigFromEnv, REFUSED } from "../services/auth.ts";
-import { TEST_ORIGIN, testAuth } from "./testAuth.ts";
+import {
+  anEmail,
+  callApi,
+  PASSWORD,
+  signIn as signInTo,
+  TEST_ORIGIN,
+  testAuth,
+} from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -24,32 +30,8 @@ const context: AppContext = {
 const app = buildApp(context);
 afterAll(() => app.close());
 
-const anEmail = () => `person-${randomUUID()}@example.com`;
-const PASSWORD = "correct horse battery";
-
-const trpc = async (path: string, input: unknown, cookie = "") => {
-  const isQuery = path.endsWith(".get");
-  const response = await app.inject({
-    method: isQuery ? "GET" : "POST",
-    url: `/api/trpc/${path}${isQuery ? `?input=${encodeURIComponent(JSON.stringify({ json: input }))}` : ""}`,
-    headers: { cookie },
-    ...(isQuery ? {} : { payload: { json: input } }),
-  });
-  const body = response.json();
-  return { status: response.statusCode, data: body.result?.data.json, error: body.error?.json };
-};
-
-// Signs in with a password; answers the status and the session cookie to send back.
-const signIn = async (email: string, password = PASSWORD) => {
-  const response = await app.inject({
-    method: "POST",
-    url: "/api/auth/sign-in/email",
-    headers: { origin: TEST_ORIGIN },
-    payload: { email, password },
-  });
-  const cookie = response.cookies.map(({ name, value }) => `${name}=${value}`).join("; ");
-  return { status: response.statusCode, cookie, body: response.json() };
-};
+const trpc = (path: string, input?: unknown, cookie = "") => callApi(app, path, input, cookie);
+const signIn = (email: string, password?: string) => signInTo(app, email, password);
 
 // An approved person who has set a password through their link.
 const aPerson = async (name = "Ada Example") => {
@@ -116,33 +98,32 @@ describe("an invite link", () => {
     const { status, cookie } = await signIn(email);
     expect(status).toBe(200);
     expect(cookie).not.toBe("");
-    expect((await trpc("session.get", undefined, cookie)).data).toEqual({
+    expect((await trpc("session.get", undefined, cookie)).data).toMatchObject({
       person: { name: "Ada Example", email },
-      businesses: [{ id: 1, name: "Demo business" }],
       providers: ["google"],
     });
 
-    expect((await trpc("invites.get", { token })).error.data.code).toBe("NOT_FOUND");
+    expect((await trpc("invites.get", { token })).code).toBe("NOT_FOUND");
     const again = await trpc("invites.accept", {
       token,
       name: "Eve",
       password: "another password",
     });
-    expect(again.error.data.code).toBe("NOT_FOUND");
+    expect(again.code).toBe("NOT_FOUND");
     expect((await signIn(email, "another password")).status).toBe(401);
   });
 
   it("is not spent when a new person leaves out their name", async () => {
     const { token } = await approveEmail(db, anEmail());
     const nameless = await trpc("invites.accept", { token, password: PASSWORD });
-    expect(nameless.error.data.code).toBe("NOT_FOUND");
+    expect(nameless.code).toBe("NOT_FOUND");
     expect((await trpc("invites.get", { token })).data).toMatchObject({ hasAccount: false });
   });
 
   it("refuses a short password", async () => {
     const { token } = await approveEmail(db, anEmail());
     const short = await trpc("invites.accept", { token, name: "Ada", password: "short" });
-    expect(short.error.data.code).toBe("BAD_REQUEST");
+    expect(short.code).toBe("BAD_REQUEST");
   });
 
   it("stops working after it expires", async () => {
@@ -151,19 +132,19 @@ describe("an invite link", () => {
       .update(invites)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(invites.email, email));
-    expect((await trpc("invites.get", { token })).error.data.code).toBe("NOT_FOUND");
+    expect((await trpc("invites.get", { token })).code).toBe("NOT_FOUND");
     const late = await trpc("invites.accept", { token, name: "Ada", password: PASSWORD });
-    expect(late.error.data.code).toBe("NOT_FOUND");
+    expect(late.code).toBe("NOT_FOUND");
   });
 
   it("stops working when a newer link is made or the address is removed", async () => {
     const first = await approveEmail(db, anEmail());
     const second = await approveEmail(db, first.email);
-    expect((await trpc("invites.get", { token: first.token })).error.data.code).toBe("NOT_FOUND");
+    expect((await trpc("invites.get", { token: first.token })).code).toBe("NOT_FOUND");
     expect((await trpc("invites.get", { token: second.token })).data).toBeDefined();
 
     await removeApproval(db, first.email);
-    expect((await trpc("invites.get", { token: second.token })).error.data.code).toBe("NOT_FOUND");
+    expect((await trpc("invites.get", { token: second.token })).code).toBe("NOT_FOUND");
   });
 
   it("resets the password of an existing account and ends its sessions", async () => {
@@ -222,14 +203,8 @@ describe("a session", () => {
   });
 
   it("uses a cookie that scripts cannot read and other sites cannot send", async () => {
-    const email = await aPerson();
-    const response = await app.inject({
-      method: "POST",
-      url: "/api/auth/sign-in/email",
-      headers: { origin: TEST_ORIGIN },
-      payload: { email, password: PASSWORD },
-    });
-    const session = response.cookies.find(({ name }) => name.includes("session_token"));
+    const { cookies } = await signIn(await aPerson());
+    const session = cookies.find(({ name }) => name.includes("session_token"));
     expect(session).toMatchObject({ httpOnly: true, sameSite: "Lax" });
     expect(session).not.toHaveProperty("domain");
   });

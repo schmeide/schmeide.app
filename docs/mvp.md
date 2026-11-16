@@ -3,14 +3,16 @@
 A minimal, local version of the Schmeide software factory: create a project, list what the app should do, review
 a plain-language spec, approve it, and a Claude agent builds the app from the
 [Schmeide template](https://github.com/schmeide/template), the server checks it independently, and
-deploys it on this machine. People sign in, and only approved email addresses can; everything still belongs to the
-seeded `demo` tenant.
+deploys it on this machine. People sign in, and only approved email addresses can. Each person works in a business
+of their own and sees only its projects.
 
 ## Quick start
 
 1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
 2. `make serve`, and leave it running (Ctrl-C stops it).
-3. In a second terminal, `make access/approve EMAIL=you@example.com`. Open the link it prints and set a password.
+3. In a second terminal, `make access/approve EMAIL=you@example.com TENANT=demo`. Open the link it prints and set a
+   password. `TENANT=demo` puts you in the business that holds the projects made before sign-in existed; leave it
+   out and you get an empty business of your own.
    You are now signed in; next time, sign in at <http://localhost:5173> with that email and password.
 4. Type a project name and press "Create project".
 5. Press "Write it myself" and type one request per box ("Add another request" or Enter adds a box), or press
@@ -161,8 +163,9 @@ volumes, workspace, and rows) whether it passed or failed. It exits non-zero on 
   this one while developing; it needs only `make infra/up`, which it runs.
 - `make e2e`: the same flow with Claude against the server from `make serve` (`:3100`). A few
   minutes and well under a dollar with `opus` so far. Run it sparingly.
-- `KEEP=1` on either leaves the app running and prints its preview URL and the `projects.delete`
-  command that removes it (that needs `make serve` running).
+- `KEEP=1` on either leaves the app running and prints its preview URL, and the email and password
+  of the account the run made, to sign in with and delete the project.
+- Both sign in as an approved account they create for the run and remove afterwards.
 
 ## Sample invoicing requests
 
@@ -294,7 +297,7 @@ Each is marked in code with a `ponytail:` comment.
 
 | Dev mode                                          | Production target                             |
 | ------------------------------------------------- | --------------------------------------------- |
-| No auth, one seeded `demo` tenant                 | Accounts and tenant-scoped sessions           |
+| Sign-in limited to approved emails, set by hand   | Open sign-up, invitations, emailed codes      |
 | Local git directory per project                   | Self-hosted Forgejo repository                |
 | Agent runs on the host in the workspace           | Sandbox pod per job                           |
 | Checks run on the host via the project Makefile   | Kubernetes Job                                |

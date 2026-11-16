@@ -10,7 +10,6 @@ import {
   planItems,
   projectIcons,
   projects,
-  tenants,
   usage,
   type Build,
   type Project,
@@ -26,9 +25,6 @@ import { ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
-
-// ponytail: every request acts as the seeded `demo` tenant; resolve the tenant from auth in production
-const DEMO_TENANT = "demo";
 
 export type Deps = {
   readonly db: Db;
@@ -69,7 +65,7 @@ const uniqueSlug = async (db: Db, base: string): Promise<string> => {
 // unique violation (Postgres 23505) retries with fresh picks.
 export const createProject = async (
   db: Db,
-  input: { readonly name: string },
+  input: { readonly name: string; readonly tenantId: number },
   attempts = 5
 ): Promise<Project> => {
   try {
@@ -77,7 +73,7 @@ export const createProject = async (
     const [project] = await db
       .insert(projects)
       .values({
-        tenantId: sql`(select id from ${tenants} where slug = ${DEMO_TENANT})`,
+        tenantId: input.tenantId,
         slug,
         name: input.name,
         webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
@@ -91,8 +87,8 @@ export const createProject = async (
   }
 };
 
-export const listProjects = (db: Db): Promise<readonly Project[]> =>
-  db.select().from(projects).orderBy(desc(projects.id));
+export const listProjects = (db: Db, tenantId: number): Promise<readonly Project[]> =>
+  db.select().from(projects).where(eq(projects.tenantId, tenantId)).orderBy(desc(projects.id));
 
 export const findProject = async (db: Db, id: number): Promise<Project> => {
   const [project] = await db.select().from(projects).where(eq(projects.id, id));

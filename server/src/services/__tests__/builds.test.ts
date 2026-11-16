@@ -4,13 +4,14 @@ import { createDb } from "../../db/client.ts";
 import { builds } from "../../db/schema.ts";
 import { appendEvent, finishBuild, listEvents } from "../builds.ts";
 import { createProject } from "../projects.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
 
 // Status "passed" so this build never counts as the one running build.
 const newBuild = async () => {
-  const project = await createProject(db, { name: `b ${randomUUID()}` });
+  const project = await createProject(db, { name: `b ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   const [build] = await db
     .insert(builds)
     .values({ projectId: project.id, kind: "initial", request: "spec", status: "passed" })
