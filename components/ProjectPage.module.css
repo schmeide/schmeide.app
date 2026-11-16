@@ -1,0 +1,26 @@
+.back {
+  display: inline-block;
+  margin-bottom: var(--space-m);
+}
+
+.title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.status {
+  margin: var(--space-s) 0 var(--space-l);
+  padding: var(--space-m);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+
+.status[data-status="live"] {
+  border-left-color: var(--color-success);
+}
+
+.status[data-status="failed"] {
+  border-left-color: var(--color-danger);
+}
