@@ -361,7 +361,10 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
-      const prompt = specPrompt(project.features, planBrief(await planItemsOf(db, projectId)));
+      const prompt = specPrompt(
+        [project.need.trim(), project.features.trim()].filter(Boolean).join("\n"),
+        planBrief(await planItemsOf(db, projectId))
+      );
       await mkdir(config.dataDir, { recursive: true });
       try {
         const spec = config.agentCmd

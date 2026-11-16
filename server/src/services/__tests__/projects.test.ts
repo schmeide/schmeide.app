@@ -22,6 +22,7 @@ import {
   startNextChange,
   slugify,
   stopProject,
+  suggestName,
   testDbPort,
   transition,
   type Deps,
@@ -86,6 +87,48 @@ describe("createProject", () => {
 
     expect(new Set(created.map((project) => project.slug)).size).toBe(4);
     expect(new Set(created.map((project) => project.webPort)).size).toBe(4);
+  });
+});
+
+describe("suggestName", () => {
+  it.each([
+    ["I need to send invoices to my clients and see who has paid.", "Send invoices to my clients"],
+    ["i want a way to track jobs", "Track jobs"],
+    ["We need an app for booking appointments. It should text people.", "Booking appointments"],
+    ["Stock list", "Stock list"],
+    ["   ", "My app"],
+    [
+      "Keep a record of every delivery we make to every wholesale customer each week",
+      "Keep a record of every delivery we make",
+    ],
+  ])("names %j %j", (need, name) => {
+    expect(suggestName(need)).toBe(name);
+  });
+});
+
+describe("createProject from a first answer", () => {
+  it("keeps what the person said they need and names the app from it", async () => {
+    const need = `I need to track jobs ${randomUUID()}`;
+
+    const project = await createProject(db, { need, tenantId: DEMO_TENANT_ID });
+
+    expect(project.need).toBe(need);
+    expect(project.name).toMatch(/^Track jobs/);
+    expect(project.features).toBe("");
+  });
+
+  it("uses a name that came with the answer, and notes what the app replaces", async () => {
+    const project = await createProject(db, {
+      need: "Send invoices and see who has paid",
+      name: "Invoices",
+      replaces: "a spreadsheet",
+      tenantId: DEMO_TENANT_ID,
+    });
+
+    expect(project.name).toBe("Invoices");
+    expect(project.need).toBe(
+      "Send invoices and see who has paid\n\nIt replaces something they use today: a spreadsheet"
+    );
   });
 });
 

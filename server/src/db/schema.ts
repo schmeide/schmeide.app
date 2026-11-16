@@ -46,6 +46,7 @@ export const projects = pgTable("projects", {
   slug: varchar("slug", { length: 48 }).notNull().unique(),
   name: varchar("name", { length: 100 }).notNull(),
   status: projectStatus("status").notNull().default("draft"),
+  need: text("need").notNull().default(""),
   features: text("features").notNull().default(""),
   spec: text("spec"),
   webPort: integer("web_port").notNull().unique(),
@@ -188,9 +189,18 @@ const projectId = createSelectSchema(projects).shape.id;
 
 export const projectIdSchema = z.object({ id: projectId });
 
-export const newProjectSchema = createInsertSchema(projects, {
-  name: (schema) => schema.trim().min(1),
-}).pick({ name: true });
+export const NEED_MAX = 2000;
+
+export const newProjectSchema = z
+  .object({
+    name: z.string().trim().min(1).max(100).optional(),
+    need: z.string().trim().min(1).max(NEED_MAX).optional(),
+    replaces: z.string().trim().min(1).max(200).optional(),
+  })
+  .refine((input) => input.name !== undefined || input.need !== undefined, {
+    message: "Say what you need, or give the app a name",
+    path: ["need"],
+  });
 
 export const setFeaturesSchema = createInsertSchema(projects, {
   features: (schema) => schema.max(5000),

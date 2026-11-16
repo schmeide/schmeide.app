@@ -23,6 +23,7 @@ export const copy = {
   // The name of each route in utils/routes.ts: its navigation label and its tab title.
   routes: {
     apps: "Apps",
+    start: "New app",
     project: "App",
     projectChanges: "Changes",
     projectSettings: "Settings",
@@ -96,23 +97,56 @@ export const copy = {
     action: "Go to your apps",
   },
   list: {
-    title: "Schmeide",
+    title: "Your apps",
+    newApp: "New app",
+  },
+  start: {
+    title: "What do you need?",
     intro:
-      "Schmeide builds a small web app for you from a plain list of what you need it to do. You describe it, review a short spec, approve it, and Schmeide builds the app and gives you a link to try it.",
-    howTitle: "How it works",
-    how: [
-      "Create a project and give it a name.",
-      "Add what your app should do, one request per box.",
-      "Read the spec Schmeide writes from them and approve it.",
-      "Wait while your app is built, then open it from its link.",
+      "Say it in your own words, as you would to a person. Schmeide then asks a few questions and writes the plan down with you.",
+    needPlaceholder:
+      "I run a small plumbing business. I need to send invoices from my phone when a job is done, and see who has not paid yet.",
+    needMissing: "Write a sentence about what you need, or choose a starting point below.",
+    pointsTitle: "Or start from one of these",
+    pointsHint: "Choosing one writes a first answer for you. Change it as much as you like.",
+    points: [
+      { name: "Invoices", need: "I need to send invoices to my clients and see who has paid." },
+      {
+        name: "Bookings",
+        need: "I need to take bookings from my customers and see my day at a glance.",
+      },
+      {
+        name: "Client list",
+        need: "I need to keep a list of my clients with their details and notes about each one.",
+      },
+      {
+        name: "Stock list",
+        need: "I need to keep track of what I have in stock and know when to order more.",
+      },
+      {
+        name: "Job tracker",
+        need: "I need to track each job from the first call to the day it is paid.",
+      },
     ],
-    projectsTitle: "Your projects",
-    empty: "You have no projects yet. Start by creating one below, for example “Invoices”.",
-    createTitle: "New project",
-    nameLabel: "Project name",
-    namePlaceholder: "Invoices",
-    create: "Create project",
-    creating: "Creating…",
+    replacing: {
+      toggle: "I’m replacing something I already use",
+      legend: "What are you replacing?",
+      kinds: {
+        spreadsheet: { label: "A spreadsheet", replaces: "a spreadsheet" },
+        paper: { label: "Paper forms", replaces: "paper forms" },
+        product: { label: "Another app or website", replaces: "another app or website" },
+      },
+      nameLabel: "Which app or website? (optional)",
+      named: (name: string) => `another app or website, ${name}`,
+      productNote:
+        "Schmeide builds your own app with the same kinds of features. It does not copy the other product’s name, logo, wording, or look.",
+    },
+    builds:
+      "Schmeide builds apps that open in a browser, on a phone or a computer. It does not build apps for the app stores, and the apps it builds do not connect to other tools yet.",
+    askForIt: "Ask for something it does not build",
+    continue: "Continue",
+    continuing: "Thinking of the first question…",
+    unfinishedTitle: "Continue where you left off",
   },
   project: {
     back: "← All projects",

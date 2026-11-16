@@ -61,21 +61,59 @@ const uniqueSlug = async (db: Db, base: string): Promise<string> => {
   return candidates.find((slug) => !taken.has(slug)) ?? `${base}-${taken.size + 2}`;
 };
 
+const NAME_MAX = 40;
+const OPENERS = [
+  /^(i|we)\s+(need|want|would like|'d like)\s+/i,
+  /^(a way to|an app (for|to|that)|something (to|for|that)|an?|to)\s+/i,
+] as const;
+
+const withoutOpeners = (text: string): string => {
+  const shorter = OPENERS.reduce((rest, opener) => rest.replace(opener, ""), text);
+  return shorter === text ? text : withoutOpeners(shorter);
+};
+
+const fitWords = (words: readonly string[]): readonly string[] =>
+  words.reduce<{ readonly kept: readonly string[]; readonly full: boolean }>(
+    (state, word) => {
+      if (state.full) return state;
+      const next = [...state.kept, word];
+      return state.kept.length === 0 || next.join(" ").length <= NAME_MAX
+        ? { kept: next, full: false }
+        : { ...state, full: true };
+    },
+    { kept: [], full: false }
+  ).kept;
+
+export const suggestName = (need: string): string => {
+  const [sentence = ""] = need.trim().split(/[.!?\n]/);
+  const [first = ""] = withoutOpeners(sentence.trim()).split(/\s+and\s+/i);
+  const name = fitWords(first.split(/\s+/).filter(Boolean)).join(" ").slice(0, NAME_MAX);
+  return name ? name[0].toUpperCase() + name.slice(1) : "My app";
+};
+
+export const firstAnswer = (need: string, replaces?: string): string =>
+  replaces ? `${need}\n\nIt replaces something they use today: ${replaces}` : need;
+
+export type NewProject = {
+  readonly tenantId: number;
+  readonly name?: string;
+  readonly need?: string;
+  readonly replaces?: string;
+};
+
 // Slug and port are picked by read-then-insert; a concurrent create can take them first, so a
 // unique violation (Postgres 23505) retries with fresh picks.
-export const createProject = async (
-  db: Db,
-  input: { readonly name: string; readonly tenantId: number },
-  attempts = 5
-): Promise<Project> => {
+export const createProject = async (db: Db, input: NewProject, attempts = 5): Promise<Project> => {
+  const name = input.name ?? suggestName(input.need ?? "");
   try {
-    const slug = await uniqueSlug(db, slugify(input.name));
+    const slug = await uniqueSlug(db, slugify(name));
     const [project] = await db
       .insert(projects)
       .values({
         tenantId: input.tenantId,
         slug,
-        name: input.name,
+        name,
+        need: input.need ? firstAnswer(input.need, input.replaces) : "",
         webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
       })
       .returning();

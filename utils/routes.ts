@@ -8,6 +8,7 @@ export type Access = "public" | "signedIn" | "business";
 // invitations, and payment returns arrive as full addresses with query values.
 const table = {
   apps: { path: "/", access: "business" },
+  start: { path: "/new", access: "business" },
   project: { path: "/projects/:id", access: "business" },
   projectChanges: { path: "/projects/:id/changes", access: "business" },
   projectSettings: { path: "/projects/:id/settings", access: "business" },

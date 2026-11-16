@@ -91,6 +91,7 @@ export const aProject = (overrides: Partial<Project> = {}): Project => ({
   slug: "invoices",
   name: "Invoices",
   status: "draft",
+  need: "",
   features: "",
   spec: null,
   webPort: 8100,

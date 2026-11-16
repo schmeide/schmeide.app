@@ -65,6 +65,10 @@ export const interviewPrompt = ({
 }: Parameters<Interviewer>[0]): string => `You are interviewing a small business owner about a web app they want built for them. They do not write software. You ask one question at a time and keep a short written plan of the app up to date from their answers.
 
 The app is called "${project.name}".${
+  project.need.trim()
+    ? `\n\nWhat they said they need when they started, in their own words:\n${project.need.trim()}`
+    : ""
+}${
   project.features.trim()
     ? `\n\nWhat they have written about it so far, in their own words:\n${project.features.trim()}`
     : ""
