@@ -1,19 +1,44 @@
 .hero {
   max-width: var(--content-width);
   margin: 0 auto;
-  padding: var(--space-xl) var(--space-m);
+  padding: var(--space-xl) var(--space-gutter);
   text-align: center;
 }
 
 .headline {
   margin: 0;
-  font-size: clamp(2.5rem, 8vw, 5rem);
-  line-height: 1.05;
-  letter-spacing: -0.02em;
+  font-size: var(--text-display-1);
+  line-height: 1.04;
 }
 
+/* The butter highlight schmeide.com puts on its hero headline. */
 .tagline {
-  margin: var(--space-m) 0 0;
-  font-size: clamp(1.125rem, 2.5vw, 1.5rem);
-  color: var(--color-muted);
+  display: inline-block;
+  margin: var(--space-gutter) 0 0;
+  padding: 0 var(--space-s);
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+  border-radius: var(--radius-highlight);
+  font-size: var(--text-lead);
+  font-weight: 600;
+}
+
+/* A once-only staged entrance: the headline, then the tagline 100ms later. */
+@media (prefers-reduced-motion: no-preference) {
+  .headline,
+  .tagline {
+    animation: enter var(--duration-gentle) ease-out both;
+  }
+
+  .tagline {
+    animation-delay: 100ms;
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    translate: 0 12px;
+  }
 }

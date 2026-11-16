@@ -5,10 +5,9 @@
 }
 
 .item {
-  padding: var(--space-s) var(--space-m);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  padding: var(--space-m);
+  background: var(--color-inset);
+  border-radius: var(--radius-input);
 }
 
 .request {

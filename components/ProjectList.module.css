@@ -1,10 +1,42 @@
 .intro {
-  font-size: 1.125rem;
+  max-width: var(--lead-width);
+  font-size: var(--text-lead);
   color: var(--color-muted);
 }
 
 .section {
   margin-top: var(--space-l);
+}
+
+/* "How it works" numbered with the butter step badges schmeide.com uses. */
+.section ol {
+  display: grid;
+  gap: var(--space-m);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: how;
+}
+
+.section ol li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-m);
+  counter-increment: how;
+}
+
+.section ol li::before {
+  content: counter(how);
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--hit-target);
+  height: var(--hit-target);
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+  border-radius: var(--radius-badge);
+  font-weight: 700;
 }
 
 .form {
@@ -34,31 +66,37 @@
 .project {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: var(--space-s);
-  padding: var(--space-m);
+  gap: var(--space-s) var(--space-m);
+  padding: var(--space-m) var(--space-gutter);
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
 }
 
 .name {
-  font-weight: 600;
-  font-size: 1.125rem;
+  font-weight: 700;
+  font-size: var(--text-lead);
   overflow-wrap: anywhere;
 }
 
+/* A pill badge; the label text carries the meaning, the color only reinforces it. */
 .status {
+  padding: var(--space-xs) 0.75rem;
+  background: var(--color-inset);
   color: var(--color-muted);
+  border-radius: var(--radius-badge);
+  font-size: var(--text-small);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .status[data-status="live"] {
-  color: var(--color-success);
-  font-weight: 600;
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
 }
 
 .status[data-status="failed"] {
+  background: var(--color-danger-bg);
   color: var(--color-danger);
-  font-weight: 600;
 }
