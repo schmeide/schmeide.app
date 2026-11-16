@@ -36,7 +36,7 @@ describe("ProjectPage", () => {
 
     expect(await screen.findByText(copy.status.draft.hint)).toBeInTheDocument();
     await userEvent.type(
-      screen.getByLabelText(copy.project.featuresLabel),
+      screen.getByLabelText(copy.project.requestLabel(1)),
       "Keep a list of clients"
     );
     await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
@@ -53,6 +53,57 @@ describe("ProjectPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent(copy.status.spec_ready.label);
   });
 
+  it("takes one request per box: add, Enter, remove, and empty boxes are ignored", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({ project: aProject() }),
+      "projects.setFeatures": (input) => aProject({ features: String(input.features) }),
+      "projects.generateSpec": () => aProject({ status: "spec_generating" }),
+    });
+    await userEvent.type(await screen.findByLabelText(copy.project.requestLabel(1)), "Clients");
+    expect(screen.queryByRole("button", { name: copy.project.removeRequestLabel(1) })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.addRequest }));
+    expect(screen.getByLabelText(copy.project.requestLabel(2))).toHaveFocus();
+    await userEvent.keyboard("Invoices{Enter}");
+    expect(screen.getByLabelText(copy.project.requestLabel(3))).toHaveFocus();
+    expect(calls.some((call) => call.path === "projects.setFeatures")).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.addRequest }));
+    await userEvent.keyboard("Not this one");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.removeRequestLabel(4) }));
+    expect(screen.queryByLabelText(copy.project.requestLabel(4))).toBeNull();
+    expect(screen.getByLabelText(copy.project.requestLabel(3))).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({ path: "projects.generateSpec", input: { id: 7 } })
+    );
+    expect(calls).toContainEqual({
+      path: "projects.setFeatures",
+      input: { id: 7, features: "Clients\nInvoices" },
+    });
+  });
+
+  it("asks for a request when every box is empty", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject() }));
+    await userEvent.click(await screen.findByRole("button", { name: copy.project.addRequest }));
+    await userEvent.type(screen.getByLabelText(copy.project.requestLabel(2)), "   ");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
+    expect(screen.getByRole("alert")).toHaveTextContent(copy.project.needFeatures);
+    expect(calls.map((call) => call.path)).not.toContain("projects.setFeatures");
+  });
+
+  it("splits a pasted list into one box per line", async () => {
+    renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject() }));
+    await userEvent.click(await screen.findByLabelText(copy.project.requestLabel(1)));
+    await userEvent.paste("Clients\r\n\n  Invoices  \nTax\n");
+    expect(screen.getByLabelText(copy.project.requestLabel(1))).toHaveValue("Clients");
+    expect(screen.getByLabelText(copy.project.requestLabel(2))).toHaveValue("Invoices");
+    expect(screen.getByLabelText(copy.project.requestLabel(3))).toHaveValue("Tax");
+    expect(screen.queryByLabelText(copy.project.requestLabel(4))).toBeNull();
+    expect(screen.getByLabelText(copy.project.requestLabel(3))).toHaveFocus();
+  });
+
   it("says the spec is being written while it is", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
@@ -64,11 +115,12 @@ describe("ProjectPage", () => {
   it("warns that changing the features discards the spec", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
-      projectServer({ project: aProject({ status: "spec_ready", features: "a", spec: SPEC }) })
+      projectServer({ project: aProject({ status: "spec_ready", features: "a\nb", spec: SPEC }) })
     );
     await userEvent.click(await screen.findByRole("button", { name: copy.project.changeFeatures }));
     expect(screen.getByText(copy.project.discardWarning)).toBeInTheDocument();
-    expect(screen.getByLabelText(copy.project.featuresLabel)).toHaveValue("a");
+    expect(screen.getByLabelText(copy.project.requestLabel(1))).toHaveValue("a");
+    expect(screen.getByLabelText(copy.project.requestLabel(2))).toHaveValue("b");
   });
 
   it("approves the spec and starts the build", async () => {

@@ -9,11 +9,11 @@ export const copy = {
   list: {
     title: "Schmeide",
     intro:
-      "Schmeide builds a small web app for you from a plain list of the features you need. You describe it, review a short spec, approve it, and Schmeide builds the app and gives you a link to try it.",
+      "Schmeide builds a small web app for you from a plain list of what you need it to do. You describe it, review a short spec, approve it, and Schmeide builds the app and gives you a link to try it.",
     howTitle: "How it works",
     how: [
       "Create a project and give it a name.",
-      "List the features you need, one per line.",
+      "Add what your app should do, one request per box.",
       "Read the spec Schmeide writes from them and approve it.",
       "Wait while your app is built, then open it from its link.",
     ],
@@ -28,29 +28,36 @@ export const copy = {
   project: {
     back: "← All projects",
     statusPrefix: "Status:",
-    featuresTitle: "1. Features",
-    featuresIntro: "Write each thing your app should do on its own line, in your own words.",
-    featuresLabel: "Features, one per line",
-    featuresPlaceholder:
-      "Keep a list of my clients with their name and email\nCreate an invoice for a client with line items\nMark an invoice as paid",
+    featuresTitle: "1. What your app should do",
+    featuresIntro:
+      "Write one request in each box, in your own words. Press Enter or “Add another request” for a new box.",
+    featuresLabel: "Your requests",
+    requestLabel: (position: number) => `Request ${position}`,
+    requestPlaceholders: [
+      "Keep a list of my clients with their name and email",
+      "Create an invoice for a client with line items",
+    ],
+    addRequest: "Add another request",
+    removeRequest: "Remove",
+    removeRequestLabel: (position: number) => `Remove request ${position}`,
     saveFeatures: "Save",
     saving: "Saving…",
     saved: "Saved.",
     writeSpec: "Write the spec",
     startingSpec: "Starting…",
-    needFeatures: "Add at least one feature first.",
+    needFeatures: "Add at least one request first.",
     discardWarning:
-      "Saving new features throws away the spec below. You will then write a new spec from the new features.",
+      "Saving new requests throws away the spec below. You will then write a new spec from the new requests.",
     cancelEdit: "Keep the current spec",
     specFailed:
-      "The spec could not be written this time. Check your features and press “Write the spec” again.",
+      "The spec could not be written this time. Check your requests and press “Write the spec” again.",
     specTitle: "2. Spec",
     specWriting:
       "Writing your spec. This usually takes under a minute, and this page updates by itself.",
     specIntro: "This is what Schmeide will build. Read it through before approving it.",
     approve: "Approve and build",
     approving: "Starting the build…",
-    changeFeatures: "Change the features",
+    changeFeatures: "Change the requests",
     builtFrom: "The spec this app was built from",
     buildTitle: "3. Build",
     changeTitle: "Latest change",
@@ -141,7 +148,7 @@ export const copy = {
   status: {
     draft: {
       label: "Describing",
-      hint: "Next: list the features you need below, then press “Write the spec”.",
+      hint: "Next: add what your app should do below, then press “Write the spec”.",
     },
     spec_generating: {
       label: "Writing the spec",
