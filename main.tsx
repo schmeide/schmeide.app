@@ -9,6 +9,7 @@ import { SessionProvider } from "./components/SessionProvider";
 import type { AppRouter } from "./server/src/router.ts";
 import { TRPCProvider } from "./trpc";
 import { classifyError } from "./utils/apiError";
+import { businessHeaders } from "./utils/chosenBusiness";
 
 import "./assets/main.css";
 
@@ -28,7 +29,7 @@ const queryClient: QueryClient = new QueryClient({
   }),
 });
 const trpcClient = createTRPCClient<AppRouter>({
-  links: [httpBatchLink({ url: "/api/trpc", transformer: superjson })],
+  links: [httpBatchLink({ url: "/api/trpc", transformer: superjson, headers: businessHeaders })],
 });
 
 createRoot(root).render(

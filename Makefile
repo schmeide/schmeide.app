@@ -131,8 +131,8 @@ db/generate: node_modules ## Generate a migration from server/src/db/schema.ts (
 ##@ Access
 
 .PHONY: access/approve
-access/approve: node_modules env-EMAIL ## Approve an email for prelaunch sign-in and print its set-password link (EMAIL=person@example.com)
-	$(JS_EXEC) run --silent access -w server -- approve "$(EMAIL)"
+access/approve: node_modules env-EMAIL ## Approve an email for prelaunch sign-in and print its set-password link (EMAIL=person@example.com; TENANT=demo joins that business instead of a new one)
+	$(JS_EXEC) run --silent access -w server -- approve "$(EMAIL)" $(if $(TENANT),"$(TENANT)")
 
 .PHONY: access/remove
 access/remove: node_modules env-EMAIL ## Take an email off the approved list and sign that person out (EMAIL=person@example.com)

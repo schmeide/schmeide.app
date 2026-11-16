@@ -7,7 +7,7 @@ import { InterviewUnavailableError } from "../services/errors.ts";
 import type { Interviewer } from "../services/interview.ts";
 import { approveSpec, createProject, transition } from "../services/projects.ts";
 import type { AppContext } from "../router.ts";
-import { testAuth } from "./testAuth.ts";
+import { aSignedInPerson, testAuth } from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -25,13 +25,15 @@ const deps: AppContext = {
 describe("the API", () => {
   it("answers CONFLICT when a running build is edited as if it were queued", async () => {
     const app = buildApp(deps);
-    const project = await createProject(db, { name: `api ${randomUUID()}` });
+    const { cookie, tenantId } = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: `api ${randomUUID()}`, tenantId });
     await transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
     const { build } = await approveSpec(deps, project.id);
     try {
       const response = await app.inject({
         method: "POST",
         url: "/api/trpc/builds.editQueued",
+        headers: { cookie },
         payload: { json: { buildId: build.id, request: "something else" } },
       });
 
@@ -45,9 +47,15 @@ describe("the API", () => {
 
   it("runs an interview: a question, an answer, and the plan they produce", async () => {
     const app = buildApp(deps);
-    const project = await createProject(db, { name: `api ${randomUUID()}` });
+    const { cookie, tenantId } = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: `api ${randomUUID()}`, tenantId });
     const call = (path: string, json: unknown) =>
-      app.inject({ method: "POST", url: `/api/trpc/${path}`, payload: { json } });
+      app.inject({
+        method: "POST",
+        url: `/api/trpc/${path}`,
+        headers: { cookie },
+        payload: { json },
+      });
     const empty = { add: [], update: [], remove: [], ready: [] };
     interviewer
       .mockResolvedValueOnce({
@@ -89,12 +97,14 @@ describe("the API", () => {
 
   it("answers SERVICE_UNAVAILABLE when the next question cannot be produced", async () => {
     const app = buildApp(deps);
-    const project = await createProject(db, { name: `api ${randomUUID()}` });
+    const { cookie, tenantId } = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: `api ${randomUUID()}`, tenantId });
     interviewer.mockRejectedValueOnce(new InterviewUnavailableError("The model run failed"));
     try {
       const response = await app.inject({
         method: "POST",
         url: "/api/trpc/interview.start",
+        headers: { cookie },
         payload: { json: { id: project.id } },
       });
 

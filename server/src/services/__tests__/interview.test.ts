@@ -23,6 +23,7 @@ import {
   generateSpec,
   transition,
 } from "../projects.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 // Tests share one database, so they assert only on rows they created.
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -52,7 +53,8 @@ const scripted = (...turns: readonly Turn[]) => {
   return { deps: { db, interviewer }, interviewer };
 };
 
-const newProject = () => createProject(db, { name: `Invoices ${randomUUID()}` });
+const newProject = () =>
+  createProject(db, { name: `Invoices ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
 
 describe("startInterview", () => {
   it("asks the first question and stores what the model already put in the plan", async () => {

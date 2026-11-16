@@ -4,6 +4,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import { useTRPC } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { signOut as endSession } from "../utils/authApi";
+import { chooseBusiness as tellServer } from "../utils/chosenBusiness";
 import { signedOut, type Business, type Provider, type Session } from "../utils/session";
 
 type SessionContext = {
@@ -59,11 +60,20 @@ export function SessionProvider({
         session.businesses.find((business) => business.id === businessId) ??
         session.businesses[0] ??
         null,
-      chooseBusiness: setBusinessId,
+      // What is on screen belongs to the business being left, so it is all loaded again.
+      chooseBusiness: (id: number) => {
+        tellServer(id);
+        setBusinessId(id);
+        void queryClient.invalidateQueries({
+          predicate: (query) => !matchQuery({ queryKey: sessionKey }, query),
+        });
+      },
       providers: query.data?.providers ?? [],
       refresh,
       signOut: async () => {
         await endSession();
+        tellServer(null);
+        setBusinessId(null);
         await refresh();
         // Nothing the last person loaded stays in memory for the next one to sign in here.
         queryClient.removeQueries({

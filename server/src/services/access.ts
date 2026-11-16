@@ -4,6 +4,7 @@ import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { approvedEmails, emailSchema, invites, sessions, users } from "../db/schema.ts";
 import type { Auth } from "./auth.ts";
+import { joinBusiness } from "./businesses.ts";
 import { NotFoundError } from "./errors.ts";
 
 export const INVITE_DAYS = 7;
@@ -24,16 +25,26 @@ export const isApproved = async (db: Db, email: string): Promise<boolean> => {
 
 // Approves the address (again is fine) and returns a fresh one-time token for its link. Earlier
 // unused links for the address stop working, so only the newest one is live.
+// `tenantId` makes the person a member of that business instead of giving them a new one: now if
+// they already have an account, on first sign-in otherwise.
 export const approveEmail = async (
   db: Db,
   rawEmail: string,
-  now = new Date()
+  { tenantId, now = new Date() }: { readonly tenantId?: number; readonly now?: Date } = {}
 ): Promise<{ readonly email: string; readonly token: string; readonly expiresAt: Date }> => {
   const email = emailSchema.parse(rawEmail);
   const token = randomBytes(32).toString("base64url");
   const expiresAt = new Date(now.getTime() + INVITE_MS);
   await db.transaction(async (tx) => {
-    await tx.insert(approvedEmails).values({ email }).onConflictDoNothing();
+    await tx
+      .insert(approvedEmails)
+      .values({ email, tenantId })
+      .onConflictDoUpdate({
+        target: approvedEmails.email,
+        set: tenantId ? { tenantId } : { email },
+      });
+    const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.email, email));
+    if (user && tenantId) await joinBusiness(tx as unknown as Db, user.id, tenantId);
     await tx.delete(invites).where(and(eq(invites.email, email), isNull(invites.usedAt)));
     await tx.insert(invites).values({ email, tokenHash: hashToken(token), expiresAt });
   });

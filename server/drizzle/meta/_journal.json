@@ -50,6 +50,13 @@
       "when": 1794865531301,
       "tag": "0006_sign_in_and_approved_emails",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794866092938,
+      "tag": "0007_businesses_and_memberships",
+      "breakpoints": true
     }
   ]
 }
