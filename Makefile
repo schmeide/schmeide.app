@@ -128,6 +128,20 @@ db/generate: node_modules ## Generate a migration from server/src/db/schema.ts (
 	$(JS_EXEC) run db:generate -w server $(if $(NAME),-- --name $(NAME))
 	$(JS_EXEC) exec prettier -- --write server/drizzle >/dev/null
 
+##@ Access
+
+.PHONY: access/approve
+access/approve: node_modules env-EMAIL ## Approve an email for prelaunch sign-in and print its set-password link (EMAIL=person@example.com)
+	$(JS_EXEC) run --silent access -w server -- approve "$(EMAIL)"
+
+.PHONY: access/remove
+access/remove: node_modules env-EMAIL ## Take an email off the approved list and sign that person out (EMAIL=person@example.com)
+	$(JS_EXEC) run --silent access -w server -- remove "$(EMAIL)"
+
+.PHONY: access/list
+access/list: node_modules ## List approved emails and whether each has signed in
+	$(JS_EXEC) run --silent access -w server -- list
+
 .PHONY: doctor
 doctor: node_modules ## Check Docker, claude, git, node, the template, ports, and leftover app containers; print each fix
 	bash server/scripts/doctor.sh

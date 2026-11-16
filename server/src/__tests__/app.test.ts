@@ -5,17 +5,21 @@ import { createDb } from "../db/client.ts";
 import { finishBuild } from "../services/builds.ts";
 import { InterviewUnavailableError } from "../services/errors.ts";
 import type { Interviewer } from "../services/interview.ts";
-import { approveSpec, createProject, transition, type Deps } from "../services/projects.ts";
+import { approveSpec, createProject, transition } from "../services/projects.ts";
+import type { AppContext } from "../router.ts";
+import { testAuth } from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
 
 const interviewer = vi.fn<Interviewer>();
-const deps: Deps & { interviewer: Interviewer } = {
+const deps: AppContext = {
   db,
   workflows: { start: vi.fn(async () => ({}) as never), getHandle: vi.fn() as never },
   taskQueue: "test",
   interviewer,
+  auth: testAuth(db),
+  providers: [],
 };
 
 describe("the API", () => {

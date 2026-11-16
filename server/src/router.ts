@@ -1,18 +1,22 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import {
+  acceptInviteSchema,
   answerQuestionSchema,
   buildIdSchema,
   changeRequestSchema,
   editChangeSchema,
   editPlanItemSchema,
   eventsQuerySchema,
+  inviteTokenSchema,
   newPlanItemSchema,
   newProjectSchema,
   planItemIdSchema,
   projectIdSchema,
   setFeaturesSchema,
 } from "./db/schema.ts";
+import { acceptInvite, getInvite } from "./services/access.ts";
+import { currentPerson, type Auth, type Provider } from "./services/auth.ts";
 import { listEvents } from "./services/builds.ts";
 import { ConflictError, InterviewUnavailableError, NotFoundError } from "./services/errors.ts";
 import {
@@ -41,7 +45,15 @@ import {
   type Deps,
 } from "./services/projects.ts";
 
-export type Context = Deps & { readonly interviewer: Interviewer };
+// What the process holds for every request.
+export type AppContext = Deps & {
+  readonly interviewer: Interviewer;
+  readonly auth: Auth;
+  // The sign-in providers that have credentials, for the sign-in page.
+  readonly providers: readonly Provider[];
+};
+
+export type Context = AppContext & { readonly headers: Headers };
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
 
@@ -61,6 +73,27 @@ const procedure = t.procedure.use(async ({ next }) => {
 });
 
 export const appRouter = t.router({
+  session: t.router({
+    // Who is calling. Signed out, or taken off the approved list, is a null person.
+    get: procedure.query(async ({ ctx }) => {
+      const person = await currentPerson(ctx, ctx.headers);
+      return {
+        person: person && { name: person.name, email: person.email },
+        // ponytail: everyone works in the seeded `demo` tenant until businesses exist (#103)
+        businesses: person ? [{ id: 1, name: "Demo business" }] : [],
+        providers: ctx.providers,
+      };
+    }),
+  }),
+  // One-time links that let an approved person set a password; see services/access.ts.
+  invites: t.router({
+    get: procedure
+      .input(inviteTokenSchema)
+      .query(({ ctx, input }) => getInvite(ctx.db, input.token)),
+    accept: procedure
+      .input(acceptInviteSchema)
+      .mutation(({ ctx, input }) => acceptInvite(ctx, input)),
+  }),
   projects: t.router({
     list: procedure.query(({ ctx }) => listProjects(ctx.db)),
     get: procedure.input(projectIdSchema).query(({ ctx, input }) => getProject(ctx.db, input.id)),

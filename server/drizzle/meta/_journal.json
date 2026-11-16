@@ -36,6 +36,13 @@
       "when": 1794858128744,
       "tag": "0004_interview_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794864395982,
+      "tag": "0005_sign_in_and_approved_emails",
+      "breakpoints": true
     }
   ]
 }
