@@ -7,6 +7,7 @@ import { Client, Connection } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
+import { failOrphanedBuilds } from "./services/projects.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
@@ -73,7 +74,9 @@ const worker = await Worker.create({
   activities: createActivities(db, config),
 });
 
-const app = buildApp({ db, workflows: client.workflow, taskQueue }, true);
+const deps = { db, workflows: client.workflow, taskQueue } as const;
+await failOrphanedBuilds(deps);
+const app = buildApp(deps, true);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

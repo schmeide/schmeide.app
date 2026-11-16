@@ -17,6 +17,7 @@ import type {
   specWorkflow,
   stopWorkflow,
 } from "../temporal/workflows.ts";
+import { appendEvent, finishBuild } from "./builds.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
@@ -266,3 +267,28 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(builds).where(eq(builds.projectId, id));
     await tx.delete(projects).where(eq(projects.id, id));
   });
+
+export const ORPHANED_BUILD =
+  "The Schmeide server stopped while this build ran, and the build could not be resumed. Request a change to try again.";
+
+// At startup: a build still marked running whose workflow is gone (Temporal restarted) or ended
+// without recording it would block every new build forever. A workflow still running resumes on its own.
+export const failOrphanedBuilds = async ({ db, workflows }: Deps): Promise<void> => {
+  const running = await db.select().from(builds).where(eq(builds.status, "running"));
+  for (const build of running) {
+    const status = await workflows
+      .getHandle(`build-${build.id}`)
+      .describe()
+      .then(
+        (description) => description.status.name,
+        () => undefined
+      );
+    if (status === "RUNNING") continue;
+    await finishBuild(db, build.id, ORPHANED_BUILD);
+    await appendEvent(db, build.id, "error", ORPHANED_BUILD);
+    await db
+      .update(projects)
+      .set({ status: "failed" })
+      .where(and(eq(projects.id, build.projectId), eq(projects.status, "building")));
+  }
+};

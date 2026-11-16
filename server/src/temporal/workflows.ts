@@ -25,8 +25,10 @@ const { prepareWorkspace, finishBuild, stopDeployment, removeProject } =
 // The SDK throttles heartbeats to 80% of heartbeatTimeout, and cancellation only arrives with a
 // heartbeat, so a short timeout keeps cancellation prompt. Waiting for the cancellation to complete
 // means a canceled build is only marked failed once its agent or make process has stopped.
+// One retry lets a build survive a server restart: the dying worker fails the activity (or its
+// heartbeat times out) and the restarted worker runs it again. Agent failures are non-retryable.
 const longRunning: ActivityOptions = {
-  ...once,
+  retry: { maximumAttempts: 2 },
   heartbeatTimeout: "30 seconds",
   cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
 };
