@@ -20,6 +20,7 @@ import {
   type Config,
   type Query,
 } from "../activities.ts";
+import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -71,7 +72,7 @@ const setup = () => {
 };
 
 const newBuild = async (kind: "initial" | "change" = "initial") => {
-  const project = await createProject(db, { name: `a ${randomUUID()}` });
+  const project = await createProject(db, { name: `a ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)
@@ -226,7 +227,10 @@ describe("build activities", () => {
     const env = new MockActivityEnvironment();
     const initial = await newBuild("initial");
     const change = await newBuild("change");
-    const drafted = await createProject(db, { name: `a ${randomUUID()}` });
+    const drafted = await createProject(db, {
+      name: `a ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
     await transition(db, drafted.id, ["draft"], { status: "spec_generating" });
 
     await env.run(activities.generateSpec, drafted.id);

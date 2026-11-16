@@ -1,5 +1,6 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
+import type { z } from "zod";
 import {
   acceptInviteSchema,
   answerQuestionSchema,
@@ -17,6 +18,7 @@ import {
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
 import { currentPerson, type Auth, type Provider } from "./services/auth.ts";
+import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
 import { ConflictError, InterviewUnavailableError, NotFoundError } from "./services/errors.ts";
 import {
@@ -72,84 +74,101 @@ const procedure = t.procedure.use(async ({ next }) => {
   return result;
 });
 
+// The header a person in several businesses names the one they are working in with.
+export const BUSINESS_HEADER = "x-schmeide-business";
+
+// Everything below `open` needs a signed-in, approved caller, and acts inside one of their
+// businesses: the one the header names when they belong to it, otherwise their first.
+const open = procedure;
+const signedIn = procedure.use(async ({ ctx, next }) => {
+  const person = await currentPerson(ctx, ctx.headers);
+  if (!person) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to continue" });
+  const businesses = await businessesOf(ctx.db, person);
+  const asked = Number(ctx.headers.get(BUSINESS_HEADER));
+  const business = businesses.find(({ id }) => id === asked) ?? businesses[0];
+  return next({ ctx: { ...ctx, person, tenantId: business.id } });
+});
+
+// A procedure about one project (`id`) or one build (`buildId`). Either in another business
+// answers NOT_FOUND, exactly as one that does not exist.
+const onProject = <Schema extends z.ZodType<{ readonly id: number }>>(schema: Schema) =>
+  signedIn.input(schema).use(async ({ ctx, input, next }) => {
+    await assertProjectIn(ctx.db, ctx.tenantId, input.id);
+    return next();
+  });
+const onBuild = <Schema extends z.ZodType<{ readonly buildId: number }>>(schema: Schema) =>
+  signedIn.input(schema).use(async ({ ctx, input, next }) => {
+    await assertBuildIn(ctx.db, ctx.tenantId, input.buildId);
+    return next();
+  });
+
 export const appRouter = t.router({
   session: t.router({
     // Who is calling. Signed out, or taken off the approved list, is a null person.
-    get: procedure.query(async ({ ctx }) => {
+    get: open.query(async ({ ctx }) => {
       const person = await currentPerson(ctx, ctx.headers);
       return {
         person: person && { name: person.name, email: person.email },
-        // ponytail: everyone works in the seeded `demo` tenant until businesses exist (#103)
-        businesses: person ? [{ id: 1, name: "Demo business" }] : [],
+        businesses: person ? await businessesOf(ctx.db, person) : [],
         providers: ctx.providers,
       };
     }),
   }),
   // One-time links that let an approved person set a password; see services/access.ts.
   invites: t.router({
-    get: procedure
-      .input(inviteTokenSchema)
-      .query(({ ctx, input }) => getInvite(ctx.db, input.token)),
-    accept: procedure
-      .input(acceptInviteSchema)
-      .mutation(({ ctx, input }) => acceptInvite(ctx, input)),
+    get: open.input(inviteTokenSchema).query(({ ctx, input }) => getInvite(ctx.db, input.token)),
+    accept: open.input(acceptInviteSchema).mutation(({ ctx, input }) => acceptInvite(ctx, input)),
   }),
   projects: t.router({
-    list: procedure.query(({ ctx }) => listProjects(ctx.db)),
-    get: procedure.input(projectIdSchema).query(({ ctx, input }) => getProject(ctx.db, input.id)),
-    create: procedure
+    list: signedIn.query(({ ctx }) => listProjects(ctx.db, ctx.tenantId)),
+    get: onProject(projectIdSchema).query(({ ctx, input }) => getProject(ctx.db, input.id)),
+    create: signedIn
       .input(newProjectSchema)
-      .mutation(({ ctx, input }) => createProject(ctx.db, input)),
-    setFeatures: procedure
-      .input(setFeaturesSchema)
-      .mutation(({ ctx, input }) => setFeatures(ctx.db, input)),
-    generateSpec: procedure
-      .input(projectIdSchema)
-      .mutation(({ ctx, input }) => generateSpec(ctx, input.id)),
-    approveSpec: procedure
-      .input(projectIdSchema)
-      .mutation(({ ctx, input }) => approveSpec(ctx, input.id)),
-    requestChange: procedure
-      .input(changeRequestSchema)
-      .mutation(({ ctx, input }) => requestChange(ctx, input)),
+      .mutation(({ ctx, input }) => createProject(ctx.db, { ...input, tenantId: ctx.tenantId })),
+    setFeatures: onProject(setFeaturesSchema).mutation(({ ctx, input }) =>
+      setFeatures(ctx.db, input)
+    ),
+    generateSpec: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+      generateSpec(ctx, input.id)
+    ),
+    approveSpec: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+      approveSpec(ctx, input.id)
+    ),
+    requestChange: onProject(changeRequestSchema).mutation(({ ctx, input }) =>
+      requestChange(ctx, input)
+    ),
     // The deployed app's page title and icon (base64 PNG or ICO); see services/site.ts.
-    setSite: procedure.input(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
-    stop: procedure.input(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
-    delete: procedure
-      .input(projectIdSchema)
-      .mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
+    setSite: onProject(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
+    stop: onProject(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
+    delete: onProject(projectIdSchema).mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
   }),
   // The guided questions that build a project's plan; see services/interview.ts.
   interview: t.router({
-    get: procedure.input(projectIdSchema).query(({ ctx, input }) => getInterview(ctx.db, input.id)),
+    get: onProject(projectIdSchema).query(({ ctx, input }) => getInterview(ctx.db, input.id)),
     // Asks the first question, or the next one after a turn that failed.
-    start: procedure
-      .input(projectIdSchema)
-      .mutation(({ ctx, input }) => startInterview(ctx, input.id)),
-    answer: procedure
-      .input(answerQuestionSchema)
-      .mutation(({ ctx, input }) => answerQuestion(ctx, input)),
-    addItem: procedure
-      .input(newPlanItemSchema)
-      .mutation(({ ctx, input }) => addPlanItem(ctx.db, input)),
-    updateItem: procedure
-      .input(editPlanItemSchema)
-      .mutation(({ ctx, input }) => updatePlanItem(ctx.db, input)),
-    removeItem: procedure
-      .input(planItemIdSchema)
-      .mutation(({ ctx, input }) => removePlanItem(ctx.db, input)),
+    start: onProject(projectIdSchema).mutation(({ ctx, input }) => startInterview(ctx, input.id)),
+    answer: onProject(answerQuestionSchema).mutation(({ ctx, input }) =>
+      answerQuestion(ctx, input)
+    ),
+    addItem: onProject(newPlanItemSchema).mutation(({ ctx, input }) => addPlanItem(ctx.db, input)),
+    updateItem: onProject(editPlanItemSchema).mutation(({ ctx, input }) =>
+      updatePlanItem(ctx.db, input)
+    ),
+    removeItem: onProject(planItemIdSchema).mutation(({ ctx, input }) =>
+      removePlanItem(ctx.db, input)
+    ),
   }),
   builds: t.router({
-    events: procedure
-      .input(eventsQuerySchema)
-      .query(({ ctx, input }) => listEvents(ctx.db, input.buildId, input.afterId)),
+    events: onBuild(eventsQuerySchema).query(({ ctx, input }) =>
+      listEvents(ctx.db, input.buildId, input.afterId)
+    ),
     // A queued change only; CONFLICT once it has started.
-    editQueued: procedure
-      .input(editChangeSchema)
-      .mutation(({ ctx, input }) => editQueuedChange(ctx.db, input)),
-    removeQueued: procedure
-      .input(buildIdSchema)
-      .mutation(({ ctx, input }) => removeQueuedChange(ctx.db, input.buildId)),
+    editQueued: onBuild(editChangeSchema).mutation(({ ctx, input }) =>
+      editQueuedChange(ctx.db, input)
+    ),
+    removeQueued: onBuild(buildIdSchema).mutation(({ ctx, input }) =>
+      removeQueuedChange(ctx.db, input.buildId)
+    ),
   }),
 });
 

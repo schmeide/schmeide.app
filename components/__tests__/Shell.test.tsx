@@ -2,6 +2,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
+import { BUSINESS_HEADER, businessHeaders, chooseBusiness } from "../../utils/chosenBusiness";
 import { navigate } from "../../utils/navigation";
 import { signedOut, type Session } from "../../utils/session";
 import { App } from "../../App";
@@ -132,12 +133,20 @@ describe("the signed-in shell", () => {
     expect(screen.queryByRole("complementary")).toBeNull();
   });
 
-  it("lets a person in several businesses switch between them", async () => {
-    open("/", bookkeeper);
+  it("lets a person in several businesses switch, and loads the other one's apps", async () => {
+    const calls = open("/", bookkeeper);
+    const lists = () => calls.filter((call) => call.path === "projects.list").length;
     const switcher = screen.getByRole("combobox", { name: copy.shell.businessLabel });
     expect(switcher).toHaveDisplayValue("Ada's bakery");
+    await waitFor(() => expect(lists()).toBe(1));
+    expect(businessHeaders()).toEqual({});
+
     await userEvent.selectOptions(switcher, "Byron's books");
     expect(switcher).toHaveDisplayValue("Byron's books");
+    // Every later call names the business, and what was on screen is asked for again.
+    expect(businessHeaders()).toEqual({ [BUSINESS_HEADER]: "2" });
+    await waitFor(() => expect(lists()).toBe(2));
+    chooseBusiness(null);
   });
 });
 
