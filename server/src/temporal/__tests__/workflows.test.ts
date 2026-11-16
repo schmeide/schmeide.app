@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Context } from "@temporalio/activity";
@@ -26,7 +33,13 @@ afterAll(async () => {
 
 // A template whose `make test` fails while a file named `broken` exists, and a fake agent
 // (SCHMEIDE_AGENT_CMD) that creates `broken` on its first run and removes it on run `fixOnRun`.
-const setup = (fixOnRun: number, interruptFirstAgentRun = false) => {
+type Options = {
+  readonly fixOnRun: number;
+  readonly interruptFirstAgentRun?: boolean;
+  readonly cancelDuringPrepare?: boolean;
+};
+
+const setup = ({ fixOnRun, interruptFirstAgentRun, cancelDuringPrepare }: Options) => {
   const root = mkdtempSync(join(tmpdir(), "schmeide-wf-"));
   const dataDir = join(root, "data");
   mkdirSync(join(dataDir, "bin"), { recursive: true });
@@ -65,8 +78,8 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     makeBin: "make",
     agentCmd: agent,
   });
-  const runPrompts = () => readFileSync(prompts, "utf8").split("\n---\n").slice(0, -1);
-  // Deploying needs Docker and a real app; the loop under test ends before it.
+  const runPrompts = () =>
+    existsSync(prompts) ? readFileSync(prompts, "utf8").split("\n---\n").slice(0, -1) : [];
   // A server restart fails the running activity on the dying worker ("Worker is shutting down").
   const runAgent: typeof activities.runAgent = async (input) => {
     if (interruptFirstAgentRun && Context.current().info.attempt === 1) {
@@ -74,11 +87,18 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     }
     return activities.runAgent(input);
   };
-  return { activities: { ...activities, runAgent, deploy: async () => undefined }, runPrompts };
+  // A slow clone: the build is canceled while it runs.
+  const prepareWorkspace: typeof activities.prepareWorkspace = async (buildId) => {
+    if (cancelDuringPrepare) await new Promise((resolve) => setTimeout(resolve, 2000));
+    return activities.prepareWorkspace(buildId);
+  };
+  // Deploying needs Docker and a real app.
+  const deploy = async () => undefined;
+  return { activities: { ...activities, prepareWorkspace, runAgent, deploy }, runPrompts };
 };
 
-const runBuild = async (fixOnRun: number, interruptFirstAgentRun = false) => {
-  const { activities, runPrompts } = setup(fixOnRun, interruptFirstAgentRun);
+const runBuild = async (options: Options) => {
+  const { activities, runPrompts } = setup(options);
   const project = await createProject(db, { name: `wf ${randomUUID()}` });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
@@ -92,25 +112,28 @@ const runBuild = async (fixOnRun: number, interruptFirstAgentRun = false) => {
     workflowsPath: new URL("../workflows.ts", import.meta.url).pathname,
     activities,
   });
-  const outcome = await worker.runUntil(
-    env.client.workflow
-      .execute(buildWorkflow, {
-        taskQueue,
-        workflowId: `build-${build.id}`,
-        args: [project.id, build.id],
-      })
-      .then(
-        () => "passed",
-        () => "failed"
-      )
-  );
+  const outcome = await worker.runUntil(async () => {
+    const handle = await env.client.workflow.start(buildWorkflow, {
+      taskQueue,
+      workflowId: `build-${build.id}`,
+      args: [project.id, build.id],
+    });
+    if (options.cancelDuringPrepare) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await handle.cancel();
+    }
+    return handle.result().then(
+      () => "passed",
+      () => "failed"
+    );
+  });
   const events = (await listEvents(db, build.id, 0)).map((event) => event.message);
   return { outcome, build: await getBuild(db, build.id), prompts: runPrompts(), events };
 };
 
 describe("buildWorkflow check and fix loop", () => {
   it(`feeds failing check output back to the agent and fails after ${MAX_FIX_ATTEMPTS} rounds`, async () => {
-    const { outcome, build, prompts, events } = await runBuild(99);
+    const { outcome, build, prompts, events } = await runBuild({ fixOnRun: 99 });
 
     expect(outcome).toBe("failed");
     expect(prompts).toHaveLength(1 + MAX_FIX_ATTEMPTS);
@@ -128,7 +151,7 @@ describe("buildWorkflow check and fix loop", () => {
   }, 120_000);
 
   it("passes once a later fix round makes the checks pass", async () => {
-    const { outcome, build, prompts, events } = await runBuild(3);
+    const { outcome, build, prompts, events } = await runBuild({ fixOnRun: 3 });
 
     expect(outcome).toBe("passed");
     expect(prompts).toHaveLength(3);
@@ -137,7 +160,10 @@ describe("buildWorkflow check and fix loop", () => {
   }, 120_000);
 
   it("runs an interrupted agent step again, telling it to continue", async () => {
-    const { outcome, prompts, events } = await runBuild(1, true);
+    const { outcome, prompts, events } = await runBuild({
+      fixOnRun: 1,
+      interruptFirstAgentRun: true,
+    });
 
     expect(outcome).toBe("passed");
     expect(prompts).toHaveLength(1);
@@ -145,5 +171,22 @@ describe("buildWorkflow check and fix loop", () => {
     expect(events).toEqual(
       expect.arrayContaining(["The server restarted; the agent picks up where it stopped"])
     );
+  }, 120_000);
+
+  it("records a cancel only after the running step has stopped", async () => {
+    const { outcome, build, prompts, events } = await runBuild({
+      fixOnRun: 1,
+      cancelDuringPrepare: true,
+    });
+
+    expect(outcome).toBe("failed");
+    expect(prompts).toHaveLength(0);
+    expect(events).toEqual([
+      "Copying the template into a fresh workspace",
+      "Workspace ready",
+      "Build canceled",
+    ]);
+    expect(build.error).toBe("Build canceled");
+    expect(build.finishedAt!.getTime() - build.startedAt.getTime()).toBeGreaterThanOrEqual(2000);
   }, 120_000);
 });
