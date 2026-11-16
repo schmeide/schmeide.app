@@ -9,6 +9,7 @@ import { SessionProvider } from "./components/SessionProvider";
 import type { AppRouter } from "./server/src/router.ts";
 import { TRPCProvider } from "./trpc";
 import { classifyError } from "./utils/apiError";
+import { apiUrl } from "./utils/apiUrl";
 import { businessHeaders } from "./utils/chosenBusiness";
 
 import "./assets/main.css";
@@ -29,7 +30,15 @@ const queryClient: QueryClient = new QueryClient({
   }),
 });
 const trpcClient = createTRPCClient<AppRouter>({
-  links: [httpBatchLink({ url: "/api/trpc", transformer: superjson, headers: businessHeaders })],
+  links: [
+    httpBatchLink({
+      url: apiUrl("/api/trpc"),
+      transformer: superjson,
+      headers: businessHeaders,
+      // The session cookie goes along when the API is on another origin of this site.
+      fetch: (url, options) => fetch(url, { ...options, credentials: "include" }),
+    }),
+  ],
 });
 
 createRoot(root).render(
