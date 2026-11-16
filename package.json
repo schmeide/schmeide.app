@@ -8,19 +8,19 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && tsc -p server && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check-updates": "ncu -u",
+    "check-updates": "ncu -u --workspaces --root",
     "lint:eslint": "eslint .",
-    "lint:types": "tsc --noEmit",
+    "lint:types": "tsc --noEmit && tsc -p server",
     "lint:prettier": "prettier --check .",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!node_modules/**\"",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!**/node_modules/**\"",
     "lint": "concurrently -m1 npm:lint:*",
     "fix:eslint": "eslint . --fix",
     "fix:prettier": "prettier --write .",
-    "fix:md": "markdownlint-cli2 --fix \"**/*.md\" \"!node_modules/**\"",
+    "fix:md": "markdownlint-cli2 --fix \"**/*.md\" \"!**/node_modules/**\"",
     "fix": "concurrently -m1 npm:fix:*"
   },
   "dependencies": {
@@ -49,5 +49,8 @@
     "typescript-eslint": "^8.72.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
-  }
+  },
+  "workspaces": [
+    "server"
+  ]
 }

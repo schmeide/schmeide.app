@@ -19,6 +19,16 @@ JS_INSTALL ?= install
 
 OUT_DIR ?= ./dist
 
+# Platform server (server/). Ports match compose.yaml.
+PORT ?= 3100
+DATABASE_URL ?= postgres://postgres:postgres@localhost:5440/schmeide
+TEST_DATABASE_URL ?= postgres://postgres:postgres@localhost:5441/schmeide
+TEMPORAL_ADDRESS ?= localhost:7233
+SCHMEIDE_DATA_DIR ?= $(HOME)/.schmeide
+SCHMEIDE_TEMPLATE ?= https://github.com/schmeide/template.git
+SCHMEIDE_AGENT_MODEL ?= opus
+export PORT DATABASE_URL TEMPORAL_ADDRESS SCHMEIDE_DATA_DIR SCHMEIDE_TEMPLATE SCHMEIDE_AGENT_MODEL
+
 NODE_VERSION := $(shell cat .nvmrc 2>/dev/null)
 NVM_DIR ?= $(HOME)/.nvm
 
@@ -70,24 +80,80 @@ clean: ## Clean build artifacts
 		./node_modules/.tmp
 
 .PHONY: serve
-serve: ## Run the Vite dev server
-	if ! [[ -d ./node_modules ]]; then \
-		$(JS_EXEC) $(JS_INSTALL); \
-	fi
+serve: infra/up node_modules ## Infra, migrations, the platform server on :3100, and Vite on :5173 (proxies /api)
+	$(MAKE) db/migrate
+	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
+	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
+
+.PHONY: serve/web
+serve/web: node_modules ## Run only the Vite dev server
 	$(JS_EXEC) run dev
+
+.PHONY: serve/server
+serve/server: node_modules ## Run only the platform server (API + Temporal worker) with reload
+	$(JS_EXEC) run dev -w server
 
 .PHONY: serve/prod
 serve/prod: build ## Serve the built static site locally
 	$(JS_EXEC) run preview
 
+##@ Infrastructure
+
+.PHONY: infra/up
+infra/up: docker/check ## Start Postgres (:5440) and the Temporal dev server (:7233, UI :8233)
+	docker compose up -d --wait db temporal
+
+.PHONY: infra/down
+infra/down: docker/check ## Stop the infrastructure (the database volume is kept)
+	docker compose --profile test down
+
+.PHONY: db/migrate
+db/migrate: node_modules ## Apply server/drizzle migrations to DATABASE_URL
+	$(JS_EXEC) run db:migrate -w server
+
+.PHONY: db/generate
+db/generate: node_modules ## Generate a migration from server/src/db/schema.ts (NAME=create_widgets to name it)
+	$(JS_EXEC) run db:generate -w server $(if $(NAME),-- --name $(NAME))
+	$(JS_EXEC) exec prettier -- --write server/drizzle >/dev/null
+
+.PHONY: doctor
+doctor: node_modules ## Check Docker, claude, git, node, the template, and ports; print the fix for each failure
+	bash server/scripts/doctor.sh
+
 ##@ Testing
 
 .PHONY: test
-test: ## Run tests once
-	if ! [[ -d ./node_modules ]]; then \
-		$(JS_EXEC) $(JS_INSTALL); \
-	fi
+test: docker/check node_modules ## Run all tests once (server tests against a throwaway Postgres on :5441)
+	trap 'docker compose --profile test down test-db >/dev/null 2>&1' EXIT
+	docker compose --profile test up -d --wait test-db
 	$(JS_EXEC) run test
+	$(MAKE) test/server DATABASE_URL=$(TEST_DATABASE_URL)
+
+.PHONY: test/server
+test/server: node_modules ## Migrate and run server tests against an existing DATABASE_URL (no Docker)
+	$(MAKE) db/migrate
+	$(JS_EXEC) run test -w server
+
+.PHONY: e2e
+e2e: node_modules ## Real Claude run of the to-do fixture against `make serve`, then delete it (KEEP=1 keeps it)
+	$(JS_EXEC) run e2e -w server
+
+E2E_FAKE_PORT ?= 3199
+
+.PHONY: e2e/fake
+e2e/fake: infra/up node_modules ## Same run with a fake agent and its own server on :3199: no Claude usage
+	$(MAKE) db/migrate
+	mkdir -p $(SCHMEIDE_DATA_DIR)/logs
+	log=$(SCHMEIDE_DATA_DIR)/logs/e2e-fake-server.log
+	(cd server && PORT=$(E2E_FAKE_PORT) SCHMEIDE_TASK_QUEUE=schmeide-fake \
+		SCHMEIDE_AGENT_CMD=$(CURDIR)/server/e2e/fake-agent.sh exec node src/main.ts) >$$log 2>&1 &
+	server=$$!
+	trap 'kill $$server 2>/dev/null || true' EXIT
+	until curl -sf localhost:$(E2E_FAKE_PORT)/api/healthz >/dev/null; do
+		if ! kill -0 $$server 2>/dev/null; then echo "Error: the fake-agent server exited; see $$log"; exit 1; fi
+		sleep 1
+	done
+	PORT=$(E2E_FAKE_PORT) $(JS_EXEC) run e2e -w server
 
 .PHONY: test/watch
 test/watch: ## Run tests in watch mode
@@ -157,6 +223,21 @@ fix/ts: ## Fix lint and format errors
 
 ##@ Helpers
 
+# Installs dependencies only when node_modules is missing.
+node_modules:
+	$(JS_EXEC) $(JS_INSTALL)
+
+.PHONY: docker/check
+docker/check:
+	if ! command -v docker >/dev/null 2>&1; then \
+		echo "Error: docker not found. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry."; \
+		exit 1; \
+	fi
+	if ! docker info >/dev/null 2>&1; then \
+		echo "Error: the Docker daemon is not running. Start Docker Desktop and retry."; \
+		exit 1; \
+	fi
+
 env-%: ## Check if env var is defined
 	if [ -z "$($*)" ]; then \
 		echo "Error: Environment variable '$*' is not set."; \
@@ -165,4 +246,4 @@ env-%: ## Check if env var is defined
 
 .PHONY: help
 help: ## Display this help
-	awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_\/-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)

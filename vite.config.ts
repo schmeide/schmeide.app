@@ -8,11 +8,13 @@ import { defineConfig } from "vite";
 export default defineConfig({
   base: "/",
   plugins: [react()],
+  // `make serve` runs the platform server on :3100 (see server/src/main.ts).
+  server: { proxy: { "/api": "http://localhost:3100" } },
   test: {
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
     include: ["**/__tests__/*.{test,spec}.{ts,tsx}"],
-    exclude: ["node_modules", "dist"],
+    exclude: ["**/node_modules/**", "dist", "server/**"],
   },
 });
