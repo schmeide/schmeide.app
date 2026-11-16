@@ -110,6 +110,27 @@ describe("getProject", () => {
   });
 });
 
+describe("getProject changes", () => {
+  it("lists the changes built since the first build, oldest first", async () => {
+    const project = await createProject(db, {
+      name: `c ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await db.insert(builds).values([
+      { projectId: project.id, kind: "initial", request: "spec", status: "passed" },
+      { projectId: project.id, kind: "change", request: "add due dates", status: "passed" },
+      { projectId: project.id, kind: "change", request: "broke", status: "failed" },
+      { projectId: project.id, kind: "site", request: "icon", status: "passed" },
+      { projectId: project.id, kind: "change", request: "email invoices", status: "passed" },
+      { projectId: project.id, kind: "change", request: "waiting", status: "queued" },
+    ]);
+
+    const { changes } = await getProject(db, project.id);
+
+    expect(changes.map((change) => change.request)).toEqual(["add due dates", "email invoices"]);
+  });
+});
+
 describe("project state machine", () => {
   it("generates a spec only from features", async () => {
     const { deps, workflows } = fakeWorkflows();

@@ -28,6 +28,7 @@ import {
 } from "../services/builds.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
+  builtChanges,
   deleteProjectRows,
   findProject,
   startNextChange,
@@ -107,7 +108,21 @@ const STANDING_RULES = `Standing rules:
 - Keep the interface simple and clear: the customer is not technical.
 - When the checks pass, commit everything with git (\`git add -A\` then \`git commit -m "..."\`).`;
 
-export const buildPrompt = (kind: "initial" | "change", spec: string, request: string): string =>
+const builtSince = (changes: readonly string[]): string =>
+  changes.length
+    ? `Changes built since then, oldest first. The code already has them, and where one disagrees with the spec, the change is right:
+
+${changes.map((change, index) => `${index + 1}. ${change}`).join("\n")}
+
+`
+    : "";
+
+export const buildPrompt = (
+  kind: "initial" | "change",
+  spec: string,
+  request: string,
+  changes: readonly string[] = []
+): string =>
   kind === "initial"
     ? `Build the web app described by the spec below inside this repository, a Schmeide project template.
 Replace the sample notes feature entirely (table, migration, service, router, page, and tests) with the spec's features.
@@ -117,15 +132,15 @@ ${STANDING_RULES}
 Spec:
 
 ${spec}`
-    : `This repository holds a web app built from the spec below. Apply the change request that follows it.
+    : `This repository holds a web app first built from the spec below, then changed. Apply the change request at the end.
 
 ${STANDING_RULES}
 
-Spec the app was built from:
+Spec the app was first built from:
 
 ${spec}
 
-Change request:
+${builtSince(changes)}Change request:
 
 ${request}`;
 
@@ -433,7 +448,14 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
         (input.feedback !== undefined
           ? checksFeedbackPrompt(input.feedback)
-          : buildPrompt(runKind, project.spec ?? "", build.request));
+          : buildPrompt(
+              runKind,
+              project.spec ?? "",
+              build.request,
+              runKind === "change"
+                ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
+                : []
+            ));
       await event(
         input.buildId,
         "step",

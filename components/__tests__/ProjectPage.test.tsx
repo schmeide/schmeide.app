@@ -524,6 +524,42 @@ describe("ProjectPage app workspace", () => {
     expect(screen.queryByRole("list", { name: copy.project.setup.label })).toBeNull();
   });
 
+  it("calls the spec the one the app started from, and says nothing changed since", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+
+    const section = await screen.findByRole("region", { name: copy.project.builtFrom });
+    expect(within(section).getByText(copy.project.builtFromUnchanged)).toBeVisible();
+    expect(within(section).queryByRole("list", { name: copy.project.changesSince })).toBeNull();
+  });
+
+  it("lists the changes built since the spec, oldest first, so the spec is not read as current", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: live,
+        latestBuild: passed,
+        hasBeenLive: true,
+        changes: [
+          { id: 4, request: "Add a due date to each invoice", finishedAt: new Date() },
+          { id: 5, request: "Send invoices by email", finishedAt: new Date() },
+        ],
+      })
+    );
+
+    const section = await screen.findByRole("region", { name: copy.project.builtFrom });
+    expect(within(section).getByText(copy.project.builtFromChanged)).toBeVisible();
+    const changes = within(section).getByRole("list", { name: copy.project.changesSince });
+    expect(
+      within(changes)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Add a due date to each invoice", "Send invoices by email"]);
+    expect(within(section).queryByText(copy.project.builtFromUnchanged)).toBeNull();
+  });
+
   it.each(["overview", "changes", "settings"] as const)(
     "has at most one primary button on %s, and no numbered step",
     async (view) => {

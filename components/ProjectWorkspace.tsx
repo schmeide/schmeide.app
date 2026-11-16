@@ -1,5 +1,5 @@
 import { copy } from "../data/copy";
-import type { Build, Project, Usage } from "../trpc";
+import type { Build, BuiltChange, Project, Usage } from "../trpc";
 import { pathTo, type RouteName } from "../utils/routes";
 import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
@@ -27,6 +27,7 @@ type Props = {
   readonly project: Project;
   readonly latestBuild: Build | null;
   readonly queued: readonly Build[];
+  readonly changes: readonly BuiltChange[];
   readonly hasIcon: boolean;
   readonly usage: Usage;
   readonly request: string;
@@ -40,13 +41,14 @@ export function ProjectWorkspace({
   project,
   latestBuild,
   queued,
+  changes,
   hasIcon,
   usage,
   request,
   onRequestChange,
   onStop,
 }: Props) {
-  const changes = pathTo("projectChanges", { id: project.id });
+  const changesPath = pathTo("projectChanges", { id: project.id });
   const live = project.status === "live" && project.previewUrl;
 
   return (
@@ -84,7 +86,7 @@ export function ProjectWorkspace({
               </a>
             )}
             <Link
-              to={changes}
+              to={changesPath}
               className={styles.action}
               data-variant={live ? undefined : "primary"}
             >
@@ -96,6 +98,19 @@ export function ProjectWorkspace({
           {project.spec && (
             <section aria-labelledby="built-from" className={stepStyles.step}>
               <h2 id="built-from">{copy.project.builtFrom}</h2>
+              {changes.length === 0 ? (
+                <p className={stepStyles.muted}>{copy.project.builtFromUnchanged}</p>
+              ) : (
+                <>
+                  <p className={stepStyles.muted}>{copy.project.builtFromChanged}</p>
+                  <h3 id="changes-since">{copy.project.changesSince}</h3>
+                  <ol aria-labelledby="changes-since">
+                    {changes.map((change) => (
+                      <li key={change.id}>{change.request}</li>
+                    ))}
+                  </ol>
+                </>
+              )}
               <details>
                 <summary>{copy.project.showSpec}</summary>
                 <Spec source={project.spec} />

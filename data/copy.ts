@@ -170,7 +170,11 @@ export const copy = {
     approve: "Approve and build",
     approving: "Starting the build…",
     changeFeatures: "Change the requests",
-    builtFrom: "The spec this app was built from",
+    builtFrom: "The spec your app started from",
+    builtFromUnchanged: "No changes have been built since, so this still describes your app.",
+    builtFromChanged:
+      "Your app has changed since this was written. The spec is kept as it was; the changes built after it are listed here, oldest first.",
+    changesSince: "Changes built since",
     showSpec: "Show the spec",
     buildTitle: "3. Build",
     changeTitle: "Latest change",
