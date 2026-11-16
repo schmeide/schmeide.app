@@ -18,6 +18,7 @@ const table = {
   welcome: { path: "/welcome", access: "signedIn" },
   help: { path: "/help", access: "public" },
   signIn: { path: "/sign-in", access: "public" },
+  setPassword: { path: "/set-password", access: "public" },
   terms: { path: "/terms", access: "public" },
   privacy: { path: "/privacy", access: "public" },
   acceptableUse: { path: "/acceptable-use", access: "public" },

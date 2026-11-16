@@ -1,7 +1,14 @@
 import { TRPCClientError } from "@trpc/client";
 
 export type ApiProblem =
-  "unreachable" | "notFound" | "forbidden" | "conflict" | "badRequest" | "unavailable" | "other";
+  | "unreachable"
+  | "signedOut"
+  | "notFound"
+  | "forbidden"
+  | "conflict"
+  | "badRequest"
+  | "unavailable"
+  | "other";
 
 // An error with no tRPC code never reached the server: it is down, or this is the static site.
 export const classifyError = (error: unknown): ApiProblem => {
@@ -9,6 +16,7 @@ export const classifyError = (error: unknown): ApiProblem => {
   const data: unknown = error.data;
   const code = typeof data === "object" && data && "code" in data ? data.code : undefined;
   if (!code) return "unreachable";
+  if (code === "UNAUTHORIZED") return "signedOut";
   if (code === "NOT_FOUND") return "notFound";
   if (code === "FORBIDDEN") return "forbidden";
   if (code === "CONFLICT") return "conflict";

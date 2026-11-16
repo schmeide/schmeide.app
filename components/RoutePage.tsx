@@ -5,6 +5,7 @@ import type { RouteName, RouteParams } from "../utils/routes";
 import { PlaceholderPage } from "./PlaceholderPage";
 import { ProjectList } from "./ProjectList";
 import { ProjectPage } from "./ProjectPage";
+import { SetPasswordPage } from "./SetPasswordPage";
 import { SignInPage } from "./SignInPage";
 
 const placeholder = (name: RouteName) => () => <PlaceholderPage title={copy.routes[name]} />;
@@ -23,6 +24,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   welcome: placeholder("welcome"),
   help: placeholder("help"),
   signIn: () => <SignInPage />,
+  setPassword: () => <SetPasswordPage />,
   terms: placeholder("terms"),
   privacy: placeholder("privacy"),
   acceptableUse: placeholder("acceptableUse"),

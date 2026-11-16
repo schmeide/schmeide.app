@@ -8,7 +8,7 @@ import { SessionProvider } from "../SessionProvider";
 import type { AppRouter } from "../../server/src/router.ts";
 import type { Build, BuildEvent, Interview, PlanItem, Project, Question, Usage } from "../../trpc";
 import { TRPCProvider } from "../../trpc";
-import type { Session } from "../../utils/session";
+import type { Provider, Session } from "../../utils/session";
 
 type Input = Readonly<Record<string, unknown>>;
 export type Handlers = Readonly<Record<string, (input: Input) => unknown>>;
@@ -58,15 +58,25 @@ const fakeLink =
         );
     });
 
-// `session` is who is signed in; left out, it is the dev stand-in owner with one business.
-export const renderWithApi = (ui: ReactNode, handlers: Handlers, session?: Session) => {
+export const demoOwner: Session = {
+  person: { name: "Demo owner", email: "owner@demo.example" },
+  businesses: [{ id: 1, name: "Demo business" }],
+};
+
+// `session` is who is signed in; left out, it is an owner with one business. "server" asks the
+// handlers instead (`session.get`), as the real app does.
+export const renderWithApi = (
+  ui: ReactNode,
+  handlers: Handlers,
+  session: Session | "server" = demoOwner
+) => {
   const calls: Call[] = [];
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const trpcClient = createTRPCClient<AppRouter>({ links: [fakeLink(handlers, calls)] });
   render(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <SessionProvider initial={session}>{ui}</SessionProvider>
+        <SessionProvider fixed={session === "server" ? undefined : session}>{ui}</SessionProvider>
       </TRPCProvider>
     </QueryClientProvider>
   );
@@ -180,3 +190,42 @@ export const projectServer = (state: {
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),
 });
+
+// The server's side of sign-in: `session.get` answers whoever `state.session` says, and the
+// /api/auth routes (called with fetch) change it. Returns the handlers and the fetch calls made.
+export const authServer = (state: {
+  session: Session;
+  providers?: readonly Provider[];
+  // The account that can sign in with a password.
+  account?: Session & { readonly password: string };
+  // The answer to a password sign-in when it is not 200 or 401.
+  signInStatus?: number;
+}) => {
+  const requests: { readonly path: string; readonly body: Input }[] = [];
+  const answer = (status: number, body: unknown = {}) =>
+    Promise.resolve(new Response(JSON.stringify(body), { status }));
+  vi.stubGlobal("fetch", (url: string, init: RequestInit) => {
+    const path = url.replace("/api/auth", "");
+    const body = JSON.parse(String(init.body)) as Input;
+    requests.push({ path, body });
+    if (path === "/sign-out") {
+      state.session = { person: null, businesses: [] };
+      return answer(200);
+    }
+    if (path === "/sign-in/social")
+      return answer(200, { url: `https://provider.example/${String(body.provider)}` });
+    if (path === "/sign-in/email") {
+      if (state.signInStatus) return answer(state.signInStatus);
+      const { account } = state;
+      if (!account || account.person?.email !== body.email || account.password !== body.password)
+        return answer(401);
+      state.session = { person: account.person, businesses: account.businesses };
+      return answer(200);
+    }
+    return answer(404);
+  });
+  const handlers: Handlers = {
+    "session.get": () => ({ ...state.session, providers: state.providers ?? [] }),
+  };
+  return { handlers, requests };
+};

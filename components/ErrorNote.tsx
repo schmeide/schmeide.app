@@ -9,6 +9,8 @@ const describe = (error: ApiError): string => {
   switch (classifyError(error)) {
     case "unreachable":
       return copy.errors.serverDown;
+    case "signedOut":
+      return copy.errors.signedOut;
     case "notFound":
       return copy.errors.notFound;
     case "forbidden":
