@@ -82,7 +82,8 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 
 ## Using the UI
 
-Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install. Sign in with an approved email (step 3 of the quick start).
+Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install. Sign in with
+an approved email (step 3 of the quick start).
 
 1. **Create a project**: type a name and press "Create project". The project page opens.
 
