@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 
 import { SessionProvider } from "../SessionProvider";
 import type { AppRouter } from "../../server/src/router.ts";
-import type { Build, BuildEvent, Project, Usage } from "../../trpc";
+import type { Build, BuildEvent, Interview, PlanItem, Project, Question, Usage } from "../../trpc";
 import { TRPCProvider } from "../../trpc";
 import type { Session } from "../../utils/session";
 
@@ -119,6 +119,43 @@ export const noUsage: Usage = {
   costUsd: 0,
 };
 
+export const anInterview = (overrides: Partial<Interview> = {}): Interview => ({
+  items: [],
+  questions: [],
+  current: null,
+  sections: {
+    who: "not_started",
+    does: "not_started",
+    screens: "not_started",
+    keeps: "not_started",
+  },
+  finished: false,
+  ...overrides,
+});
+
+export const aQuestion = (overrides: Partial<Question> = {}): Question => ({
+  id: 11,
+  projectId: 7,
+  text: "Who sends the invoices?",
+  kind: "pick_one",
+  choices: ["Just me", "Me and my staff"],
+  answer: null,
+  askedAt: at,
+  answeredAt: null,
+  ...overrides,
+});
+
+export const anItem = (overrides: Partial<PlanItem> = {}): PlanItem => ({
+  id: 21,
+  projectId: 7,
+  section: "does",
+  text: "Create an invoice",
+  source: "you",
+  phase: "day_one",
+  createdAt: at,
+  ...overrides,
+});
+
 // A single project whose state the test mutates; `get` reads it, `events` pages through `events`.
 export const projectServer = (state: {
   project: Project;
@@ -128,7 +165,9 @@ export const projectServer = (state: {
   hasBeenLive?: boolean;
   events?: BuildEvent[];
   usage?: Usage;
+  interview?: Interview;
 }): Handlers => ({
+  "interview.get": () => state.interview ?? anInterview(),
   "projects.list": () => [state.project],
   "projects.get": () => ({
     project: state.project,

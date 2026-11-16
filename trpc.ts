@@ -12,6 +12,10 @@ export type Build = NonNullable<Outputs["projects"]["get"]["latestBuild"]>;
 export type BuildEvent = Outputs["builds"]["events"][number];
 export type Usage = Outputs["projects"]["get"]["usage"];
 export type ProjectStatus = Project["status"];
+export type Interview = Outputs["interview"]["get"];
+export type PlanItem = Interview["items"][number];
+export type Question = Interview["questions"][number];
+export type Answer = NonNullable<Question["answer"]>;
 
 // How often a spec in progress, a running build, or its log is checked.
 export const POLL_MS = 2000;

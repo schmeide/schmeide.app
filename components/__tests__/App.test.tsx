@@ -2,7 +2,7 @@ import { screen } from "@testing-library/react";
 
 import { App } from "../../App";
 import { copy } from "../../data/copy";
-import { aProject, ApiFailure, renderWithApi } from "./fakeApi";
+import { anInterview, aProject, ApiFailure, renderWithApi } from "./fakeApi";
 
 const unreachable = {
   "projects.list": () => {
@@ -32,6 +32,7 @@ describe("App", () => {
     window.history.replaceState(null, "", "/projects/7");
     renderWithApi(<App isPublicSite />, {
       "projects.list": () => [aProject()],
+      "interview.get": () => anInterview(),
       "projects.get": () => ({
         project: aProject(),
         latestBuild: null,

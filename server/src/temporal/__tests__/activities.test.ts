@@ -16,6 +16,7 @@ import {
   GIT_CONFIG,
   createActivities,
   gitConfigFile,
+  specPrompt,
   type Config,
   type Query,
 } from "../activities.ts";
@@ -124,6 +125,25 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
       } as unknown as SDKMessage;
     })();
   }) as unknown as Query;
+
+describe("specPrompt", () => {
+  it("writes from the typed requests when there is no plan", () => {
+    const prompt = specPrompt("Keep a list of clients", "");
+
+    expect(prompt).toContain("with these features, one per line:\n\nKeep a list of clients");
+    expect(prompt).not.toContain("wanted later");
+  });
+
+  it("leads with the plan, adds the typed requests, and leaves out what was put off", () => {
+    const prompt = specPrompt("Keep a list of clients", "What it does:\n- Create an invoice");
+
+    expect(prompt).toContain("the plan they agreed");
+    expect(prompt).toContain("What it does:\n- Create an invoice");
+    expect(prompt).toContain("in their own words, one per line:\n\nKeep a list of clients");
+    expect(prompt).toContain("Leave out everything listed as wanted later.");
+    expect(specPrompt("", "What it does:\n- Create an invoice")).not.toContain("own words");
+  });
+});
 
 describe("build activities", () => {
   it("prepares a fresh one-commit workspace from the template, then reuses it", async () => {

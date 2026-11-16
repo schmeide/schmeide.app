@@ -1,16 +1,29 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import {
+  answerQuestionSchema,
   buildIdSchema,
   changeRequestSchema,
   editChangeSchema,
+  editPlanItemSchema,
   eventsQuerySchema,
+  newPlanItemSchema,
   newProjectSchema,
+  planItemIdSchema,
   projectIdSchema,
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { listEvents } from "./services/builds.ts";
-import { ConflictError, NotFoundError } from "./services/errors.ts";
+import { ConflictError, InterviewUnavailableError, NotFoundError } from "./services/errors.ts";
+import {
+  addPlanItem,
+  answerQuestion,
+  getInterview,
+  removePlanItem,
+  startInterview,
+  updatePlanItem,
+  type Interviewer,
+} from "./services/interview.ts";
 import { siteSchema } from "./services/site.ts";
 import {
   approveSpec,
@@ -28,7 +41,7 @@ import {
   type Deps,
 } from "./services/projects.ts";
 
-export type Context = Deps;
+export type Context = Deps & { readonly interviewer: Interviewer };
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
 
@@ -40,6 +53,9 @@ const procedure = t.procedure.use(async ({ next }) => {
       throw new TRPCError({ code: "NOT_FOUND", message: cause.message });
     if (cause instanceof ConflictError)
       throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
+    // The UI falls back to typed requests, or offers to try again.
+    if (cause instanceof InterviewUnavailableError)
+      throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: cause.message, cause });
   }
   return result;
 });
@@ -69,6 +85,26 @@ export const appRouter = t.router({
     delete: procedure
       .input(projectIdSchema)
       .mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
+  }),
+  // The guided questions that build a project's plan; see services/interview.ts.
+  interview: t.router({
+    get: procedure.input(projectIdSchema).query(({ ctx, input }) => getInterview(ctx.db, input.id)),
+    // Asks the first question, or the next one after a turn that failed.
+    start: procedure
+      .input(projectIdSchema)
+      .mutation(({ ctx, input }) => startInterview(ctx, input.id)),
+    answer: procedure
+      .input(answerQuestionSchema)
+      .mutation(({ ctx, input }) => answerQuestion(ctx, input)),
+    addItem: procedure
+      .input(newPlanItemSchema)
+      .mutation(({ ctx, input }) => addPlanItem(ctx.db, input)),
+    updateItem: procedure
+      .input(editPlanItemSchema)
+      .mutation(({ ctx, input }) => updatePlanItem(ctx.db, input)),
+    removeItem: procedure
+      .input(planItemIdSchema)
+      .mutation(({ ctx, input }) => removePlanItem(ctx.db, input)),
   }),
   builds: t.router({
     events: procedure

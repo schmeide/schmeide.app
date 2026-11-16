@@ -10,7 +10,8 @@ deploys it on this machine. There is no auth; everything belongs to the seeded `
 1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
 2. `make serve`, and leave it running (Ctrl-C stops it).
 3. Open <http://localhost:5173>, type a project name, and press "Create project".
-4. Type one request per box ("Add another request" or Enter adds a box), press "Write the spec",
+4. Press "Write it myself" and type one request per box ("Add another request" or Enter adds a box), or press
+   "Start the questions" and answer them. Then press "Write the spec",
    read it, and press "Approve and build".
 5. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
 
@@ -85,10 +86,16 @@ Open <http://localhost:5173> after `make serve`. The page is the whole tool; the
 A project page has two phases. **Setup** lasts until the first build passes. It shows one step at a time, with a
 stepper (Describe, Spec, Build, Live) above it, and one main button per step:
 
-1. **What your app should do**: one request per box, in plain words. "Add another request" or Enter in a box adds a
-   box below it, "Remove" drops one, and empty boxes are ignored. Pasting a list of several lines into a box puts each
-   line in its own box (the [sample invoicing requests](#sample-invoicing-requests) work). "Save" keeps them; "Write
-   the spec" saves and starts the spec.
+1. **What your app should do**: two ways to describe it, which can be mixed.
+   - "Start the questions" asks one question at a time beside "Your plan", which fills in as you answer. Choose an
+     answer, pick "Something else" to use your own words, or press "You decide" and Schmeide picks one and marks it
+     in the plan. Each question takes a few seconds to arrive. "Write the spec" is there from the first answer; you
+     do not have to answer everything.
+   - "Write it myself" shows the request boxes: one request per box, in plain words. "Add another request" or
+     Enter in a box adds a box below it, "Remove" drops one, and empty boxes are ignored. Pasting a list of
+     several lines into a box puts each line in its own box (the
+     [sample invoicing requests](#sample-invoicing-requests) work). "Save" keeps them; "Write the spec" saves and
+     starts the spec.
 2. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
    "Change the requests", which goes back to step 1 and warns that saving new requests throws the spec away.
 3. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
@@ -206,19 +213,48 @@ Print an invoice as a clean page I can save as a PDF
 
 `builds.events({ buildId, afterId })` is the live log: pass the last id seen to page forward.
 
+## The interview
+
+A second way to describe a project, beside `projects.setFeatures`: the server asks one question at a
+time and keeps a plan up to date from the answers. The screen is "Start the questions" on the project page; the
+API is:
+
+- `interview.start({ id })` asks the first question, or the next one after a turn that failed. It
+  does nothing while a question is waiting or once the interview has finished.
+- `interview.answer({ id, questionId, answer })` stores the answer, changes the plan, and asks the
+  next question. An answer is `{ type: "choices", values }`, `{ type: "yes_no", value }`,
+  `{ type: "text", value }` (the person's own words, accepted on any question), or
+  `{ type: "you_decide" }`.
+- `interview.get({ id })` returns the plan items, the answered questions, the waiting question, the
+  status of each plan section (`not_started`, `sketched`, `ready`), and whether it has finished.
+- `interview.addItem`, `interview.updateItem`, and `interview.removeItem` edit the plan directly.
+
+The plan has four sections: `who` uses the app, what it `does`, its `screens`, and what it `keeps`.
+Each item is for `day_one` or `later`, and is marked `you` or `schmeide` by who it came from.
+
+- Each question is one model call, made while the request waits: about 4 seconds and about 1 cent
+  with `sonnet`. The interview ends after 30 questions at most.
+- When the model cannot produce a turn the call answers `SERVICE_UNAVAILABLE`, the question stays
+  open, and the same call can be sent again.
+- A project with plan items needs no typed requests: `projects.generateSpec` writes the spec from
+  the plan, adds any typed requests to it, and leaves out the `later` items.
+- Changing the plan of a `spec_ready` project returns it to `draft` and clears the spec, as
+  `projects.setFeatures` does. The plan cannot change once the project is being built.
+
 ## Environment
 
-| Variable               | Default                                    | Meaning                              |
-| ---------------------- | ------------------------------------------ | ------------------------------------ |
-| `PORT`                 | `3100`                                     | API port (Vite proxies to it)        |
-| `DATABASE_URL`         | Postgres on `:5440`, database `schmeide`   | Customer database                    |
-| `TEMPORAL_ADDRESS`     | `localhost:7233`                           | Temporal frontend                    |
-| `SCHMEIDE_DATA_DIR`    | `~/.schmeide`                              | Workspaces, logs, make shim          |
-| `SCHMEIDE_TEMPLATE`    | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
-| `SCHMEIDE_AGENT_MODEL` | `opus`                                     | Model for spec and build runs        |
-| `SCHMEIDE_CLAUDE_BIN`  | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
-| `SCHMEIDE_AGENT_CMD`   | unset                                      | Fake agent command instead of Claude |
-| `SCHMEIDE_TASK_QUEUE`  | `schmeide`                                 | Temporal task queue of this server   |
+| Variable                   | Default                                    | Meaning                              |
+| -------------------------- | ------------------------------------------ | ------------------------------------ |
+| `PORT`                     | `3100`                                     | API port (Vite proxies to it)        |
+| `DATABASE_URL`             | Postgres on `:5440`, database `schmeide`   | Customer database                    |
+| `TEMPORAL_ADDRESS`         | `localhost:7233`                           | Temporal frontend                    |
+| `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, logs, make shim          |
+| `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
+| `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Model for spec and build runs        |
+| `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for interview questions        |
+| `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
+| `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
+| `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
 
 ## Where things live
 

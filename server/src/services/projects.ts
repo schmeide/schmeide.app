@@ -5,6 +5,9 @@ import type { Db } from "../db/client.ts";
 import {
   buildEvents,
   builds,
+  interviewQuestions,
+  interviews,
+  planItems,
   projectIcons,
   projects,
   tenants,
@@ -194,7 +197,15 @@ export const generateSpec = async (
   id: number
 ): Promise<Project> => {
   const current = await findProject(db, id);
-  if (!current.features.trim()) throw new ConflictError("Add at least one feature first");
+  // A project is described by typed requests, by the interview's plan, or by both.
+  const [planned] = await db
+    .select({ id: planItems.id })
+    .from(planItems)
+    .where(eq(planItems.projectId, id))
+    .limit(1);
+  if (!current.features.trim() && !planned) {
+    throw new ConflictError("Add at least one feature first");
+  }
   return db.transaction(async (tx) => {
     const project = await transition(tx as unknown as Db, id, ["draft", "spec_ready"], {
       status: "spec_generating",
@@ -448,6 +459,9 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     const ids = tx.select({ id: builds.id }).from(builds).where(eq(builds.projectId, id));
     await tx.delete(usage).where(eq(usage.projectId, id));
     await tx.delete(projectIcons).where(eq(projectIcons.projectId, id));
+    await tx.delete(planItems).where(eq(planItems.projectId, id));
+    await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
+    await tx.delete(interviews).where(eq(interviews.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
     await tx.delete(builds).where(eq(builds.projectId, id));
     await tx.delete(projects).where(eq(projects.id, id));

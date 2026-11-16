@@ -17,6 +17,10 @@ import {
 
 const SPEC = "## Features\n- Keep a list of clients\n\n## Screens\n- Client list";
 
+// A new project opens on the questions; the request boxes are one press away.
+const writeItMyself = async () =>
+  userEvent.click(await screen.findByRole("button", { name: copy.interview.writeMyself }));
+
 describe("ProjectPage", () => {
   it("saves the features and writes the spec, then shows it readably", async () => {
     const state = { project: aProject() };
@@ -37,6 +41,7 @@ describe("ProjectPage", () => {
     });
 
     expect(await screen.findByText(copy.status.draft.hint)).toBeInTheDocument();
+    await writeItMyself();
     await userEvent.type(
       screen.getByLabelText(copy.project.requestLabel(1)),
       "Keep a list of clients"
@@ -61,6 +66,7 @@ describe("ProjectPage", () => {
       "projects.setFeatures": (input) => aProject({ features: String(input.features) }),
       "projects.generateSpec": () => aProject({ status: "spec_generating" }),
     });
+    await writeItMyself();
     await userEvent.type(await screen.findByLabelText(copy.project.requestLabel(1)), "Clients");
     expect(screen.queryByRole("button", { name: copy.project.removeRequestLabel(1) })).toBeNull();
 
@@ -88,6 +94,7 @@ describe("ProjectPage", () => {
 
   it("asks for a request when every box is empty", async () => {
     const calls = renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject() }));
+    await writeItMyself();
     await userEvent.click(await screen.findByRole("button", { name: copy.project.addRequest }));
     await userEvent.type(screen.getByLabelText(copy.project.requestLabel(2)), "   ");
     await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
@@ -97,6 +104,7 @@ describe("ProjectPage", () => {
 
   it("splits a pasted list into one box per line", async () => {
     renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject() }));
+    await writeItMyself();
     await userEvent.click(await screen.findByLabelText(copy.project.requestLabel(1)));
     await userEvent.paste("Clients\r\n\n  Invoices  \nTax\n");
     expect(screen.getByLabelText(copy.project.requestLabel(1))).toHaveValue("Clients");

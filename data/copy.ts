@@ -219,10 +219,53 @@ export const copy = {
     deleteNo: "Keep it",
     deleting: "Deleting… this can take a few seconds.",
   },
+  interview: {
+    intro:
+      "Answer a few questions and Schmeide writes down what your app needs as you go. Most answers are a choice. You can always answer in your own words, or let Schmeide decide.",
+    start: "Start the questions",
+    starting: "Thinking of the first question…",
+    thinking: "Thinking of the next question…",
+    writeMyself: "Write it myself",
+    useQuestions: "Answer questions instead",
+    yes: "Yes",
+    no: "No",
+    other: "Something else",
+    otherLabel: "In your own words",
+    answerLabel: "Your answer",
+    continue: "Continue",
+    youDecide: "You decide",
+    youDecideHint: "Schmeide picks a sensible answer and marks it in your plan.",
+    needAnswer: "Choose an answer, write your own, or press “You decide”.",
+    unavailable:
+      "The next question could not be prepared. Try again in a moment, or press “Write it myself” to type your requests.",
+    retry: "Try again",
+    finished: "Those are all the questions. Read your plan, then press “Write the spec”.",
+    paused: "There is no question waiting. Ask for the next one, or write the spec from your plan.",
+    resume: "Ask the next question",
+    planTitle: (count: number) => `Your plan (${count})`,
+    sections: {
+      who: "Who uses it",
+      does: "What it does",
+      screens: "Its screens",
+      keeps: "What it keeps",
+    },
+    sectionStatus: { not_started: "Not started", sketched: "Sketched", ready: "Ready" },
+    sectionEmpty: "Nothing here yet.",
+    tagNew: "New",
+    tagSchmeide: "Schmeide chose this",
+    tagLater: "Later",
+    added: (items: readonly string[]) => `Added to your plan: ${items.join("; ")}`,
+    answersTitle: (count: number) => `Your answers (${count})`,
+    answerYouDecide: "Left to Schmeide",
+    needPlan:
+      "Your plan needs at least one thing under “What it does”. Answer a question first, or press “Write it myself”.",
+    discardWarning:
+      "Answering more questions can change your plan. If it does, the spec below is thrown away and written again from the new plan.",
+  },
   status: {
     draft: {
       label: "Describing",
-      hint: "Next: add what your app should do below, then press “Write the spec”.",
+      hint: "Next: describe what your app should do below, then press “Write the spec”.",
     },
     spec_generating: {
       label: "Writing the spec",
@@ -255,6 +298,7 @@ export const copy = {
     forbidden: "You do not have access to this.",
     conflict: "That cannot be done right now:",
     badRequest: "That was not accepted:",
+    unavailable: "That is not available right now. Wait a moment, then try again.",
     other: "Something went wrong:",
   },
   duration: (minutes: number, seconds: number) =>
