@@ -3,6 +3,8 @@ import { useState } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
+import { navigate } from "../utils/navigation";
+import { pathTo } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
 
 import styles from "./Step.module.css";
@@ -20,7 +22,7 @@ export function ProjectActions({ project, onStop }: Props) {
   const remove = useMutation(
     trpc.projects.delete.mutationOptions({
       onSuccess: () => {
-        window.location.assign("#/");
+        navigate(pathTo("apps"));
         void refresh();
       },
     })

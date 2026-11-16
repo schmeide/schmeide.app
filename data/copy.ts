@@ -6,6 +6,54 @@ export const copy = {
     tagline: "Coming soon.",
   },
   loading: "Loading…",
+  siteTitle: "Schmeide",
+  pageTitle: (page: string) => `${page} · Schmeide`,
+  shell: {
+    skip: "Skip to main content",
+    logo: "Schmeide",
+    menu: "Menu",
+    primaryNav: "Main",
+    accountNav: "Your account",
+    businessLabel: "Business",
+    notices: "Notices",
+    legalNav: "Legal",
+    signIn: "Sign in",
+    signOut: "Sign out",
+  },
+  // The name of each route in utils/routes.ts: its navigation label and its tab title.
+  routes: {
+    apps: "Apps",
+    project: "App",
+    usage: "Usage",
+    billing: "Billing",
+    business: "Business",
+    account: "Account",
+    welcome: "Your business",
+    help: "Help",
+    signIn: "Sign in",
+    terms: "Terms",
+    privacy: "Privacy",
+    acceptableUse: "Acceptable use",
+    report: "Report an app",
+  },
+  placeholder: "This page is not built yet.",
+  signInPage: {
+    intro:
+      "This development version has no accounts yet. Press “Sign in” to continue as the demo owner.",
+    action: "Sign in",
+  },
+  problems: {
+    notFound: {
+      title: "Page not found",
+      body: "This address does not match anything here, or the app was deleted.",
+    },
+    noAccess: {
+      title: "No access",
+      body: "This page belongs to a business you are not a member of.",
+    },
+    signedInAs: (email: string) => `You are signed in as ${email}.`,
+    action: "Go to your apps",
+  },
   list: {
     title: "Schmeide",
     intro:
@@ -178,6 +226,7 @@ export const copy = {
       "The server is not running. In a terminal, from the schmeide.app folder, run “make serve” (or “gmake serve”), wait until it prints the App address, then press “Try again”.",
     retry: "Try again",
     notFound: "This project no longer exists. It may have been deleted.",
+    forbidden: "You do not have access to this.",
     conflict: "That cannot be done right now:",
     badRequest: "That was not accepted:",
     other: "Something went wrong:",

@@ -19,6 +19,7 @@ describe("classifyError", () => {
       classifyError(trpcError("CONFLICT", "Project 1 is live; this needs it to be draft"))
     ).toBe("conflict");
     expect(classifyError(trpcError("NOT_FOUND", "Project 9 not found"))).toBe("notFound");
+    expect(classifyError(trpcError("FORBIDDEN", "not a member"))).toBe("forbidden");
     expect(classifyError(trpcError("BAD_REQUEST", "too long"))).toBe("badRequest");
     expect(classifyError(trpcError("INTERNAL_SERVER_ERROR", "boom"))).toBe("other");
   });

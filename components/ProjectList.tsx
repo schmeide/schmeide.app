@@ -3,7 +3,10 @@ import type { FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC } from "../trpc";
+import { navigate } from "../utils/navigation";
+import { pathTo } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
+import { Link } from "./Link";
 
 import styles from "./ProjectList.module.css";
 
@@ -15,7 +18,7 @@ export function ProjectList() {
     trpc.projects.create.mutationOptions({
       onSuccess: (project) => {
         void refresh();
-        window.location.assign(`#/projects/${project.id}`);
+        navigate(pathTo("project", { id: project.id }));
       },
     })
   );
@@ -71,9 +74,9 @@ export function ProjectList() {
           <ul className={styles.projects}>
             {list.data.map((project) => (
               <li key={project.id} className={styles.project}>
-                <a href={`#/projects/${project.id}`} className={styles.name}>
+                <Link to={pathTo("project", { id: project.id })} className={styles.name}>
                   {project.name}
-                </a>
+                </Link>
                 <span className={styles.status} data-status={project.status}>
                   {copy.status[project.status].label}
                 </span>

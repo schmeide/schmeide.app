@@ -358,11 +358,24 @@ describe("ProjectPage", () => {
       },
     });
     expect(await screen.findByText(copy.errors.notFound)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: copy.project.back })).toHaveAttribute("href", "#/");
+    expect(screen.getByRole("link", { name: copy.project.back })).toHaveAttribute("href", "/");
+  });
+
+  it("says there is no access, and with which email, for a project of another business", async () => {
+    renderWithApi(<ProjectPage id={7} />, {
+      "projects.get": () => {
+        throw new ApiFailure("FORBIDDEN", "Not a member");
+      },
+    });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: copy.problems.noAccess.title })
+    ).toBeInTheDocument();
+    expect(screen.getByText(copy.problems.signedInAs("owner@demo.example"))).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");
   });
 
   it("confirms before deleting, saying what goes, then returns to the list", async () => {
-    window.location.hash = "#/projects/7";
+    window.history.replaceState(null, "", "/projects/7");
     const calls = renderWithApi(<ProjectPage id={7} />, {
       ...projectServer({ project: aProject({ status: "stopped" }) }),
       "projects.delete": () => undefined,
@@ -372,6 +385,6 @@ describe("ProjectPage", () => {
     expect(calls.some((call) => call.path === "projects.delete")).toBe(false);
     await userEvent.click(screen.getByRole("button", { name: copy.project.deleteYes }));
     expect(calls).toContainEqual({ path: "projects.delete", input: { id: 7 } });
-    await waitFor(() => expect(window.location.hash).toBe("#/"));
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
   });
 });
