@@ -22,6 +22,8 @@ import {
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
+// These activities never start a workflow.
+const deps = { db, workflows: {} as never, taskQueue: "test" };
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, {
@@ -122,7 +124,7 @@ describe("build activities", () => {
   it("prepares a fresh one-commit workspace from the template, then reuses it", async () => {
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
-    const activities = createActivities(db, config);
+    const activities = createActivities(deps, config);
     const env = new MockActivityEnvironment();
 
     await env.run(activities.prepareWorkspace, build.id);
@@ -143,7 +145,7 @@ describe("build activities", () => {
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
     const calls: { prompt: string; options: Options }[] = [];
-    const activities = createActivities(db, config, fakeQuery(calls));
+    const activities = createActivities(deps, config, fakeQuery(calls));
     const env = new MockActivityEnvironment();
     await env.run(activities.prepareWorkspace, build.id);
 
@@ -181,7 +183,7 @@ describe("build activities", () => {
   it("fails the activity when the agent run does not succeed", async () => {
     const { config } = setup();
     const { build } = await newBuild();
-    const activities = createActivities(db, config, fakeQuery([], true));
+    const activities = createActivities(deps, config, fakeQuery([], true));
     const env = new MockActivityEnvironment();
     await env.run(activities.prepareWorkspace, build.id);
 
@@ -193,7 +195,7 @@ describe("build activities", () => {
   it("runs check, test, and build with the project's ports and reports the first failure", async () => {
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
-    const activities = createActivities(db, config);
+    const activities = createActivities(deps, config);
     const env = new MockActivityEnvironment();
     await env.run(activities.prepareWorkspace, build.id);
 

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { builds } from "../../db/schema.ts";
+import { builds, projects } from "../../db/schema.ts";
 import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../builds.ts";
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
@@ -10,12 +10,15 @@ import {
   createProject,
   deleteProject,
   deleteProjectRows,
+  editQueuedChange,
   failOrphanedBuilds,
   findProject,
   getProject,
   generateSpec,
+  removeQueuedChange,
   requestChange,
   setFeatures,
+  startNextChange,
   slugify,
   stopProject,
   testDbPort,
@@ -123,7 +126,7 @@ describe("project state machine", () => {
     expect(edited).toMatchObject({ status: "draft", spec: null, features: "something else" });
   });
 
-  it("approves only a ready spec, starts a build, and allows one build at a time", async () => {
+  it("approves only a ready spec, starts a build, and lets other projects build too", async () => {
     const { deps, workflows } = fakeWorkflows();
     const draft = await createProject(db, { name: `p ${randomUUID()}` });
     await expect(approveSpec(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
@@ -131,6 +134,7 @@ describe("project state machine", () => {
     const ready = await specReady();
     const other = await specReady();
     const { project, build } = await approveSpec(deps, ready.id);
+    const second = await approveSpec(deps, other.id);
     try {
       expect(project.status).toBe("building");
       expect(build).toMatchObject({ kind: "initial", status: "running", request: "## Features" });
@@ -138,9 +142,10 @@ describe("project state machine", () => {
         "buildWorkflow",
         expect.objectContaining({ workflowId: `build-${build.id}`, args: [ready.id, build.id] })
       );
-      await expect(approveSpec(deps, other.id)).rejects.toThrow(/still running/);
+      expect(second.build.status).toBe("running");
     } finally {
       await finishBuild(db, build.id);
+      await finishBuild(db, second.build.id);
     }
   });
 
@@ -176,6 +181,121 @@ describe("project state machine", () => {
 
     const draft = await createProject(db, { name: `p ${randomUUID()}` });
     await expect(stopProject(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe("the change queue", () => {
+  // A project whose build is running, as after approving its spec.
+  const building = async () => {
+    const fake = fakeWorkflows();
+    const { project, build } = await approveSpec(fake.deps, (await specReady()).id);
+    return { ...fake, project, build };
+  };
+  const pass = async (buildId: number, projectId: number) => {
+    await finishBuild(db, buildId);
+    await db.update(projects).set({ status: "live" }).where(eq(projects.id, projectId));
+  };
+
+  it("queues changes behind the running build and starts them oldest first after each pass", async () => {
+    const { deps, workflows, project, build } = await building();
+
+    const first = await requestChange(deps, { id: project.id, request: "first" });
+    const second = await requestChange(deps, { id: project.id, request: "second" });
+
+    expect([first.build.status, second.build.status]).toEqual(["queued", "queued"]);
+    expect(workflows.start).toHaveBeenCalledTimes(1);
+    const detail = await getProject(db, project.id);
+    expect(detail.latestBuild?.id).toBe(build.id);
+    expect(detail.queued.map((queued) => queued.request)).toEqual(["first", "second"]);
+
+    await pass(build.id, project.id);
+    expect((await startNextChange(deps, project.id))?.id).toBe(first.build.id);
+    // Repeating it (an activity retry) does not start the second while the first runs.
+    expect(await startNextChange(deps, project.id)).toBeUndefined();
+    expect((await getBuild(db, first.build.id)).status).toBe("running");
+    expect((await getBuild(db, second.build.id)).status).toBe("queued");
+    expect((await findProject(db, project.id)).status).toBe("building");
+    expect(workflows.start).toHaveBeenLastCalledWith(
+      "buildWorkflow",
+      expect.objectContaining({ workflowId: `build-${first.build.id}` })
+    );
+
+    await pass(first.build.id, project.id);
+    expect((await startNextChange(deps, project.id))?.id).toBe(second.build.id);
+    await pass(second.build.id, project.id);
+    expect(await startNextChange(deps, project.id)).toBeUndefined();
+  });
+
+  it("starts at most one of many changes requested at once", async () => {
+    const { deps } = fakeWorkflows();
+    const ready = await specReady();
+    await transition(db, ready.id, ["spec_ready"], { status: "live" });
+
+    const results = await Promise.all(
+      ["a", "b", "c", "d"].map((request) => requestChange(deps, { id: ready.id, request }))
+    );
+
+    expect(results.map((result) => result.build.status).sort()).toEqual([
+      "queued",
+      "queued",
+      "queued",
+      "running",
+    ]);
+    for (const { build } of results) await finishBuild(db, build.id);
+  });
+
+  it("starts at most one change when the queue is moved on twice at once", async () => {
+    const { deps, project, build } = await building();
+    await requestChange(deps, { id: project.id, request: "a" });
+    await requestChange(deps, { id: project.id, request: "b" });
+    await pass(build.id, project.id);
+
+    const started = await Promise.all([
+      startNextChange(deps, project.id),
+      startNextChange(deps, project.id),
+    ]);
+
+    expect(started.filter(Boolean)).toHaveLength(1);
+    await finishBuild(db, started.find(Boolean)!.id);
+  });
+
+  it("leaves the queue waiting after a failed or canceled build", async () => {
+    const { deps, project, build } = await building();
+    const queued = await requestChange(deps, { id: project.id, request: "later" });
+    await finishBuild(db, build.id, "Build canceled");
+    await transition(db, project.id, ["building"], { status: "failed" });
+
+    expect(await startNextChange(deps, project.id)).toBeUndefined();
+    expect((await getBuild(db, queued.build.id)).status).toBe("queued");
+
+    // A new change on the failed project is the retry: it starts now, ahead of the queue.
+    const retry = await requestChange(deps, { id: project.id, request: "try again" });
+    expect(retry.build.status).toBe("running");
+    await pass(retry.build.id, project.id);
+    expect((await startNextChange(deps, project.id))?.id).toBe(queued.build.id);
+    await finishBuild(db, queued.build.id);
+  });
+
+  it("edits and removes a queued change, and refuses once it has started", async () => {
+    const { deps, project, build } = await building();
+    const kept = await requestChange(deps, { id: project.id, request: "tpyo" });
+    const dropped = await requestChange(deps, { id: project.id, request: "never mind" });
+
+    expect((await editQueuedChange(db, { buildId: kept.build.id, request: "typo" })).request).toBe(
+      "typo"
+    );
+    await removeQueuedChange(db, dropped.build.id);
+    expect((await getProject(db, project.id)).queued.map((queued) => queued.request)).toEqual([
+      "typo",
+    ]);
+
+    await expect(editQueuedChange(db, { buildId: build.id, request: "x" })).rejects.toBeInstanceOf(
+      ConflictError
+    );
+    await expect(removeQueuedChange(db, build.id)).rejects.toBeInstanceOf(ConflictError);
+    await expect(removeQueuedChange(db, dropped.build.id)).rejects.toBeInstanceOf(NotFoundError);
+    expect((await getBuild(db, build.id)).request).toBe("## Features");
+    await finishBuild(db, build.id);
   });
 });
 

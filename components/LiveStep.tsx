@@ -18,7 +18,8 @@ const TOKEN_FIELDS = [
 
 type Props = { readonly project: Project; readonly usage: Usage };
 
-// After a build: a box to request a change, and what the project has cost so far.
+// During and after a build: a box to request a change (it waits its turn while a build runs), and
+// what the project has cost so far.
 export function LiveStep({ project, usage }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
@@ -41,7 +42,11 @@ export function LiveStep({ project, usage }: Props) {
       <form onSubmit={onSubmit} className={stepStyles.form}>
         <h3 className={styles.formTitle}>{copy.project.changeTitleForm}</h3>
         <p className={stepStyles.muted}>
-          {project.status === "failed" ? copy.project.changeRetryIntro : copy.project.changeIntro}
+          {project.status === "failed"
+            ? copy.project.changeRetryIntro
+            : project.status === "building"
+              ? copy.project.changeQueueIntro
+              : copy.project.changeIntro}
         </p>
         <label htmlFor="change-request">{copy.project.changeLabel}</label>
         <textarea

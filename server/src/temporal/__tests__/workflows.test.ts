@@ -13,9 +13,10 @@ import { join } from "node:path";
 import { Context } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
+import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { builds } from "../../db/schema.ts";
+import { builds, projects } from "../../db/schema.ts";
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
@@ -37,9 +38,14 @@ type Options = {
   readonly fixOnRun: number;
   readonly interruptFirstAgentRun?: boolean;
   readonly cancelDuringPrepare?: boolean;
+  // Requests queued behind the build; each starts after the one before it passes.
+  readonly queued?: readonly string[];
 };
 
-const setup = ({ fixOnRun, interruptFirstAgentRun, cancelDuringPrepare }: Options) => {
+const setup = (
+  { fixOnRun, interruptFirstAgentRun, cancelDuringPrepare }: Options,
+  taskQueue: string
+) => {
   const root = mkdtempSync(join(tmpdir(), "schmeide-wf-"));
   const dataDir = join(root, "data");
   mkdirSync(join(dataDir, "bin"), { recursive: true });
@@ -70,7 +76,8 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
 `
   );
   chmodSync(agent, 0o755);
-  const activities = createActivities(db, {
+  const deps = { db, workflows: env.client.workflow, taskQueue };
+  const activities = createActivities(deps, {
     dataDir,
     template,
     agentModel: "opus",
@@ -92,20 +99,32 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     if (cancelDuringPrepare) await new Promise((resolve) => setTimeout(resolve, 2000));
     return activities.prepareWorkspace(buildId);
   };
-  // Deploying needs Docker and a real app.
-  const deploy = async () => undefined;
+  // Deploying needs Docker and a real app; only its effect on the project is kept.
+  const deploy = async (buildId: number) => {
+    const { projectId } = await getBuild(db, buildId);
+    await db.update(projects).set({ status: "live" }).where(eq(projects.id, projectId));
+  };
   return { activities: { ...activities, prepareWorkspace, runAgent, deploy }, runPrompts };
 };
 
 const runBuild = async (options: Options) => {
-  const { activities, runPrompts } = setup(options);
+  const taskQueue = `test-${randomUUID()}`;
+  const { activities, runPrompts } = setup(options, taskQueue);
   const project = await createProject(db, { name: `wf ${randomUUID()}` });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)
     .values({ projectId: project.id, kind: "initial", request: "spec" })
     .returning();
-  const taskQueue = `test-${randomUUID()}`;
+  const queued = await Promise.all(
+    (options.queued ?? []).map(async (request) => {
+      const [row] = await db
+        .insert(builds)
+        .values({ projectId: project.id, kind: "change", request, status: "queued" })
+        .returning();
+      return row;
+    })
+  );
   const worker = await Worker.create({
     connection: env.nativeConnection,
     taskQueue,
@@ -122,13 +141,23 @@ const runBuild = async (options: Options) => {
       await new Promise((resolve) => setTimeout(resolve, 500));
       await handle.cancel();
     }
-    return handle.result().then(
+    const outcome = await handle.result().then(
       () => "passed",
       () => "failed"
     );
+    for (const row of outcome === "passed" ? queued : []) {
+      await env.client.workflow.getHandle(`build-${row.id}`).result();
+    }
+    return outcome;
   });
   const events = (await listEvents(db, build.id, 0)).map((event) => event.message);
-  return { outcome, build: await getBuild(db, build.id), prompts: runPrompts(), events };
+  return {
+    outcome,
+    build: await getBuild(db, build.id),
+    queued: await Promise.all(queued.map((row) => getBuild(db, row.id))),
+    prompts: runPrompts(),
+    events,
+  };
 };
 
 describe("buildWorkflow check and fix loop", () => {
@@ -188,5 +217,28 @@ describe("buildWorkflow check and fix loop", () => {
     ]);
     expect(build.error).toBe("Build canceled");
     expect(build.finishedAt!.getTime() - build.startedAt.getTime()).toBeGreaterThanOrEqual(2000);
+  }, 120_000);
+
+  it("starts the queued changes one after another once the build passes", async () => {
+    const { outcome, queued, prompts } = await runBuild({
+      fixOnRun: 1,
+      queued: ["add due dates", "sort by date"],
+    });
+
+    expect(outcome).toBe("passed");
+    expect(queued.map((build) => build.status)).toEqual(["passed", "passed"]);
+    expect(queued[0].finishedAt!.getTime()).toBeLessThanOrEqual(queued[1].startedAt.getTime());
+    expect(prompts.map((prompt) => prompt.split("Change request:\n\n")[1])).toEqual([
+      undefined,
+      "add due dates",
+      "sort by date",
+    ]);
+  }, 120_000);
+
+  it("leaves queued changes waiting when the build fails", async () => {
+    const { outcome, queued } = await runBuild({ fixOnRun: 99, queued: ["add due dates"] });
+
+    expect(outcome).toBe("failed");
+    expect(queued.map((build) => build.status)).toEqual(["queued"]);
   }, 120_000);
 });

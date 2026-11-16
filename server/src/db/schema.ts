@@ -50,7 +50,8 @@ export const projects = pgTable("projects", {
 });
 
 export const buildKind = pgEnum("build_kind", ["initial", "change"]);
-export const buildStatus = pgEnum("build_status", ["running", "passed", "failed"]);
+// `queued`: a change waiting for the project's running build; it starts once that one passes.
+export const buildStatus = pgEnum("build_status", ["queued", "running", "passed", "failed"]);
 
 export const builds = pgTable("builds", {
   id: serial("id").primaryKey(),
@@ -120,8 +121,14 @@ export const changeRequestSchema = createInsertSchema(builds, {
   .pick({ request: true })
   .extend({ id: projectId });
 
+const buildId = createSelectSchema(builds).shape.id;
+
+export const buildIdSchema = z.object({ buildId });
+
+export const editChangeSchema = changeRequestSchema.omit({ id: true }).extend({ buildId });
+
 export const eventsQuerySchema = z.object({
-  buildId: createSelectSchema(builds).shape.id,
+  buildId,
   afterId: z.number().int().min(0).default(0),
 });
 

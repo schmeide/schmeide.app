@@ -8,11 +8,13 @@ import { ErrorNote } from "./ErrorNote";
 import { FeaturesStep } from "./FeaturesStep";
 import { LiveStep } from "./LiveStep";
 import { ProjectActions } from "./ProjectActions";
+import { QueuedChanges } from "./QueuedChanges";
 import { SpecStep } from "./SpecStep";
 
 import styles from "./ProjectPage.module.css";
 
-const AFTER_BUILD: readonly ProjectStatus[] = ["live", "failed", "stopped"];
+// A change can be requested once a build exists; while one runs, it waits in the queue.
+const CHANGEABLE: readonly ProjectStatus[] = ["building", "live", "failed", "stopped"];
 
 // One project, walked through in order: features, spec, build, the live app.
 export function ProjectPage({ id }: { readonly id: number }) {
@@ -57,7 +59,7 @@ export function ProjectPage({ id }: { readonly id: number }) {
     );
   }
 
-  const { project, latestBuild, usage } = query.data;
+  const { project, latestBuild, queued, usage } = query.data;
   return (
     <article>
       {back}
@@ -89,7 +91,8 @@ export function ProjectPage({ id }: { readonly id: number }) {
         <SpecStep project={project} onChangeFeatures={() => setEditingFeatures(true)} />
       )}
       {latestBuild && <BuildStep key={latestBuild.id} build={latestBuild} />}
-      {AFTER_BUILD.includes(project.status) && <LiveStep project={project} usage={usage} />}
+      <QueuedChanges queued={queued} />
+      {CHANGEABLE.includes(project.status) && <LiveStep project={project} usage={usage} />}
       <ProjectActions project={project} onStop={() => setStoppingAt(project.updatedAt.getTime())} />
     </article>
   );

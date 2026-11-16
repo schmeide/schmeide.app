@@ -32,7 +32,7 @@ describe("App", () => {
     window.location.hash = "#/projects/7";
     renderWithApi(<App isPublicSite />, {
       "projects.list": () => [aProject()],
-      "projects.get": () => ({ project: aProject(), latestBuild: null, usage: {} }),
+      "projects.get": () => ({ project: aProject(), latestBuild: null, queued: [], usage: {} }),
     });
     expect(await screen.findByRole("heading", { level: 1, name: "Invoices" })).toBeInTheDocument();
   });

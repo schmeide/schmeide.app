@@ -1,5 +1,5 @@
-import type { WorkflowClient } from "@temporalio/client";
-import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
+import { and, asc, desc, eq, inArray, like, ne, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
@@ -17,8 +17,8 @@ import type {
   specWorkflow,
   stopWorkflow,
 } from "../temporal/workflows.ts";
-import { appendEvent, finishBuild } from "./builds.ts";
-import { BuildRunningError, ConflictError, NotFoundError } from "./errors.ts";
+import { appendEvent, finishBuild, getBuild } from "./builds.ts";
+import { ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
@@ -109,14 +109,24 @@ export type UsageTotals = {
 export const getProject = async (
   db: Db,
   id: number
-): Promise<{ project: Project; latestBuild: Build | null; usage: UsageTotals }> => {
+): Promise<{
+  project: Project;
+  latestBuild: Build | null;
+  queued: readonly Build[];
+  usage: UsageTotals;
+}> => {
   const project = await findProject(db, id);
   const [latestBuild] = await db
     .select()
     .from(builds)
-    .where(eq(builds.projectId, id))
+    .where(and(eq(builds.projectId, id), ne(builds.status, "queued")))
     .orderBy(desc(builds.id))
     .limit(1);
+  const queued = await db
+    .select()
+    .from(builds)
+    .where(and(eq(builds.projectId, id), eq(builds.status, "queued")))
+    .orderBy(asc(builds.id));
   const [totals] = await db
     .select({
       inputTokens: total(usage.inputTokens),
@@ -127,7 +137,7 @@ export const getProject = async (
     })
     .from(usage)
     .where(eq(usage.projectId, id));
-  return { project, latestBuild: latestBuild ?? null, usage: totals };
+  return { project, latestBuild: latestBuild ?? null, queued, usage: totals };
 };
 
 // Moves a project between statuses only if it is in one of `from`; this is the state machine.
@@ -178,43 +188,155 @@ export const generateSpec = async (
   });
 };
 
+// Every decision about which of a project's builds runs (start now or queue, the queue moving on,
+// editing or removing a queued change) takes this lock first, so two of them never interleave.
+// It is also what keeps a project to one running build: its builds share the workspace.
+const lockProject = async (tx: Db, id: number): Promise<Project> => {
+  const [project] = await tx.select().from(projects).where(eq(projects.id, id)).for("update");
+  if (!project) throw new NotFoundError(`Project ${id} not found`);
+  return project;
+};
+
+const hasRunningBuild = async (tx: Db, projectId: number): Promise<boolean> =>
+  (
+    await tx
+      .select({ id: builds.id })
+      .from(builds)
+      .where(and(eq(builds.projectId, projectId), eq(builds.status, "running")))
+      .limit(1)
+  ).length > 0;
+
+// Called inside the transaction that marks the build running, so a failed start rolls it back. A
+// repeated start (an activity retried after its first start went through) leaves the run alone.
+const startWorkflow = async ({ workflows, taskQueue }: Deps, build: Build): Promise<void> => {
+  try {
+    await workflows.start<typeof buildWorkflow>("buildWorkflow", {
+      taskQueue,
+      workflowId: `build-${build.id}`,
+      args: [build.projectId, build.id],
+    });
+  } catch (error) {
+    if (!(error instanceof WorkflowExecutionAlreadyStartedError)) throw error;
+  }
+};
+
 const startBuild = async (
-  { db, workflows, taskQueue }: Deps,
+  deps: Deps,
+  tx: Db,
   id: number,
   from: readonly Status[],
   kind: Build["kind"],
   request: (project: Project) => string
 ): Promise<{ project: Project; build: Build }> => {
-  // ponytail: one build at a time across all tenants; a task queue per tenant in production
-  const [running] = await db
-    .select({ id: builds.id })
-    .from(builds)
-    .where(eq(builds.status, "running"))
-    .limit(1);
-  if (running)
-    throw new BuildRunningError(`Build ${running.id} is still running; wait for it to finish`);
-  return db.transaction(async (tx) => {
-    const project = await transition(tx as unknown as Db, id, from, { status: "building" });
-    const [build] = await tx
-      .insert(builds)
-      .values({ projectId: id, kind, request: request(project) })
-      .returning();
-    await workflows.start<typeof buildWorkflow>("buildWorkflow", {
-      taskQueue,
-      workflowId: `build-${build.id}`,
-      args: [id, build.id],
-    });
-    return { project, build };
-  });
+  // ponytail: builds of different projects run side by side on one worker; a task queue per tenant in production
+  const project = await transition(tx, id, from, { status: "building" });
+  const [build] = await tx
+    .insert(builds)
+    .values({ projectId: id, kind, request: request(project) })
+    .returning();
+  await startWorkflow(deps, build);
+  return { project, build };
 };
 
 export const approveSpec = (deps: Deps, id: number) =>
-  startBuild(deps, id, ["spec_ready"], "initial", (project) => project.spec ?? "");
+  deps.db.transaction((tx) =>
+    startBuild(
+      deps,
+      tx as unknown as Db,
+      id,
+      ["spec_ready"],
+      "initial",
+      (project) => project.spec ?? ""
+    )
+  );
 
+// Starts the change now, or queues it behind the project's running build. On a failed or offline
+// project it starts now even with changes queued: it is the retry, and the queue follows it.
 export const requestChange = (
   deps: Deps,
   input: { readonly id: number; readonly request: string }
-) => startBuild(deps, input.id, ["live", "failed", "stopped"], "change", () => input.request);
+): Promise<{ project: Project; build: Build }> =>
+  deps.db.transaction(async (raw) => {
+    const tx = raw as unknown as Db;
+    const project = await lockProject(tx, input.id);
+    if (project.status === "building" || (await hasRunningBuild(tx, input.id))) {
+      const [build] = await tx
+        .insert(builds)
+        .values({ projectId: input.id, kind: "change", request: input.request, status: "queued" })
+        .returning();
+      return { project, build };
+    }
+    return startBuild(
+      deps,
+      tx,
+      input.id,
+      ["live", "failed", "stopped"],
+      "change",
+      () => input.request
+    );
+  });
+
+// When a build passes: starts the project's oldest queued change. Safe to repeat (an activity retry,
+// or a restart replaying it): it does nothing while a build runs or the project is not live, so a
+// failed or canceled build leaves the queue waiting until a later build passes.
+export const startNextChange = (deps: Deps, projectId: number): Promise<Build | undefined> =>
+  deps.db.transaction(async (raw) => {
+    const tx = raw as unknown as Db;
+    const project = await lockProject(tx, projectId);
+    if (project.status !== "live" || (await hasRunningBuild(tx, projectId))) return undefined;
+    const [next] = await tx
+      .select({ id: builds.id })
+      .from(builds)
+      .where(and(eq(builds.projectId, projectId), eq(builds.status, "queued")))
+      .orderBy(asc(builds.id))
+      .limit(1);
+    if (!next) return undefined;
+    await transition(tx, projectId, ["live"], { status: "building" });
+    const [build] = await tx
+      .update(builds)
+      .set({ status: "running", startedAt: new Date() })
+      .where(eq(builds.id, next.id))
+      .returning();
+    await startWorkflow(deps, build);
+    return build;
+  });
+
+// Changes a queued change's request or removes it; refused once it has started.
+const changeQueued = async (
+  db: Db,
+  buildId: number,
+  apply: (tx: Db) => Promise<readonly Build[]>
+): Promise<Build> => {
+  const { projectId } = await getBuild(db, buildId);
+  return db.transaction(async (raw) => {
+    const tx = raw as unknown as Db;
+    await lockProject(tx, projectId);
+    const [build] = await apply(tx);
+    if (!build)
+      throw new ConflictError("This change has already started, so it can no longer be changed");
+    return build;
+  });
+};
+
+export const editQueuedChange = (
+  db: Db,
+  input: { readonly buildId: number; readonly request: string }
+): Promise<Build> =>
+  changeQueued(db, input.buildId, (tx) =>
+    tx
+      .update(builds)
+      .set({ request: input.request })
+      .where(and(eq(builds.id, input.buildId), eq(builds.status, "queued")))
+      .returning()
+  );
+
+export const removeQueuedChange = (db: Db, buildId: number): Promise<Build> =>
+  changeQueued(db, buildId, (tx) =>
+    tx
+      .delete(builds)
+      .where(and(eq(builds.id, buildId), eq(builds.status, "queued")))
+      .returning()
+  );
 
 // A running build is canceled; otherwise the deployment is taken down.
 export const stopProject = async (
@@ -272,7 +394,7 @@ export const ORPHANED_BUILD =
   "The Schmeide server stopped while this build ran, and the build could not be resumed. Request a change to try again.";
 
 // At startup: a build still marked running whose workflow is gone (Temporal restarted) or ended
-// without recording it would block every new build forever. A workflow still running resumes on its own.
+// without recording it would hold its project at one running build forever, queuing every change. A workflow still running resumes on its own.
 export const failOrphanedBuilds = async ({ db, workflows }: Deps): Promise<void> => {
   const running = await db.select().from(builds).where(eq(builds.status, "running"));
   for (const build of running) {

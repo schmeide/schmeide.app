@@ -66,15 +66,15 @@ const connection = await Connection.connect({ address: temporalAddress }).catch(
   }
 );
 const client = new Client({ connection });
+const deps = { db, workflows: client.workflow, taskQueue } as const;
 
 const worker = await Worker.create({
   connection: await NativeConnection.connect({ address: temporalAddress }),
   taskQueue,
   workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
-  activities: createActivities(db, config),
+  activities: createActivities(deps, config),
 });
 
-const deps = { db, workflows: client.workflow, taskQueue } as const;
 await failOrphanedBuilds(deps);
 const app = buildApp(deps, true);
 
