@@ -1,0 +1,48 @@
+/* The request boxes: one input per request, a quiet remove beside each, and an add button below. */
+.requests {
+  display: grid;
+  gap: var(--space-s);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.requests legend {
+  margin-bottom: var(--space-s);
+  padding: 0;
+  font-weight: 600;
+}
+
+.list {
+  display: grid;
+  gap: var(--space-s);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  gap: var(--space-s);
+  align-items: center;
+}
+
+.row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Quiet: no border until hovered, muted text, but still a full-size target. */
+.remove {
+  flex: none;
+  min-width: var(--hit-target);
+  padding-inline: var(--space-m);
+  border-color: transparent;
+  color: var(--color-muted);
+  font-weight: 500;
+}
+
+.add {
+  justify-self: start;
+}

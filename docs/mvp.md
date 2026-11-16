@@ -1,6 +1,6 @@
 # Dev-mode MVP
 
-A minimal, local version of the Schmeide software factory: create a project, type features, review
+A minimal, local version of the Schmeide software factory: create a project, list what the app should do, review
 a plain-language spec, approve it, and a Claude agent builds the app from the
 [Schmeide template](https://github.com/schmeide/template), the server checks it independently, and
 deploys it on this machine. There is no auth; everything belongs to the seeded `demo` tenant.
@@ -10,7 +10,8 @@ deploys it on this machine. There is no auth; everything belongs to the seeded `
 1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
 2. `make serve`, and leave it running (Ctrl-C stops it).
 3. Open <http://localhost:5173>, type a project name, and press "Create project".
-4. Type one feature per line, press "Write the spec", read it, and press "Approve and build".
+4. Type one request per box ("Add another request" or Enter adds a box), press "Write the spec",
+   read it, and press "Approve and build".
 5. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
 
 ## What to expect
@@ -30,7 +31,7 @@ subscription they count against its usage limits rather than being billed):
   the to-do list, 110 for the contact book). It can sit on one line for a minute while tests run.
 - Of the build time, the agent takes most; the server's own checks take about 15 seconds and
   publishing about 10.
-- The sample invoicing features are about the size of the contact book: expect roughly 10 minutes
+- The sample invoicing requests are about the size of the contact book: expect roughly 10 minutes
   and $2 to $3.
 - The change on the contact book was interrupted by stopping and restarting `make serve` mid-run; it
   resumed and passed.
@@ -79,10 +80,12 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install or log in to.
 
 1. **Create a project**: type a name and press "Create project". The project page opens.
-2. **Features**: one feature per line, in plain words (the [sample invoicing features](#sample-invoicing-features)
-   work). "Save" keeps them; "Write the spec" saves and starts the spec.
+2. **What your app should do**: one request per box, in plain words. "Add another request" or Enter in a box adds a
+   box below it, "Remove" drops one, and empty boxes are ignored. Pasting a list of several lines into a box puts each
+   line in its own box (the [sample invoicing requests](#sample-invoicing-requests) work). "Save" keeps them; "Write
+   the spec" saves and starts the spec.
 3. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
-   "Change the features", which warns first that saving new features throws the spec away.
+   "Change the requests", which warns first that saving new requests throws the spec away.
 4. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
    Problem) with the server's own message. A failed build shows what went wrong.
 5. **Your app**: "Open your app" at the top of the page opens the preview in a new tab. "Request a change"
@@ -103,9 +106,9 @@ API and shows the "Coming soon" page instead.
 
 | Status shown         | Server status     | Meaning                                                  |
 | -------------------- | ----------------- | -------------------------------------------------------- |
-| Describing           | `draft`           | Features being written; no spec yet                      |
+| Describing           | `draft`           | Requests being written; no spec yet                      |
 | Writing the spec     | `spec_generating` | The spec is being written                                |
-| Spec ready to review | `spec_ready`      | Approve it, or change the features (discards the spec)   |
+| Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec)   |
 | Building             | `building`        | A build or change build is running                       |
 | Live                 | `live`            | The app is running at its preview link                   |
 | Build failed         | `failed`          | The last build failed or was canceled; request a change  |
@@ -129,9 +132,9 @@ volumes, workspace, and rows) whether it passed or failed. It exits non-zero on 
 - `KEEP=1` on either leaves the app running and prints its preview URL and the `projects.delete`
   command that removes it (that needs `make serve` running).
 
-## Sample invoicing features
+## Sample invoicing requests
 
-Paste into the features box for a hand-run demo:
+For a hand-run demo, copy the whole list and paste it into the first request box; each line lands in its own box:
 
 ```text
 Keep a list of my clients with their name, email, and address
@@ -149,7 +152,8 @@ Print an invoice as a clean page I can save as a PDF
 ## The flow
 
 1. `projects.create({ name })`: status `draft`; a slug and web port (8100, 8101, ...) are assigned.
-2. `projects.setFeatures({ id, features })`: one feature per line; clears any earlier spec.
+2. `projects.setFeatures({ id, features })`: one request per line (the UI joins its boxes with newlines); clears
+   any earlier spec.
 3. `projects.generateSpec({ id })`: status `spec_generating`, then `spec_ready` with a markdown spec
    (Features, Screens, Data it stores). Failure returns to `draft`.
 4. `projects.approveSpec({ id })`: status `building`; starts `buildWorkflow`:
