@@ -4,9 +4,11 @@ import { observable } from "@trpc/server/observable";
 import { render } from "@testing-library/react";
 import type { ReactNode } from "react";
 
+import { SessionProvider } from "../SessionProvider";
 import type { AppRouter } from "../../server/src/router.ts";
 import type { Build, BuildEvent, Project, Usage } from "../../trpc";
 import { TRPCProvider } from "../../trpc";
+import type { Session } from "../../utils/session";
 
 type Input = Readonly<Record<string, unknown>>;
 export type Handlers = Readonly<Record<string, (input: Input) => unknown>>;
@@ -56,14 +58,15 @@ const fakeLink =
         );
     });
 
-export const renderWithApi = (ui: ReactNode, handlers: Handlers) => {
+// `session` is who is signed in; left out, it is the dev stand-in owner with one business.
+export const renderWithApi = (ui: ReactNode, handlers: Handlers, session?: Session) => {
   const calls: Call[] = [];
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const trpcClient = createTRPCClient<AppRouter>({ links: [fakeLink(handlers, calls)] });
   render(
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        {ui}
+        <SessionProvider initial={session}>{ui}</SessionProvider>
       </TRPCProvider>
     </QueryClientProvider>
   );

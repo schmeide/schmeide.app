@@ -57,8 +57,9 @@ For a pure refactor, run the existing tests before and after.
 - A Vite + React + TypeScript app, built to static files and served by GitHub
   Pages. In dev (`make serve`) it is the project UI over the `server/` tRPC API
   at `/api/trpc`; the Pages build has no API and shows the "Coming soon" hero.
-- No router, state library, or CSS framework. Do not introduce one without a
-  reason in the PR body.
+- No router library, state library, or CSS framework. Do not introduce one
+  without a reason in the PR body. Routing is our own: path routes on the
+  History API, one table in `utils/routes.ts`.
 - Runtime dependencies are `react`, `react-dom`, and the tRPC client stack
   (`@trpc/client`, `@trpc/tanstack-react-query`, `@tanstack/react-query`,
   `superjson`). Anything new belongs in
@@ -74,12 +75,17 @@ For a pure refactor, run the existing tests before and after.
 - `main.tsx`: entry point. Imports `assets/main.css` and mounts `<App />`.
 - `App.tsx`: root layout. Composition only, no page content.
 - `components/`: one public component per file (`Hero.tsx`), with its styles in
-  a sibling CSS module (`Hero.module.css`).
+  a sibling CSS module (`Hero.module.css`). `Shell.tsx` is the frame around
+  every page; `Routes.tsx` picks the page for the address and `RoutePage.tsx`
+  maps each route to its page.
 - `components/__tests__/`: Vitest specs, named `<Component>.test.tsx`.
 - `data/copy.ts`: every string that appears on the page, plus outbound URLs.
   Components import from here; they do not hardcode copy.
 - `utils/`: pure TypeScript logic that needs no React, tested under
-  `utils/__tests__/`. Create it when the first such function exists.
+  `utils/__tests__/`. `utils/routes.ts` is the route table and its guards:
+  add a route there, give it a title in `data/copy.ts` and a page in
+  `components/RoutePage.tsx`. Link to it with `<Link to={pathTo(name)}>`, never
+  a hardcoded path.
 - `assets/`: global styles and bundled static assets.
 - `public/`: files copied verbatim into the build (`CNAME`, favicon, images).
 - `vite.config.ts`: dev server, build, and Vitest config in one file.

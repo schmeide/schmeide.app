@@ -99,10 +99,16 @@ Open <http://localhost:5173> after `make serve`. The page is the whole tool; the
 7. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
    asks first and removes the running app, its data, the code, the spec, and the build history.
 
-The URL hash is the view (`#/` for the list, `#/projects/<id>` for a project), so refresh and Back work. Different
-projects build at the same time; one project runs one build at a time, because its builds share its workspace. If
-the server is not running, the page says to start it with `make serve`. The production build (GitHub Pages) has no
-API and shows the "Coming soon" page instead.
+Every page sits in the app shell: the logo (back to the list), the business name, the navigation (Apps, Usage,
+Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal links in the footer. The
+pages other than the project list and a project say "This page is not built yet". There are no accounts, so everyone
+is the "Demo owner" of the "Demo business"; "Sign out" in the account menu shows the signed-out state until "Sign in"
+or a reload.
+
+The address is the view (`/` for the list, `/projects/<id>` for a project; the full table is `utils/routes.ts`), so
+refresh and Back work. Different projects build at the same time; one project runs one build at a time, because its
+builds share its workspace. If the server is not running, the page says to start it with `make serve`. The production
+build (GitHub Pages) has no API and shows the "Coming soon" page instead, with no shell.
 
 | Status shown         | Server status     | Meaning                                                  |
 | -------------------- | ----------------- | -------------------------------------------------------- |

@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import superjson from "superjson";
 
 import { App } from "./App";
+import { SessionProvider } from "./components/SessionProvider";
 import type { AppRouter } from "./server/src/router.ts";
 import { TRPCProvider } from "./trpc";
 
@@ -23,7 +24,9 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
-        <App />
+        <SessionProvider>
+          <App />
+        </SessionProvider>
       </TRPCProvider>
     </QueryClientProvider>
   </StrictMode>

@@ -12,7 +12,7 @@ const unreachable = {
 
 describe("App", () => {
   beforeEach(() => {
-    window.location.hash = "";
+    window.history.replaceState(null, "", "/");
   });
 
   it("shows the coming-soon hero on the public site, where there is no API", async () => {
@@ -28,8 +28,8 @@ describe("App", () => {
     expect(screen.getByText(copy.errors.serverDown)).toHaveTextContent("make serve");
   });
 
-  it("shows the project tool when the API answers, and opens a project from the hash", async () => {
-    window.location.hash = "#/projects/7";
+  it("shows the project tool when the API answers, and opens a project from its address", async () => {
+    window.history.replaceState(null, "", "/projects/7");
     renderWithApi(<App isPublicSite />, {
       "projects.list": () => [aProject()],
       "projects.get": () => ({

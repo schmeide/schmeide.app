@@ -1,14 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { copy } from "../data/copy";
 import { POLL_MS, useTRPC, type ProjectStatus } from "../trpc";
+import { classifyError } from "../utils/apiError";
+import { pathTo } from "../utils/routes";
 import { BuildStep } from "./BuildStep";
 import { ErrorNote } from "./ErrorNote";
 import { FeaturesStep } from "./FeaturesStep";
 import { LiveStep } from "./LiveStep";
 import { ProjectActions } from "./ProjectActions";
+import { Link } from "./Link";
 import { QueuedChanges } from "./QueuedChanges";
+import { RouteProblem } from "./RouteProblem";
 import { SiteStep } from "./SiteStep";
 import { SpecStep } from "./SpecStep";
 
@@ -46,12 +50,22 @@ export function ProjectPage({ id }: { readonly id: number }) {
     setSeen({ status, specFailed: seen.status === "spec_generating" && status === "draft" });
   }
 
+  // The tab is named after the project once it is known; until then it keeps the route's title.
+  const name = query.data?.project.name;
+  useEffect(() => {
+    if (name) document.title = copy.pageTitle(name);
+  }, [name]);
+
   const back = (
-    <a href="#/" className={styles.back}>
+    <Link to={pathTo("apps")} className={styles.back}>
       {copy.project.back}
-    </a>
+    </Link>
   );
   if (!query.data) {
+    // A project of a business the person is not in.
+    if (query.error && classifyError(query.error) === "forbidden") {
+      return <RouteProblem kind="noAccess" />;
+    }
     return (
       <>
         {back}

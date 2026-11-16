@@ -7,7 +7,7 @@ import { aProject, renderWithApi } from "./fakeApi";
 
 describe("ProjectList", () => {
   beforeEach(() => {
-    window.location.hash = "";
+    window.history.replaceState(null, "", "/");
   });
 
   it("explains what to do first when there are no projects", async () => {
@@ -24,10 +24,7 @@ describe("ProjectList", () => {
       ],
     });
     const links = await screen.findAllByRole("link");
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "#/projects/2",
-      "#/projects/1",
-    ]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["/projects/2", "/projects/1"]);
     expect(screen.getByText(copy.status.live.label)).toBeInTheDocument();
     expect(screen.getByText(copy.status.spec_ready.label)).toBeInTheDocument();
   });
@@ -40,6 +37,6 @@ describe("ProjectList", () => {
     await userEvent.type(await screen.findByLabelText(copy.list.nameLabel), "Invoices");
     await userEvent.click(screen.getByRole("button", { name: copy.list.create }));
     expect(calls).toContainEqual({ path: "projects.create", input: { name: "Invoices" } });
-    await waitFor(() => expect(window.location.hash).toBe("#/projects/12"));
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/12"));
   });
 });
