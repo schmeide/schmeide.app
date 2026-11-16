@@ -81,7 +81,7 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
   const activities = createActivities(deps, {
     dataDir,
     template,
-    agentModel: "opus",
+    agentModels: { fallback: "opus", byKind: {} },
     claudeBin: undefined,
     makeBin: "make",
     agentCmd: agent,

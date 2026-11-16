@@ -15,6 +15,7 @@ import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk"
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
 import { eq } from "drizzle-orm";
+import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
 import { projectIcons, projects, type BuildEventKind, type Project } from "../db/schema.ts";
 import {
@@ -41,7 +42,7 @@ export type { Query };
 export type Config = {
   readonly dataDir: string;
   readonly template: string;
-  readonly agentModel: string;
+  readonly agentModels: ModelRouting;
   readonly claudeBin: string | undefined;
   // GNU make 4+. Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS and fails every template target.
   readonly makeBin: string;
@@ -305,12 +306,12 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
       }).filter((entry): entry is [string, string] => entry[1] !== undefined)
     );
 
-  // Shared by spec and build runs. settingSources keeps the owner's user-level settings, hooks, and
+  // Shared by spec and build runs; only the model differs by run kind. settingSources keeps the owner's user-level settings, hooks, and
   // plugins out; claudeMdExcludes keeps out the user CLAUDE.md, which loads regardless of sources.
-  const agentOptions = (cwd: string, env: Record<string, string>): Options => ({
+  const agentOptions = (cwd: string, env: Record<string, string>, model: string): Options => ({
     cwd,
     env,
-    model: config.agentModel,
+    model,
     pathToClaudeCodeExecutable: config.claudeBin,
     settingSources: ["project"],
     settings: {
@@ -354,7 +355,11 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
               for await (const message of query({
                 prompt: prompt,
                 options: {
-                  ...agentOptions(config.dataDir, agentEnv(project)),
+                  ...agentOptions(
+                    config.dataDir,
+                    agentEnv(project),
+                    pickModel(config.agentModels, "spec").model
+                  ),
                   settingSources: [],
                   tools: [],
                   maxTurns: 1,
@@ -363,7 +368,7 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
                 },
               })) {
                 if (message.type !== "result") continue;
-                await recordUsage(db, usageRows(message, projectId, null));
+                await recordUsage(db, usageRows(message, projectId, null, "spec"));
                 if (message.subtype !== "success" || message.is_error) {
                   throw new Error(`Spec generation failed: ${message.subtype}`);
                 }
@@ -421,15 +426,12 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
     }): Promise<string> {
       const { build, project } = await projectOfBuild(input.buildId);
       const retried = Context.current().info.attempt > 1;
+      const runKind: RoutedKind = build.kind === "initial" ? "initial" : "change";
       const prompt =
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
         (input.feedback !== undefined
           ? checksFeedbackPrompt(input.feedback)
-          : buildPrompt(
-              build.kind === "initial" ? "initial" : "change",
-              project.spec ?? "",
-              build.request
-            ));
+          : buildPrompt(runKind, project.spec ?? "", build.request));
       await event(
         input.buildId,
         "step",
@@ -444,6 +446,8 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
         await event(input.buildId, "agent", `Fake agent ${config.agentCmd} finished`);
         return "fake-session";
       }
+      const { model, reason } = pickModel(config.agentModels, runKind);
+      await event(input.buildId, "agent", `Model ${model} for this ${runKind} run (${reason})`);
       return withHeartbeat(async (signal) => {
         const abortController = new AbortController();
         signal.addEventListener("abort", () => abortController.abort(), { once: true });
@@ -451,7 +455,7 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
         for await (const message of query({
           prompt,
           options: {
-            ...agentOptions(workspaceOf(project), agentEnv(project)),
+            ...agentOptions(workspaceOf(project), agentEnv(project), model),
             tools: AGENT_TOOLS,
             allowedTools: AGENT_ALLOWED_TOOLS,
             resume: input.resume,
@@ -476,7 +480,7 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
               if (line) await event(input.buildId, "agent", line);
             }
           } else if (message.type === "result") {
-            await recordUsage(db, usageRows(message, project.id, input.buildId));
+            await recordUsage(db, usageRows(message, project.id, input.buildId, runKind));
             for (const denial of message.permission_denials) {
               await event(
                 input.buildId,
