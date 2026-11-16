@@ -37,8 +37,10 @@ reasoning.
 Clear and concise. Under 80 characters for the subject line. If you need more
 context, add a body (120 char line limit).
 
-Lowercase, imperative mood: `123: add null check`, not `123: Added null check`.
-Put the issue number in the PR body too (`Closes #N`).
+Conventional commits, lowercase and imperative, with the issue number as the scope:
+`feat(123): add null check`, not `123: Added null check`. `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`,
+`perf`, `test`, `build`, `ci`, `chore` or `revert`. The PR title becomes the commit subject, and CI fails any title
+that is not in this form. Put the issue number in the PR body too (`Closes #N`).
 
 ## Code style
 
