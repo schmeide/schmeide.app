@@ -5,6 +5,50 @@ a plain-language spec, approve it, and a Claude agent builds the app from the
 [Schmeide template](https://github.com/schmeide/template), the server checks it independently, and
 deploys it on this machine. There is no auth; everything belongs to the seeded `demo` tenant.
 
+## Quick start
+
+1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
+2. `make serve`, and leave it running (Ctrl-C stops it).
+3. Open <http://localhost:5173>, type a project name, and press "Create project".
+4. Type one feature per line, press "Write the spec", read it, and press "Approve and build".
+5. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
+
+## What to expect
+
+Measured on this machine with `opus`, driven through the UI (costs are what Claude Code reports; with a
+subscription they count against its usage limits rather than being billed):
+
+| Run                                         | Features | Build time | Agent turns | Cost  |
+| ------------------------------------------- | -------- | ---------- | ----------- | ----- |
+| To-do list (`server/e2e/todo-features.txt`) | 2        | 2 min 56 s | 40          | $0.74 |
+| Change: a delete button per to-do           | 1        | 1 min 42 s | 29          | $0.40 |
+| Contact book                                | 9        | 8 min 40 s | 75          | $2.06 |
+| Change: sort contacts by name               | 1        | 2 min 7 s  | 9 + restart | $0.16 |
+
+- The spec takes under 10 seconds and costs under 2 cents.
+- The log under "What is happening" grows every few seconds while the agent works (about 70 lines for
+  the to-do list, 110 for the contact book). It can sit on one line for a minute while tests run.
+- Of the build time, the agent takes most; the server's own checks take about 15 seconds and
+  publishing about 10.
+- The sample invoicing features are about the size of the contact book: expect roughly 10 minutes
+  and $2 to $3.
+- The change on the contact book was interrupted by stopping and restarting `make serve` mid-run; it
+  resumed and passed.
+
+## When a build fails
+
+1. Read "What went wrong" on the project page; the last lines of the log say which step failed.
+2. Press "Request a change" with what to fix, or just "try again". The agent continues in the same
+   project with your note.
+3. "Checks still failing after 3 fix attempts" means the agent could not make `make check`,
+   `make test`, and `make build` pass; the output under "What went wrong" is the last failure.
+   Request a change that describes the problem.
+4. "did not answer 200 within 3 minutes" means the app built but would not start: run `make doctor`
+   (a port may be taken), then request a change.
+5. The full output of every command and every agent message is in `~/.schmeide/logs/build-<id>.log`.
+6. If the page says the server is unreachable, `make serve` stopped: start it again. A build that was
+   running continues.
+
 ## Run it
 
 ```sh
@@ -182,5 +226,8 @@ Each is marked in code with a `ponytail:` comment.
   A build whose workflow vanished is marked failed when the server next starts.
 - A step restarted after a server restart begins again: an agent run starts a new session (with a
   note to continue from the workspace), so it pays again for reading the project.
+- The Bash allowlist matches command prefixes, so shell loops (`for f in ...`) and some compound
+  commands are denied (logged as `Denied Bash: ...`); the agent retries another way, at the cost of a
+  turn. None of the measured runs failed because of it.
 - Deployments keep running until stopped. A new project takes the highest web port plus one, so
   ports below that are only reused once the projects above them are deleted.
