@@ -1,0 +1,49 @@
+# Infrastructure only: the server runs on the host because it drives the
+# locally logged-in `claude` CLI, git, make, and docker.
+services:
+  # Customer database: the source of truth for tenants, projects, and builds.
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: schmeide
+    ports:
+      - "5440:5432"
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck: &pg-ready
+      test: ["CMD-SHELL", "pg_isready -U postgres -d schmeide"]
+      interval: 1s
+      timeout: 5s
+      retries: 30
+
+  # Throwaway database for `make test`: no volume, data lives in memory.
+  test-db:
+    profiles: [test]
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: schmeide
+    ports:
+      - "5441:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck: *pg-ready
+
+  # ponytail: in-memory Temporal dev server, history is lost on restart; run a real Temporal cluster in production
+  temporal:
+    image: temporalio/temporal:1.9.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0"]
+    ports:
+      - "7233:7233"
+      - "8233:8233"
+    healthcheck:
+      test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  db-data:

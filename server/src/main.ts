@@ -1,0 +1,90 @@
+// The one process: Fastify + tRPC API and the Temporal worker. The only place that reads the environment.
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+import { Client, Connection } from "@temporalio/client";
+import { NativeConnection, Worker } from "@temporalio/worker";
+import { buildApp } from "./app.ts";
+import { createDb } from "./db/client.ts";
+import { TASK_QUEUE } from "./services/projects.ts";
+import { createActivities } from "./temporal/activities.ts";
+
+const env = process.env;
+const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide";
+const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
+const port = Number(env.PORT ?? 3100);
+const onPath = (name: string) =>
+  (env.PATH ?? "")
+    .split(delimiter)
+    .map((dir) => join(dir, name))
+    .find((path) => existsSync(path));
+const isGnuMake4 = (bin: string) =>
+  Number(/GNU Make (\d+)/.exec(execFileSync(bin, ["--version"]).toString())?.[1] ?? 0) >= 4;
+
+const claudeBin = env.SCHMEIDE_CLAUDE_BIN ?? onPath("claude");
+if (!claudeBin) {
+  console.error(
+    "claude is not on PATH. Install Claude Code and log in (`claude`), or set SCHMEIDE_CLAUDE_BIN."
+  );
+  process.exit(1);
+}
+
+const makeBin = [onPath("gmake"), onPath("make")].find((bin) => bin && isGnuMake4(bin));
+if (!makeBin) {
+  console.error(
+    "GNU make 4 or newer is required (Apple's make is 3.81). Install it: brew install make"
+  );
+  process.exit(1);
+}
+
+const dataDir = env.SCHMEIDE_DATA_DIR ?? join(homedir(), ".schmeide");
+// Project runs and the agent's own Bash calls find GNU make as `make` through this directory.
+const shimDir = join(dataDir, "bin");
+mkdirSync(shimDir, { recursive: true });
+rmSync(join(shimDir, "make"), { force: true });
+symlinkSync(makeBin, join(shimDir, "make"));
+
+const config = {
+  dataDir,
+  makeBin,
+  shimDir,
+  template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
+  agentModel: env.SCHMEIDE_AGENT_MODEL ?? "opus",
+  claudeBin,
+} as const;
+
+const db = createDb(databaseUrl);
+const connection = await Connection.connect({ address: temporalAddress }).catch(
+  (error: unknown) => {
+    console.error(
+      `Cannot reach Temporal at ${temporalAddress}: run \`make infra/up\` first.`,
+      error
+    );
+    process.exit(1);
+  }
+);
+const client = new Client({ connection });
+
+const worker = await Worker.create({
+  connection: await NativeConnection.connect({ address: temporalAddress }),
+  taskQueue: TASK_QUEUE,
+  workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
+  activities: createActivities(db, config),
+});
+
+const app = buildApp({ db, workflows: client.workflow }, true);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    worker.shutdown();
+    void app.close();
+  });
+}
+
+console.log(
+  `Data dir ${config.dataDir}, template ${config.template}, agent model ${config.agentModel}`
+);
+await app.listen({ host: "127.0.0.1", port });
+await worker.run();
+await connection.close();
