@@ -55,10 +55,13 @@ For a pure refactor, run the existing tests before and after.
 ## Project type
 
 - A Vite + React + TypeScript app, built to static files and served by GitHub
-  Pages. There is no backend and no runtime data source.
+  Pages. In dev (`make serve`) it is the project UI over the `server/` tRPC API
+  at `/api/trpc`; the Pages build has no API and shows the "Coming soon" hero.
 - No router, state library, or CSS framework. Do not introduce one without a
   reason in the PR body.
-- Runtime dependencies are `react` and `react-dom`. Anything new belongs in
+- Runtime dependencies are `react`, `react-dom`, and the tRPC client stack
+  (`@trpc/client`, `@trpc/tanstack-react-query`, `@tanstack/react-query`,
+  `superjson`). Anything new belongs in
   `devDependencies` unless it genuinely ships to the browser, and adding it
   needs a reason in the PR body.
 - Do not add third-party embeds, remote fonts, remote scripts, analytics, or

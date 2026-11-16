@@ -1,0 +1,51 @@
+/* Shared by the project steps: FeaturesStep, SpecStep, BuildStep, LiveStep, ProjectActions. */
+.step {
+  margin-top: var(--space-l);
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--color-border);
+}
+
+.step h2 {
+  margin-top: 0;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-s);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s);
+  margin-top: var(--space-s);
+}
+
+.warning {
+  margin: 0;
+  padding: var(--space-s) var(--space-m);
+  border-left: 4px solid var(--color-warning);
+  background: var(--color-warning-bg);
+  border-radius: var(--radius);
+}
+
+.spec {
+  padding: var(--space-m);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.spec > :first-child {
+  margin-top: 0;
+}
+
+.spec > :last-child {
+  margin-bottom: 0;
+}
