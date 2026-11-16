@@ -1,15 +1,23 @@
+import { matchQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { devSession } from "../data/devSession";
-import { signedOut, type Business, type Session } from "../utils/session";
+import { useTRPC } from "../trpc";
+import { classifyError } from "../utils/apiError";
+import { signOut as endSession } from "../utils/authApi";
+import { signedOut, type Business, type Provider, type Session } from "../utils/session";
 
 type SessionContext = {
+  // "loading" until the server has said who this is; "unreachable" when it did not answer.
+  readonly status: "loading" | "unreachable" | "ready";
   readonly session: Session;
   // The business the person is working in; null when signed out or before the first one exists.
   readonly business: Business | null;
   readonly chooseBusiness: (id: number) => void;
-  readonly signIn: () => void;
-  readonly signOut: () => void;
+  // The sign-in providers the server offers.
+  readonly providers: readonly Provider[];
+  // Asks the server again who this is: after signing in, or when a call answers "signed out".
+  readonly refresh: () => Promise<void>;
+  readonly signOut: () => Promise<void>;
 };
 
 const Context = createContext<SessionContext | null>(null);
@@ -20,30 +28,49 @@ export const useSession = (): SessionContext => {
   return context;
 };
 
-// Holds who is signed in and which business they are working in.
-// ponytail: the session lives in memory and starts as the dev stand-in, so signing out lasts until
-// a reload. With auth (#5) it comes from the server, and signIn/signOut call it.
+// Holds who is signed in and which business they are working in, as the server reports it.
+// `fixed` skips the server and is that session throughout: for tests of the pages inside.
 export function SessionProvider({
-  initial = devSession,
+  fixed,
   children,
 }: {
-  readonly initial?: Session;
+  readonly fixed?: Session;
   readonly children: ReactNode;
 }) {
-  const [session, setSession] = useState(initial);
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const query = useQuery({ ...trpc.session.get.queryOptions(), enabled: !fixed });
   const [businessId, setBusinessId] = useState<number | null>(null);
-  const value = useMemo(
-    () => ({
+
+  const value = useMemo((): SessionContext => {
+    const loaded: Session | undefined =
+      fixed ?? (query.data && { person: query.data.person, businesses: query.data.businesses });
+    const session = loaded ?? signedOut;
+    const sessionKey = trpc.session.pathKey();
+    const refresh = () => queryClient.invalidateQueries({ queryKey: sessionKey });
+    return {
+      status: loaded
+        ? "ready"
+        : query.error && classifyError(query.error) === "unreachable"
+          ? "unreachable"
+          : "loading",
       session,
       business:
         session.businesses.find((business) => business.id === businessId) ??
         session.businesses[0] ??
         null,
       chooseBusiness: setBusinessId,
-      signIn: () => setSession(devSession),
-      signOut: () => setSession(signedOut),
-    }),
-    [session, businessId]
-  );
+      providers: query.data?.providers ?? [],
+      refresh,
+      signOut: async () => {
+        await endSession();
+        await refresh();
+        // Nothing the last person loaded stays in memory for the next one to sign in here.
+        queryClient.removeQueries({
+          predicate: (query) => !matchQuery({ queryKey: sessionKey }, query),
+        });
+      },
+    };
+  }, [fixed, query.data, query.error, businessId, queryClient, trpc]);
   return <Context value={value}>{children}</Context>;
 }

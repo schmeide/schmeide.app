@@ -1,0 +1,44 @@
+/* Shared by the sign-in and set-password pages: one narrow column of stacked fields. */
+.intro {
+  max-width: var(--lead-width);
+  font-size: var(--text-lead);
+  color: var(--color-muted);
+}
+
+.column {
+  display: grid;
+  gap: var(--space-m);
+  max-width: 26rem;
+  margin-top: var(--space-l);
+}
+
+.providers {
+  display: grid;
+  gap: var(--space-s);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.providers button {
+  width: 100%;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-s);
+}
+
+.form label {
+  margin-top: var(--space-s);
+}
+
+.form button {
+  margin-top: var(--space-m);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}

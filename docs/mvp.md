@@ -3,17 +3,20 @@
 A minimal, local version of the Schmeide software factory: create a project, list what the app should do, review
 a plain-language spec, approve it, and a Claude agent builds the app from the
 [Schmeide template](https://github.com/schmeide/template), the server checks it independently, and
-deploys it on this machine. There is no auth; everything belongs to the seeded `demo` tenant.
+deploys it on this machine. People sign in, and only approved email addresses can; everything still belongs to the
+seeded `demo` tenant.
 
 ## Quick start
 
 1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
 2. `make serve`, and leave it running (Ctrl-C stops it).
-3. Open <http://localhost:5173>, type a project name, and press "Create project".
-4. Press "Write it myself" and type one request per box ("Add another request" or Enter adds a box), or press
+3. In a second terminal, `make access/approve EMAIL=you@example.com`. Open the link it prints and set a password.
+   You are now signed in; next time, sign in at <http://localhost:5173> with that email and password.
+4. Type a project name and press "Create project".
+5. Press "Write it myself" and type one request per box ("Add another request" or Enter adds a box), or press
    "Start the questions" and answer them. Then press "Write the spec",
    read it, and press "Approve and build".
-5. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
+6. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
 
 ## What to expect
 
@@ -79,7 +82,8 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 
 ## Using the UI
 
-Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install or log in to.
+Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install. Sign in with
+an approved email (step 3 of the quick start).
 
 1. **Create a project**: type a name and press "Create project". The project page opens.
 
