@@ -33,7 +33,7 @@ representing the project.
 
 ## Reporting
 
-Report a problem privately to the maintainers at <jamesaorson@gmail.com>. If
+Report a problem privately to the maintainers at <admin@schmeide.com>. If
 the report is about a maintainer, say so — we'll recuse them from handling it.
 
 Include what happened, where, and when. Links help. We will keep the reporter's
