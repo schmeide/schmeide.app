@@ -16,7 +16,8 @@ export type Call = { readonly path: string; readonly input: Input };
 export class ApiFailure extends Error {
   constructor(
     readonly code: string | undefined,
-    message: string = code ?? "Failed to fetch"
+    message: string = code ?? "Failed to fetch",
+    readonly reason?: string
   ) {
     super(message);
   }
@@ -28,7 +29,7 @@ const toClientError = (error: unknown) =>
         error: {
           code: -32000,
           message: error.message,
-          data: { code: error.code, httpStatus: 400 },
+          data: { code: error.code, httpStatus: 400, reason: error.reason },
         },
       })
     : TRPCClientError.from(error instanceof Error ? error : new Error(String(error)));
