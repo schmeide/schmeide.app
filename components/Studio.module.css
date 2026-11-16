@@ -1,5 +1,5 @@
 .page {
-  max-width: var(--prose-width);
+  max-width: calc(var(--prose-width) + 2 * var(--space-gutter));
   margin: 0 auto;
-  padding: var(--space-l) var(--space-m) var(--space-xl);
+  padding: var(--space-l) var(--space-gutter) var(--space-xl);
 }

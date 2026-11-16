@@ -2,6 +2,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-s) var(--space-m);
+  font-variant-numeric: tabular-nums;
 }
 
 .summary[data-status="failed"] strong {
@@ -13,10 +14,10 @@
 }
 
 .failure {
-  padding: var(--space-s) var(--space-m);
-  border-left: 4px solid var(--color-danger);
+  padding: var(--space-m);
   background: var(--color-danger-bg);
-  border-radius: var(--radius);
+  border-radius: var(--radius-input);
+  box-shadow: inset 4px 0 0 var(--color-danger);
 }
 
 .failure h3 {
@@ -25,6 +26,7 @@
 
 .failure pre {
   margin: 0;
+  font-size: 0.875rem;
   max-height: 20rem;
   overflow: auto;
   white-space: pre-wrap;
@@ -34,10 +36,10 @@
 .log {
   max-height: 24rem;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: var(--space-s) var(--space-m);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  background: var(--color-inset);
+  border-radius: var(--radius-input);
 }
 
 .events {
@@ -59,7 +61,10 @@
 }
 
 .kind {
-  font-weight: 600;
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
 }
 
 .event[data-kind="error"] .kind {
@@ -68,7 +73,8 @@
 
 .time {
   color: var(--color-muted);
-  font-size: 0.875rem;
+  font-size: var(--text-label);
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
@@ -76,6 +82,7 @@
   grid-column: 1 / -1;
   font-family: var(--font-mono);
   font-size: 0.875rem;
+  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
