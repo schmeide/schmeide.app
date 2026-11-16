@@ -49,7 +49,7 @@ export function AccountMenu() {
             </li>
           ))}
           <li>
-            <button type="button" className={styles.signOut} onClick={signOut}>
+            <button type="button" className={styles.signOut} onClick={() => void signOut()}>
               {copy.shell.signOut}
             </button>
           </li>

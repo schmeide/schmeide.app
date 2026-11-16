@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { copy } from "../../data/copy";
 import { navigate } from "../../utils/navigation";
 import { signedOut, type Session } from "../../utils/session";
+import { App } from "../../App";
 import { Routes } from "../Routes";
-import { aProject, projectServer, renderWithApi } from "./fakeApi";
+import { aProject, authServer, projectServer, renderWithApi } from "./fakeApi";
 
 const person = { name: "Ada Lovelace", email: "ada@example.com" };
 const owner: Session = { person, businesses: [{ id: 1, name: "Ada's bakery" }] };
@@ -142,23 +143,36 @@ describe("the signed-in shell", () => {
 
 describe("route guards", () => {
   it("sends a signed-out person to sign in, then back to the page they asked for", async () => {
-    open("/projects/7?from=email", signedOut);
+    const { handlers } = authServer({
+      session: signedOut,
+      account: { ...owner, password: "correct horse battery" },
+    });
+    window.history.replaceState(null, "", "/projects/7?from=email");
+    renderWithApi(<App isPublicSite={false} />, { ...api, ...handlers }, "server");
     await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
     expect(window.location.search).toBe("?next=%2Fprojects%2F7%3Ffrom%3Demail");
     expect(screen.queryByRole("navigation", { name: copy.shell.primaryNav })).toBeNull();
     expect(screen.queryByRole("button", { name: copy.shell.menu })).toBeNull();
 
+    await userEvent.type(screen.getByLabelText(copy.signInPage.emailLabel), person.email);
+    await userEvent.type(
+      screen.getByLabelText(copy.signInPage.passwordLabel),
+      "correct horse battery"
+    );
     await userEvent.click(screen.getByRole("button", { name: copy.signInPage.action }));
     await waitFor(() => expect(window.location.pathname).toBe("/projects/7"));
     expect(window.location.search).toBe("?from=email");
     expect(await screen.findByRole("heading", { level: 1, name: "Invoices" })).toBeInTheDocument();
   });
 
-  it("signs out from the account menu", async () => {
-    open("/usage", owner);
-    await userEvent.click(screen.getByRole("button", { name: "Ada Lovelace" }));
+  it("signs out on the server from the account menu", async () => {
+    const { handlers, requests } = authServer({ session: owner });
+    window.history.replaceState(null, "", "/usage");
+    renderWithApi(<App isPublicSite={false} />, { ...api, ...handlers }, "server");
+    await userEvent.click(await screen.findByRole("button", { name: "Ada Lovelace" }));
     await userEvent.click(screen.getByRole("button", { name: copy.shell.signOut }));
     await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
+    expect(requests.map((request) => request.path)).toEqual(["/sign-out"]);
     expect(screen.queryByRole("button", { name: "Ada Lovelace" })).toBeNull();
   });
 

@@ -20,3 +20,6 @@ export const navigate = (to: string, { replace = false }: { readonly replace?: b
   else window.history.pushState(null, "", to);
   window.dispatchEvent(new Event(NAVIGATED));
 };
+
+// Leaves the app for another site (a provider's sign-in page) with a full page load.
+export const leaveTo = (url: string) => window.location.assign(url);

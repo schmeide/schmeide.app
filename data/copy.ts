@@ -33,6 +33,7 @@ export const copy = {
     welcome: "Your business",
     help: "Help",
     signIn: "Sign in",
+    setPassword: "Set your password",
     terms: "Terms",
     privacy: "Privacy",
     acceptableUse: "Acceptable use",
@@ -41,8 +42,46 @@ export const copy = {
   placeholder: "This page is not built yet.",
   signInPage: {
     intro:
-      "This development version has no accounts yet. Press “Sign in” to continue as the demo owner.",
+      "Schmeide is open by invitation for now. Sign in with the email address you were invited with.",
+    provider: {
+      google: "Continue with Google",
+      microsoft: "Continue with Microsoft",
+      apple: "Continue with Apple",
+    },
+    or: "Or sign in with your email and password",
+    emailLabel: "Email",
+    passwordLabel: "Password",
     action: "Sign in",
+    signingIn: "Signing in…",
+    help: "No password yet, or forgotten it? Ask the person who invited you for a new link.",
+    // Why a sign-in was refused. `refused` is keyed by the reason the server sends back.
+    refused: {
+      not_approved:
+        "That email address is not on the invitation list yet. Sign in with the address you were invited with, or ask us to add this one.",
+      email_not_verified:
+        "That account has not confirmed its email address, so we cannot be sure it is yours. Confirm it with the provider, or sign in another way.",
+    },
+    providerFailed: "That sign-in did not finish. Try again, or sign in another way.",
+    wrong: "That email and password do not match. Check both and try again.",
+    tooMany: "Too many tries. Wait a minute, then try again.",
+    failed: "Sign-in did not work this time. Try again in a moment.",
+  },
+  setPasswordPage: {
+    intro: (email: string) =>
+      `Choose a password for ${email}. You will sign in with it from now on.`,
+    resetIntro: (email: string) =>
+      `Choose a new password for ${email}. You will be signed out everywhere else.`,
+    nameLabel: "Your name",
+    passwordLabel: "Password",
+    passwordHint: (length: number) => `At least ${length} characters.`,
+    confirmLabel: "Password again",
+    mismatch: "The two passwords are not the same. Type them again.",
+    action: "Save and sign in",
+    saving: "Saving…",
+    deadTitle: "This link no longer works",
+    dead: "It was already used, it is more than 7 days old, or a newer link replaced it. Ask the person who invited you for a new one.",
+    toSignIn: "Go to sign in",
+    savedButSignedOut: "Your password is saved. Sign in with it to continue.",
   },
   problems: {
     notFound: {
@@ -294,6 +333,7 @@ export const copy = {
     serverDown:
       "The server is not running. In a terminal, from the schmeide.app folder, run “make serve” (or “gmake serve”), wait until it prints the App address, then press “Try again”.",
     retry: "Try again",
+    signedOut: "You are signed out. Sign in again to continue.",
     notFound: "This project no longer exists. It may have been deleted.",
     forbidden: "You do not have access to this.",
     conflict: "That cannot be done right now:",
