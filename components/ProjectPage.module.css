@@ -21,6 +21,7 @@
 .status {
   margin: var(--space-m) 0 var(--space-l);
   padding: var(--space-m) var(--space-gutter);
+  max-width: var(--prose-width);
   background: var(--color-surface);
   border-radius: var(--radius-card);
 }
@@ -32,4 +33,14 @@
 
 .status[data-status="failed"] {
   background: var(--color-danger-bg);
+}
+
+/* Keep in sync with --breakpoint-md. */
+@media (min-width: 960px) {
+  .wide {
+    --wide: calc(min(var(--content-width), 100cqw) - 2 * var(--space-gutter));
+
+    width: var(--wide);
+    margin-left: calc((100% - var(--wide)) / 2);
+  }
 }

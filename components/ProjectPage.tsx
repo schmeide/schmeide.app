@@ -86,7 +86,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
         ? copy.project.appFailedHint
         : copy.status[project.status].hint;
   return (
-    <article>
+    <article className={inApp ? styles.wide : undefined}>
       {back}
       <h1 className={styles.title}>{project.name}</h1>
       <p role="status" className={styles.status} data-status={project.status}>

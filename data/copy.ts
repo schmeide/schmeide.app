@@ -123,20 +123,42 @@ export const copy = {
       steps: ["Describe", "Spec", "Build", "Live"],
       done: "(done)",
     },
-    // The app's home once it has been live.
+    // The app's home once it has been live: the designer, and its settings.
     views: {
       label: "This app",
-      overview: "Overview",
+      designer: "Designer",
+      overview: "App",
       changes: "Changes",
       settings: "Settings",
     },
     viewTitle: (view: string, name: string) => `${view} · ${name}`,
-    toChanges: "Request a change",
-    seeChanges: "See what went wrong",
+    // The designer: the app itself in a frame, with the way to change it beside it.
+    designer: {
+      tabsLabel: "App or changes",
+      appTitle: "Your app",
+      frameTitle: (name: string) => `${name}, your app as it is now`,
+      widthLabel: "Width",
+      width: { phone: "Phone", computer: "Computer" },
+      reload: "Reload the app",
+      loading: "Loading your app…",
+      frameHelp:
+        "If your app does not appear here, open it in its own tab with “Open your app”. Some apps cannot be shown inside another page.",
+      building:
+        "A change is being built. This is your app as it is now; the new version replaces it when the build finishes.",
+      buildingNoApp:
+        "Your app is being built. It appears here when the build finishes; this page updates by itself.",
+      failed:
+        "The last change did not finish, so this is your app from before it. See what went wrong under “Latest change”.",
+      offline:
+        "Your app is offline, so there is nothing to show here. Request a change to build it and bring it back online.",
+      goesLive:
+        "Your change goes live as soon as it is built. There is no step to look at it first.",
+      noChanges: "No changes yet. The first change you request shows here while it is built.",
+    },
     appBuildingHint:
-      "A change is being built. Follow it under “Changes”; this page updates by itself.",
+      "A change is being built. Your app stays as it is until the build finishes; this page updates by itself.",
     appFailedHint:
-      "The last change did not finish. See what went wrong under “Changes”, then request a change to try again.",
+      "The last change did not finish. See what went wrong under “Latest change”, then request a change to try again.",
     retryTitle: "Try again",
     firstBuildTitle: "First build",
     manageBusy: "You can delete the project once the build has finished.",
