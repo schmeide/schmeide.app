@@ -43,6 +43,13 @@
       "when": 1794864010266,
       "tag": "0005_usage_run_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1794865531301,
+      "tag": "0006_sign_in_and_approved_emails",
+      "breakpoints": true
     }
   ]
 }
