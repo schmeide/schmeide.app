@@ -9,6 +9,7 @@ import {
   type BuildEvent,
   type BuildEventKind,
   type NewUsage,
+  type RunKind,
 } from "../db/schema.ts";
 import { NotFoundError } from "./errors.ts";
 
@@ -63,11 +64,13 @@ export type Query = typeof query;
 export const usageRows = (
   message: Extract<SDKMessage, { type: "result" }>,
   projectId: number,
-  buildId: number | null
+  buildId: number | null,
+  runKind: RunKind
 ): readonly NewUsage[] =>
   Object.entries(message.modelUsage).map(([model, used]) => ({
     projectId,
     buildId,
+    runKind,
     model,
     inputTokens: used.inputTokens,
     outputTokens: used.outputTokens,

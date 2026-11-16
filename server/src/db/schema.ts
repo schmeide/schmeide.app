@@ -104,13 +104,19 @@ export const buildEvents = pgTable("build_events", {
   message: text("message").notNull(),
 });
 
-// One row per model per agent run. buildId is null for spec generation.
+// What a model run is for. It labels the run's usage, and for every kind but `interview` it
+// decides the run's model (agentModel.ts).
+export const agentRunKind = pgEnum("agent_run_kind", ["spec", "initial", "change", "interview"]);
+
+// One row per model per agent run. buildId is null for spec generation and interview questions. model is what the run
+// used, as the SDK reports it; runKind is what the run was, so cost can be compared per kind.
 export const usage = pgTable("usage", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
     .notNull()
     .references(() => projects.id),
   buildId: integer("build_id").references(() => builds.id),
+  runKind: agentRunKind("run_kind").notNull(),
   model: text("model").notNull(),
   inputTokens: integer("input_tokens").notNull(),
   outputTokens: integer("output_tokens").notNull(),
@@ -237,6 +243,7 @@ export type Project = typeof projects.$inferSelect;
 export type Build = typeof builds.$inferSelect;
 export type BuildEvent = typeof buildEvents.$inferSelect;
 export type BuildEventKind = BuildEvent["kind"];
+export type RunKind = (typeof agentRunKind.enumValues)[number];
 export type NewUsage = typeof usage.$inferInsert;
 export type PlanSection = (typeof PLAN_SECTIONS)[number];
 export type PlanItem = typeof planItems.$inferSelect;
