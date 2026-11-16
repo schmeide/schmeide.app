@@ -1,0 +1,65 @@
+/*
+ * Global rules only: tokens, reset, body. Component styles live in
+ * <Component>.module.css next to the component.
+ */
+:root {
+  color-scheme: light dark;
+
+  --color-bg: #f7f6f3;
+  --color-fg: #1c1c1a;
+  --color-muted: #5f5e5a;
+  --color-accent: #0e7490;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --space-s: 0.5rem;
+  --space-m: 1rem;
+  --space-l: 2rem;
+  --space-xl: clamp(3rem, 10vw, 8rem);
+
+  --content-width: 72rem;
+  --prose-width: 68ch;
+  --radius: 0.5rem;
+
+  /* Keep in sync with literal media-query breakpoints. */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 960px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #161615;
+    --color-fg: #ecebe7;
+    --color-muted: #a3a29d;
+    --color-accent: #22d3ee;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+  line-height: 1.5;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}

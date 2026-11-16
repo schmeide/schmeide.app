@@ -1,0 +1,19 @@
+.hero {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-m);
+  text-align: center;
+}
+
+.headline {
+  margin: 0;
+  font-size: clamp(2.5rem, 8vw, 5rem);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.tagline {
+  margin: var(--space-m) 0 0;
+  font-size: clamp(1.125rem, 2.5vw, 1.5rem);
+  color: var(--color-muted);
+}
