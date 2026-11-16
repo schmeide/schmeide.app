@@ -23,6 +23,7 @@ export const slugify = (name: string): string =>
   name
     .toLowerCase()
     .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 40)
@@ -45,20 +46,30 @@ const uniqueSlug = async (db: Db, base: string): Promise<string> => {
   return candidates.find((slug) => !taken.has(slug)) ?? `${base}-${taken.size + 2}`;
 };
 
-// ponytail: slug and port are picked by read-then-insert, so two concurrent creates can collide on the
-// unique constraints and one fails; retry on conflict or use a sequence if creates become concurrent
-export const createProject = async (db: Db, input: { readonly name: string }): Promise<Project> => {
-  const slug = await uniqueSlug(db, slugify(input.name));
-  const [project] = await db
-    .insert(projects)
-    .values({
-      tenantId: sql`(select id from ${tenants} where slug = ${DEMO_TENANT})`,
-      slug,
-      name: input.name,
-      webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
-    })
-    .returning();
-  return project;
+// Slug and port are picked by read-then-insert; a concurrent create can take them first, so a
+// unique violation (Postgres 23505) retries with fresh picks.
+export const createProject = async (
+  db: Db,
+  input: { readonly name: string },
+  attempts = 5
+): Promise<Project> => {
+  try {
+    const slug = await uniqueSlug(db, slugify(input.name));
+    const [project] = await db
+      .insert(projects)
+      .values({
+        tenantId: sql`(select id from ${tenants} where slug = ${DEMO_TENANT})`,
+        slug,
+        name: input.name,
+        webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
+      })
+      .returning();
+    return project;
+  } catch (error) {
+    const code = (error as { cause?: { code?: string } }).cause?.code;
+    if (code !== "23505" || attempts <= 1) throw error;
+    return createProject(db, input, attempts - 1);
+  }
 };
 
 export const listProjects = (db: Db): Promise<readonly Project[]> =>

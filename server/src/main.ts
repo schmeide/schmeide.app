@@ -1,6 +1,6 @@
 // The one process: Fastify + tRPC API and the Temporal worker. The only place that reads the environment.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { Client, Connection } from "@temporalio/client";
@@ -8,7 +8,7 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
 import { TASK_QUEUE } from "./services/projects.ts";
-import { createActivities } from "./temporal/activities.ts";
+import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
 const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide";
@@ -40,15 +40,14 @@ if (!makeBin) {
 
 const dataDir = env.SCHMEIDE_DATA_DIR ?? join(homedir(), ".schmeide");
 // Project runs and the agent's own Bash calls find GNU make as `make` through this directory.
-const shimDir = join(dataDir, "bin");
-mkdirSync(shimDir, { recursive: true });
-rmSync(join(shimDir, "make"), { force: true });
-symlinkSync(makeBin, join(shimDir, "make"));
+mkdirSync(shimDir(dataDir), { recursive: true });
+rmSync(join(shimDir(dataDir), "make"), { force: true });
+symlinkSync(makeBin, join(shimDir(dataDir), "make"));
+writeFileSync(gitConfigFile(dataDir), GIT_CONFIG);
 
 const config = {
   dataDir,
   makeBin,
-  shimDir,
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
   agentModel: env.SCHMEIDE_AGENT_MODEL ?? "opus",
   claudeBin,

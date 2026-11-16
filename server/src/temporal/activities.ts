@@ -21,11 +21,21 @@ export type Config = {
   readonly template: string;
   readonly agentModel: string;
   readonly claudeBin: string | undefined;
-  // GNU make 4+, and a directory whose `make` points at it, prepended to PATH for project runs.
-  // Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS and fails every template target.
+  // GNU make 4+. Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS and fails every template target.
   readonly makeBin: string;
-  readonly shimDir: string;
 };
+
+// Written by main.ts under the data dir: bin/make points at GNU make, gitconfig is a neutral identity.
+export const shimDir = (dataDir: string) => join(dataDir, "bin");
+export const gitConfigFile = (dataDir: string) => join(dataDir, "gitconfig");
+export const GIT_CONFIG = `[user]
+\tname = Schmeide
+\temail = agent@schmeide.invalid
+[init]
+\tdefaultBranch = main
+[commit]
+\tgpgsign = false
+`;
 
 export type Query = typeof sdkQuery;
 
@@ -113,8 +123,9 @@ const truncate = (text: string, max = MAX_EVENT): string => {
 };
 
 // Strip variables meant for this server so they never reach a project's make or agent.
-// MAKEFLAGS and friends leak in when the server itself runs under make.
-export const projectEnv = (project: Project, shimDir: string): NodeJS.ProcessEnv => {
+// MAKEFLAGS and friends leak in when the server itself runs under make. The owner's global git
+// config (signing, hooks templates) is replaced so project commits never need their keys.
+export const projectEnv = (project: Project, dataDir: string): NodeJS.ProcessEnv => {
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
       ([key]) =>
@@ -125,7 +136,9 @@ export const projectEnv = (project: Project, shimDir: string): NodeJS.ProcessEnv
   );
   return {
     ...env,
-    PATH: `${shimDir}:${env.PATH ?? ""}`,
+    PATH: `${shimDir(dataDir)}:${env.PATH ?? ""}`,
+    GIT_CONFIG_GLOBAL: gitConfigFile(dataDir),
+    GIT_CONFIG_NOSYSTEM: "1",
     COMPOSE_PROJECT_NAME: `schmeide-${project.slug}`,
     WEB_PORT: String(project.webPort),
     TEST_DB_PORT: String(testDbPort(project)),
@@ -241,12 +254,17 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
     );
 
   const mustRun = async (
+    project: Project,
     command: string,
     args: readonly string[],
     cwd: string,
     buildId?: number
   ) => {
-    const result = await run(command, args, { cwd, buildId });
+    const result = await run(command, args, {
+      cwd,
+      buildId,
+      env: projectEnv(project, config.dataDir),
+    });
     if (result.code !== 0) {
       throw new Error(
         `${command} ${args.join(" ")} failed (exit ${result.code}): ${result.output.slice(-2000)}`
@@ -257,7 +275,7 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
   const agentEnv = (project: Project): Record<string, string> =>
     Object.fromEntries(
       Object.entries({
-        ...projectEnv(project, config.shimDir),
+        ...projectEnv(project, config.dataDir),
         CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       }).filter((entry): entry is [string, string] => entry[1] !== undefined)
     );
@@ -325,17 +343,21 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
       const staging = await mkdtemp(join(config.dataDir, "projects", `.${project.slug}-`));
       try {
         await mustRun(
+          project,
           "git",
           ["clone", "--depth", "1", config.template, staging],
           config.dataDir,
           buildId
         );
         await rm(join(staging, ".git"), { recursive: true, force: true });
-        await mustRun("git", ["init", "-q", "-b", "main"], staging);
-        await mustRun("git", ["config", "user.name", "Schmeide"], staging);
-        await mustRun("git", ["config", "user.email", "agent@schmeide.invalid"], staging);
-        await mustRun("git", ["add", "-A"], staging);
-        await mustRun("git", ["commit", "-q", "-m", "start from the schmeide template"], staging);
+        await mustRun(project, "git", ["init", "-q", "-b", "main"], staging);
+        await mustRun(project, "git", ["add", "-A"], staging);
+        await mustRun(
+          project,
+          "git",
+          ["commit", "-q", "-m", "start from the schmeide template"],
+          staging
+        );
         await rename(staging, workspace);
       } finally {
         await rm(staging, { recursive: true, force: true });
@@ -414,7 +436,7 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
         await event(buildId, "check", `Running make ${target}`);
         const result = await run(config.makeBin, [target], {
           cwd: workspaceOf(project),
-          env: projectEnv(project, config.shimDir),
+          env: projectEnv(project, config.dataDir),
           buildId,
         });
         if (result.code !== 0) {
@@ -432,7 +454,7 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
       await event(buildId, "deploy", "Starting the app (make up)");
       const result = await run(config.makeBin, ["up"], {
         cwd: workspaceOf(project),
-        env: projectEnv(project, config.shimDir),
+        env: projectEnv(project, config.dataDir),
         buildId,
       });
       if (result.code !== 0) {
@@ -485,7 +507,7 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
       if (await stat(workspace).catch(() => undefined)) {
         const result = await run(config.makeBin, ["down"], {
           cwd: workspace,
-          env: projectEnv(project, config.shimDir),
+          env: projectEnv(project, config.dataDir),
         });
         if (result.code !== 0)
           throw new Error(`make down failed (exit ${result.code}): ${result.output.slice(-2000)}`);
