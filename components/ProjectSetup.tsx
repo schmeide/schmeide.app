@@ -5,7 +5,7 @@ import type { Build, Project } from "../trpc";
 import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
 import { DeleteProject } from "./DeleteProject";
-import { FeaturesStep } from "./FeaturesStep";
+import { DescribeStep } from "./DescribeStep";
 import { SetupStepper } from "./SetupStepper";
 import { SpecStep } from "./SpecStep";
 import { StopButton } from "./StopButton";
@@ -40,7 +40,12 @@ export function ProjectSetup({
     <>
       <SetupStepper current={describing ? 0 : building ? 2 : 1} />
       {describing ? (
-        <FeaturesStep project={project} onEditingChange={setEditing} specFailed={specFailed} />
+        <DescribeStep
+          project={project}
+          editing={editing}
+          onEditingChange={setEditing}
+          specFailed={specFailed}
+        />
       ) : building ? (
         latestBuild && (
           <BuildStep

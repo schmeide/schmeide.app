@@ -7,6 +7,7 @@ import { Client, Connection } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
+import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
@@ -51,6 +52,7 @@ const config = {
   makeBin,
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
   agentModel: env.SCHMEIDE_AGENT_MODEL ?? "opus",
+  interviewModel: env.SCHMEIDE_INTERVIEW_MODEL ?? "sonnet",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
 } as const;
@@ -76,7 +78,8 @@ const worker = await Worker.create({
 });
 
 await failOrphanedBuilds(deps);
-const app = buildApp(deps, true);
+const interviewer = createInterviewer({ ...config, model: config.interviewModel });
+const app = buildApp({ ...deps, interviewer }, true);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
@@ -86,7 +89,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent model ${config.agentModel}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent model ${config.agentModel}, interview model ${config.interviewModel}`
 );
 await app.listen({ host: "127.0.0.1", port });
 await worker.run();

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stands in for Claude in `make e2e/fake` (SCHMEIDE_AGENT_CMD): no model calls, no usage.
-# `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green.
+# `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green;
+# `interview` prints one turn that adds a plan item and asks nothing further.
 set -euo pipefail
 
 case "${1:-}" in
@@ -16,8 +17,11 @@ case "${1:-}" in
     git commit -q -m "retitle the page to ${title}"
     echo "fake agent: retitled the page to ${title}"
     ;;
+  interview)
+    printf '%s\n' '{"add":[{"section":"does","text":"Fake plan item for the end-to-end fixture","phase":"day_one"}],"update":[],"remove":[],"ready":["does"],"question":null}'
+    ;;
   *)
-    echo "usage: $0 spec|build (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac

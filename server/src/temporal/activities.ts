@@ -11,24 +11,21 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import {
-  projectIcons,
-  projects,
-  type BuildEventKind,
-  type NewUsage,
-  type Project,
-} from "../db/schema.ts";
+import { projectIcons, projects, type BuildEventKind, type Project } from "../db/schema.ts";
 import {
   appendEvent,
   finishBuild as finishBuildRow,
   getBuild,
   recordUsage,
+  usageRows,
+  type Query,
 } from "../services/builds.ts";
+import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
   deleteProjectRows,
   findProject,
@@ -38,6 +35,8 @@ import {
   type Deps,
 } from "../services/projects.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
+
+export type { Query };
 
 export type Config = {
   readonly dataDir: string;
@@ -62,8 +61,6 @@ export const GIT_CONFIG = `[user]
 [commit]
 \tgpgsign = false
 `;
-
-export type Query = typeof sdkQuery;
 
 const HEARTBEAT_MS = 10_000;
 const OUTPUT_TAIL = 12_000;
@@ -139,13 +136,22 @@ ${output}
 export const INTERRUPTED_NOTE =
   "An earlier run of this task was interrupted before it finished. Its partial work is in the workspace (see `git status`); continue from there rather than starting over.";
 
-const SPEC_PROMPT = (
-  features: string
-) => `A non-technical customer wants a small web app with these features, one per line:
+const SPEC_FORMAT = `Write a short plain-language spec for it in markdown with exactly three sections: "## Features", "## Screens", and "## Data it stores". Use short bullet points a non-technical reader understands. No code, no technology names, no title. Reply with only the markdown.`;
+
+// A project is described by typed requests, by the plan from the interview, or by both. With a
+// plan, the plan leads and the typed requests are added to it.
+export const specPrompt = (features: string, plan: string): string =>
+  plan
+    ? `A non-technical customer wants a small web app. This is the plan they agreed while being interviewed about it:
+
+${plan}
+${features.trim() ? `\nThey also asked for these, in their own words, one per line:\n\n${features.trim()}\n` : ""}
+${SPEC_FORMAT} Leave out everything listed as wanted later.`
+    : `A non-technical customer wants a small web app with these features, one per line:
 
 ${features}
 
-Write a short plain-language spec for it in markdown with exactly three sections: "## Features", "## Screens", and "## Data it stores". Use short bullet points a non-technical reader understands. No code, no technology names, no title. Reply with only the markdown.`;
+${SPEC_FORMAT}`;
 
 const truncate = (text: string, max = MAX_EVENT): string => {
   const line = text.trim().replace(/\s+/g, " ");
@@ -175,23 +181,6 @@ export const projectEnv = (project: Project, dataDir: string): NodeJS.ProcessEnv
   };
 };
 
-const usageRows = (
-  message: Extract<SDKMessage, { type: "result" }>,
-  projectId: number,
-  buildId: number | null
-): readonly NewUsage[] =>
-  Object.entries(message.modelUsage).map(([model, used]) => ({
-    projectId,
-    buildId,
-    model,
-    inputTokens: used.inputTokens,
-    outputTokens: used.outputTokens,
-    cacheReadTokens: used.cacheReadInputTokens,
-    cacheCreationTokens: used.cacheCreationInputTokens,
-    costUsd: used.costUSD,
-  }));
-
-// One short line per tool call, so the UI shows progress rather than raw output.
 export const describeToolUse = (
   name: string,
   input: Record<string, unknown>,
@@ -354,15 +343,16 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
+      const prompt = specPrompt(project.features, planBrief(await planItemsOf(db, projectId)));
       await mkdir(config.dataDir, { recursive: true });
       try {
         const spec = config.agentCmd
-          ? await runAgentCmd(project, "spec", SPEC_PROMPT(project.features), config.dataDir)
+          ? await runAgentCmd(project, "spec", prompt, config.dataDir)
           : await withHeartbeat(async (signal) => {
               const abortController = new AbortController();
               signal.addEventListener("abort", () => abortController.abort(), { once: true });
               for await (const message of query({
-                prompt: SPEC_PROMPT(project.features),
+                prompt: prompt,
                 options: {
                   ...agentOptions(config.dataDir, agentEnv(project)),
                   settingSources: [],

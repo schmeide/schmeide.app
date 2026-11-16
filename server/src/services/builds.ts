@@ -1,3 +1,4 @@
+import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, asc, eq, gt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
@@ -54,3 +55,23 @@ export const finishBuild = async (db: Db, buildId: number, error?: string): Prom
 export const recordUsage = async (db: Db, rows: readonly NewUsage[]): Promise<void> => {
   if (rows.length > 0) await db.insert(usage).values([...rows]);
 };
+
+// The Claude Agent SDK entry point; tests pass a stand-in.
+export type Query = typeof query;
+
+// buildId is null for model calls made outside a build: writing a spec, asking an interview question.
+export const usageRows = (
+  message: Extract<SDKMessage, { type: "result" }>,
+  projectId: number,
+  buildId: number | null
+): readonly NewUsage[] =>
+  Object.entries(message.modelUsage).map(([model, used]) => ({
+    projectId,
+    buildId,
+    model,
+    inputTokens: used.inputTokens,
+    outputTokens: used.outputTokens,
+    cacheReadTokens: used.cacheReadInputTokens,
+    cacheCreationTokens: used.cacheCreationInputTokens,
+    costUsd: used.costUSD,
+  }));

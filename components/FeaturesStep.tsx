@@ -19,6 +19,8 @@ type Props = {
   readonly project: Project;
   readonly onEditingChange: (editing: boolean) => void;
   readonly specFailed: boolean;
+  // Offered while describing: switch to answering questions instead of typing requests.
+  readonly onUseInterview?: () => void;
 };
 
 const lines = (text: string) =>
@@ -33,7 +35,7 @@ const boxes = (features: string): readonly string[] => {
   return saved.length ? saved : [""];
 };
 
-export function FeaturesStep({ project, onEditingChange, specFailed }: Props) {
+export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterview }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const [requests, setRequests] = useState(() => boxes(project.features));
@@ -173,6 +175,11 @@ export function FeaturesStep({ project, onEditingChange, specFailed }: Props) {
               disabled={pending}
             >
               {copy.project.cancelEdit}
+            </button>
+          )}
+          {onUseInterview && !reviewing && (
+            <button type="button" onClick={onUseInterview} disabled={pending}>
+              {copy.interview.useQuestions}
             </button>
           )}
           {save.isSuccess && !dirty && (
