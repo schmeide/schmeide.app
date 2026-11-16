@@ -8,7 +8,7 @@ deploys it on this machine. There is no auth; everything belongs to the seeded `
 ## Run it
 
 ```sh
-make doctor   # Docker, GNU make 4+, claude (logged in), git, node, template, free ports
+make doctor   # Docker, GNU make 4+, claude (logged in), git, node, template, free ports, leftover apps
 make serve    # Postgres + Temporal, migrations, the server on :3100, and Vite on :5173
 ```
 
