@@ -1,5 +1,6 @@
 import {
   ActivityCancellationType,
+  ApplicationFailure,
   CancellationScope,
   isCancellation,
   proxyActivities,
@@ -54,7 +55,8 @@ export async function buildWorkflow(_projectId: number, buildId: number): Promis
       const checks = await runChecks(buildId);
       if (checks.ok) break;
       if (attempt === MAX_FIX_ATTEMPTS) {
-        throw new Error(
+        // A plain Error would fail only the workflow task, which Temporal retries forever.
+        throw ApplicationFailure.nonRetryable(
           `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
         );
       }

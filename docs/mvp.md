@@ -177,6 +177,5 @@ Each is marked in code with a `ponytail:` comment.
   A build whose workflow vanished stays `running` and blocks new builds: mark it failed by hand
   (`update builds set status = 'failed' where status = 'running'`) and set the project to `failed`.
 - A server restart mid-build fails that build (activities run once; nothing resumes the agent).
-- Workflow logic (the check/fix loop) is not covered by an automated test; activities and services are.
 - Deployments keep running until stopped. A new project takes the highest web port plus one, so
   ports below that are only reused once the projects above them are deleted.
