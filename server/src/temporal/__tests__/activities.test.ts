@@ -186,12 +186,14 @@ describe("build activities", () => {
       model: "opus",
       permissionMode: "dontAsk",
       settingSources: ["project"],
+      tools: expect.arrayContaining(["Skill"]),
       allowedTools: AGENT_ALLOWED_TOOLS,
       env: expect.objectContaining({
         WEB_PORT: String(project.webPort),
         COMPOSE_PROJECT_NAME: `schmeide-${project.slug}`,
       }),
     });
+    expect(AGENT_ALLOWED_TOOLS).toContain("Skill");
     expect(calls[0].options.env?.DATABASE_URL).toBeUndefined();
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining([
