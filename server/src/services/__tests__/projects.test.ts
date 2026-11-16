@@ -18,6 +18,7 @@ import {
   removeQueuedChange,
   requestChange,
   setFeatures,
+  setSite,
   startNextChange,
   slugify,
   stopProject,
@@ -140,7 +141,10 @@ describe("project state machine", () => {
       expect(build).toMatchObject({ kind: "initial", status: "running", request: "## Features" });
       expect(workflows.start).toHaveBeenCalledWith(
         "buildWorkflow",
-        expect.objectContaining({ workflowId: `build-${build.id}`, args: [ready.id, build.id] })
+        expect.objectContaining({
+          workflowId: `build-${build.id}`,
+          args: [ready.id, build.id, "initial"],
+        })
       );
       expect(second.build.status).toBe("running");
     } finally {
@@ -296,6 +300,52 @@ describe("the change queue", () => {
     await expect(removeQueuedChange(db, dropped.build.id)).rejects.toBeInstanceOf(NotFoundError);
     expect((await getBuild(db, build.id)).request).toBe("## Features");
     await finishBuild(db, build.id);
+  });
+});
+
+describe("setSite", () => {
+  const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
+
+  it("only stores the title and icon before the first build", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const ready = await specReady();
+
+    const project = await setSite(deps, { id: ready.id, title: "My invoices", icon: PNG });
+
+    expect(project.pageTitle).toBe("My invoices");
+    expect((await getProject(db, ready.id)).hasIcon).toBe(true);
+    expect(workflows.start).not.toHaveBeenCalled();
+
+    await setSite(deps, { id: ready.id, title: "", icon: null });
+    const detail = await getProject(db, ready.id);
+    expect(detail.project.pageTitle).toBeNull();
+    expect(detail.hasIcon).toBe(false);
+  });
+
+  it("redeploys a live app without the agent, and waits behind a running build", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const ready = await specReady();
+    await transition(db, ready.id, ["spec_ready"], { status: "live" });
+
+    await setSite(deps, { id: ready.id, title: "Mine" });
+    const { latestBuild } = await getProject(db, ready.id);
+    expect(latestBuild).toMatchObject({ kind: "site", status: "running" });
+    expect(workflows.start).toHaveBeenLastCalledWith(
+      "buildWorkflow",
+      expect.objectContaining({ args: [ready.id, latestBuild!.id, "site"] })
+    );
+
+    // While it runs, one more site build waits; saving again does not add another.
+    await setSite(deps, { id: ready.id, title: "Mine 2" });
+    await setSite(deps, { id: ready.id, title: "Mine 3", icon: PNG });
+    const { queued } = await getProject(db, ready.id);
+    expect(queued.map((build) => build.kind)).toEqual(["site"]);
+    expect(workflows.start).toHaveBeenCalledTimes(1);
+    await expect(
+      editQueuedChange(db, { buildId: queued[0].id, request: "something" })
+    ).rejects.toBeInstanceOf(ConflictError);
+    await finishBuild(db, latestBuild!.id);
+    await removeQueuedChange(db, queued[0].id);
   });
 });
 

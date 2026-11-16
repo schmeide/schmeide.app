@@ -8,7 +8,7 @@ import { MockActivityEnvironment } from "@temporalio/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { builds, usage } from "../../db/schema.ts";
+import { builds, projectIcons, projects, usage } from "../../db/schema.ts";
 import { listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import {
@@ -41,6 +41,11 @@ const setup = () => {
   const template = join(root, "template");
   mkdirSync(template);
   writeFileSync(join(template, "AGENTS.md"), "# rules\n");
+  mkdirSync(join(template, "frontend"));
+  writeFileSync(
+    join(template, "frontend", "index.html"),
+    "<html>\n  <head>\n    <title>Notes</title>\n  </head>\n</html>\n"
+  );
   writeFileSync(
     join(template, "Makefile"),
     [
@@ -211,5 +216,43 @@ describe("build activities", () => {
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining(["make check passed", "make test failed (exit 2)"])
     );
+  });
+
+  it("writes the page title and icon into the app and commits them, and takes the icon away again", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const workspace = join(dataDir, "projects", project.slug);
+    const index = () => readFileSync(join(workspace, "frontend", "index.html"), "utf8");
+    const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+    await db
+      .update(projects)
+      .set({ pageTitle: "Tom & Jerry's <b>" })
+      .where(eq(projects.id, project.id));
+    await db.insert(projectIcons).values({ projectId: project.id, data: png.toString("base64") });
+
+    await env.run(activities.applySite, build.id);
+    await env.run(activities.applySite, build.id);
+
+    expect(index()).toContain("<title>Tom &amp; Jerry&#39;s &lt;b&gt;</title>");
+    expect(index()).toContain('<link rel="icon" type="image/png" href="/site-icon.png" />');
+    expect(readFileSync(join(workspace, "frontend", "public", "site-icon.png"))).toEqual(png);
+    // Applying the same values again commits nothing.
+    expect(git(workspace, "log", "--format=%s").trim().split("\n")).toEqual([
+      "set the page title and icon",
+      "start from the schmeide template",
+    ]);
+    expect(git(workspace, "status", "--porcelain")).toBe("");
+
+    await db.delete(projectIcons).where(eq(projectIcons.projectId, project.id));
+    await db.update(projects).set({ pageTitle: null }).where(eq(projects.id, project.id));
+    await env.run(activities.applySite, build.id);
+
+    expect(index()).toBe(
+      `<html>\n  <head>\n    <title>${project.name}</title>\n  </head>\n</html>\n`
+    );
+    expect(existsSync(join(workspace, "frontend", "public", "site-icon.png"))).toBe(false);
   });
 });

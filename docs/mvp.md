@@ -89,7 +89,11 @@ Open <http://localhost:5173> after `make serve`. The page is the whole tool; the
    starts a change build (also the way to retry a failed build or bring an offline app back). While a build
    runs, the form stays open and a new change waits under "Waiting changes", where it can be edited or
    removed until it starts. Token usage and the reported cost are listed below it.
-6. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
+6. **Page title and icon**: the name on the browser tab (the project name unless changed) and a PNG or ICO
+   icon of at most 256 KB. Saving a live app publishes it again with them in under a minute, without the
+   builder; while a build runs, the update waits its turn. Before the first build they are only stored.
+   "Use the default icon" goes back to the template's.
+7. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
    asks first and removes the running app, its data, the code, the spec, and the build history.
 
 The URL hash is the view (`#/` for the list, `#/projects/<id>` for a project), so refresh and Back work. Different
@@ -164,9 +168,15 @@ Print an invoice as a clean page I can save as a PDF
    is the retry and starts at once, ahead of the queue, which follows once it passes.
    `builds.editQueued({ buildId, request })` and `builds.removeQueued({ buildId })` change a queued
    one and answer `CONFLICT` once it has started.
-6. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
+6. `projects.setSite({ id, title, icon })`: the page title (empty means the project name) and icon
+   (base64; `null` removes it, omitted keeps it). The icon must be PNG or ICO by its bytes, at most
+   256 KB. On a `live` or `building` project it starts or queues a `site` build, which skips the agent
+   and checks. Every build, before `deploy`, runs `applySite`: it sets `<title>` (HTML-escaped) in
+   `frontend/index.html`, writes `frontend/public/site-icon.png` or `.ico` with its `<link rel="icon">`
+   (or removes them), and commits if anything changed, so an agent change cannot drop them.
+7. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
    runs `make down` (status `stopped`, volumes kept).
-7. `projects.delete({ id })` removes the deployment and its volumes, the workspace, and every row.
+8. `projects.delete({ id })` removes the deployment and its volumes, the workspace, and every row.
    Refused while a spec or build is running; returns once everything is gone.
 
 `builds.events({ buildId, afterId })` is the live log: pass the last id seen to page forward.

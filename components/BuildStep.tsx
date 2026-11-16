@@ -78,12 +78,12 @@ export function BuildStep({ build }: { readonly build: Build }) {
   return (
     <section aria-labelledby="build" className={stepStyles.step}>
       <h2 id="build">
-        {build.kind === "change" ? copy.project.changeTitle : copy.project.buildTitle}
+        {build.kind === "initial" ? copy.project.buildTitle : copy.project.changeTitle}
       </h2>
-      {build.kind === "change" && (
+      {build.kind !== "initial" && (
         <p>
           <span className={stepStyles.muted}>{copy.project.changeRequestLabel}</span>{" "}
-          {build.request}
+          {build.kind === "site" ? copy.project.siteChangeRequest : build.request}
         </p>
       )}
       <p className={styles.summary} data-status={build.status}>

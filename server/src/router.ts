@@ -11,6 +11,7 @@ import {
 } from "./db/schema.ts";
 import { listEvents } from "./services/builds.ts";
 import { ConflictError, NotFoundError } from "./services/errors.ts";
+import { siteSchema } from "./services/site.ts";
 import {
   approveSpec,
   createProject,
@@ -22,6 +23,7 @@ import {
   removeQueuedChange,
   requestChange,
   setFeatures,
+  setSite,
   stopProject,
   type Deps,
 } from "./services/projects.ts";
@@ -61,6 +63,8 @@ export const appRouter = t.router({
     requestChange: procedure
       .input(changeRequestSchema)
       .mutation(({ ctx, input }) => requestChange(ctx, input)),
+    // The deployed app's page title and icon (base64 PNG or ICO); see services/site.ts.
+    setSite: procedure.input(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
     stop: procedure.input(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
     delete: procedure
       .input(projectIdSchema)

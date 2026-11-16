@@ -1,7 +1,8 @@
 // `make e2e` / `make e2e/fake`: drives the to-do fixture from features to a live app against a
 // running server, then deletes the project (deployment, volumes, workspace, rows) unless KEEP=1.
 // Exits non-zero on failure. E2E_CONCURRENT=1 (set by `make e2e/fake`) builds two projects at once
-// and queues a change on the first while its build runs.
+// and queues a change on the first while its build runs; the second then gets a page title and icon,
+// checked on the deployed app.
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createTRPCClient, httpLink } from "@trpc/client";
@@ -35,6 +36,47 @@ const see = (projectId: number, status: string) => {
     overlapped = true;
 };
 
+// A 1x1 PNG.
+const ICON =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const TITLE = "E2E <title> & icon";
+
+// Polls until the project is live with no queued builds and its latest build is `buildId`.
+const waitForBuild = async (projectId: number, buildId: number, afterId = 0) => {
+  const log = logAs(projectId);
+  for (;;) {
+    checkDeadline();
+    const { project, latestBuild, queued } = await api.projects.get.query({ id: projectId });
+    see(projectId, project.status);
+    for (const event of await api.builds.events.query({
+      buildId: latestBuild?.id ?? buildId,
+      afterId,
+    })) {
+      log(`${event.kind.padEnd(6)} build ${event.buildId} ${event.message}`);
+      afterId = event.id;
+    }
+    if (project.status === "failed") return afterId;
+    if (project.status === "live" && queued.length === 0 && latestBuild?.id === buildId)
+      return afterId;
+    await sleep(3000);
+  }
+};
+
+const checkSite = async (projectId: number, url: string) => {
+  const log = logAs(projectId);
+  await api.projects.setSite.mutate({ id: projectId, title: TITLE, icon: ICON });
+  const { latestBuild } = await api.projects.get.query({ id: projectId });
+  if (latestBuild?.kind !== "site") throw new Error("saving the title and icon started no build");
+  log(`page title and icon saved; build ${latestBuild.id} applies them`);
+  await waitForBuild(projectId, latestBuild.id);
+  const page = await (await fetch(`${url}/`)).text();
+  if (!page.includes("<title>E2E &lt;title&gt; &amp; icon</title>"))
+    throw new Error(`the page title was not applied: ${/<title>.*<\/title>/.exec(page)?.[0]}`);
+  const icon = Buffer.from(await (await fetch(`${url}/site-icon.png`)).arrayBuffer());
+  if (!icon.equals(Buffer.from(ICON, "base64"))) throw new Error("the icon was not served");
+  log(`GET ${url}/ has the page title; ${url}/site-icon.png is the icon`);
+};
+
 const run = async (projectId: number, queueChange: boolean) => {
   const log = logAs(projectId);
   await api.projects.setFeatures.mutate({ id: projectId, features });
@@ -65,22 +107,7 @@ const run = async (projectId: number, queueChange: boolean) => {
     lastBuildId = change.build.id;
   }
   // Event ids grow across builds, so one afterId follows each build in turn.
-  let afterId = 0;
-  for (;;) {
-    checkDeadline();
-    const { project, latestBuild, queued } = await api.projects.get.query({ id: projectId });
-    see(projectId, project.status);
-    for (const event of await api.builds.events.query({
-      buildId: latestBuild?.id ?? build.id,
-      afterId,
-    })) {
-      log(`${event.kind.padEnd(6)} build ${event.buildId} ${event.message}`);
-      afterId = event.id;
-    }
-    if (project.status === "failed") break;
-    if (project.status === "live" && queued.length === 0 && latestBuild?.id === lastBuildId) break;
-    await sleep(3000);
-  }
+  await waitForBuild(projectId, lastBuildId);
 
   const { project, latestBuild, usage } = await api.projects.get.query({ id: projectId });
   see(projectId, project.status);
@@ -97,6 +124,7 @@ const run = async (projectId: number, queueChange: boolean) => {
     log(`GET ${project.previewUrl}${path} -> ${response.status}`);
     if (response.status !== 200) throw new Error(`${path} returned ${response.status}`);
   }
+  if (concurrent && !queueChange) await checkSite(projectId, project.previewUrl);
   return project.previewUrl;
 };
 

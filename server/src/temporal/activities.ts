@@ -1,5 +1,14 @@
 import { spawn } from "node:child_process";
-import { appendFile, mkdir, mkdtemp, rename, rm, stat } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
@@ -7,7 +16,13 @@ import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { projects, type BuildEventKind, type NewUsage, type Project } from "../db/schema.ts";
+import {
+  projectIcons,
+  projects,
+  type BuildEventKind,
+  type NewUsage,
+  type Project,
+} from "../db/schema.ts";
 import {
   appendEvent,
   finishBuild as finishBuildRow,
@@ -22,6 +37,7 @@ import {
   transition,
   type Deps,
 } from "../services/projects.ts";
+import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 
 export type Config = {
   readonly dataDir: string;
@@ -419,7 +435,11 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
         (input.feedback !== undefined
           ? checksFeedbackPrompt(input.feedback)
-          : buildPrompt(build.kind, project.spec ?? "", build.request));
+          : buildPrompt(
+              build.kind === "initial" ? "initial" : "change",
+              project.spec ?? "",
+              build.request
+            ));
       await event(
         input.buildId,
         "step",
@@ -503,6 +523,56 @@ export const createActivities = (deps: Deps, config: Config, query: Query = sdkQ
         await event(buildId, "check", `make ${target} passed`);
       }
       return { ok: true, output: "" };
+    },
+
+    // Writes the page title and icon into the app and commits them, before every deploy, so they
+    // cost no agent run and a change by the agent cannot drop them. `make up` builds the frontend.
+    async applySite(buildId: number): Promise<void> {
+      const { project } = await projectOfBuild(buildId);
+      const workspace = workspaceOf(project);
+      const frontend = join(workspace, "frontend");
+      const html = await readFile(join(frontend, "index.html"), "utf8").catch(() => undefined);
+      if (html === undefined) {
+        await event(
+          buildId,
+          "step",
+          "No frontend/index.html; the page title and icon were not set"
+        );
+        return;
+      }
+      const [icon] = await db
+        .select()
+        .from(projectIcons)
+        .where(eq(projectIcons.projectId, project.id));
+      const bytes = icon && Buffer.from(icon.data, "base64");
+      const type = bytes && iconType(bytes);
+      await mkdir(join(frontend, "public"), { recursive: true });
+      for (const ext of ["png", "ico"]) {
+        await rm(join(frontend, "public", `${ICON_FILE}.${ext}`), { force: true });
+      }
+      if (bytes && type) await writeFile(join(frontend, "public", `${ICON_FILE}.${type}`), bytes);
+      await writeFile(
+        join(frontend, "index.html"),
+        withSite(html, project.pageTitle ?? project.name, type)
+      );
+      await mustRun(
+        project,
+        "git",
+        ["add", "-A", "--", "frontend/index.html", "frontend/public"],
+        workspace
+      );
+      const staged = await run("git", ["diff", "--cached", "--quiet"], {
+        cwd: workspace,
+        env: projectEnv(project, config.dataDir),
+      });
+      if (staged.code === 0) return;
+      await mustRun(
+        project,
+        "git",
+        ["commit", "-q", "-m", "set the page title and icon"],
+        workspace
+      );
+      await event(buildId, "deploy", "Set the page title and icon");
     },
 
     // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production

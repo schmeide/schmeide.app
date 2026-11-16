@@ -33,16 +33,20 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
     <li className={styles.item}>
       {draft === null ? (
         <>
-          <p className={styles.request}>{build.request}</p>
+          <p className={styles.request}>
+            {build.kind === "site" ? copy.project.siteChangeRequest : build.request}
+          </p>
           <div className={stepStyles.actions}>
-            <button
-              type="button"
-              onClick={() => setDraft(build.request)}
-              disabled={pending}
-              aria-label={copy.project.queueEditLabel(position)}
-            >
-              {copy.project.queueEdit}
-            </button>
+            {build.kind === "change" && (
+              <button
+                type="button"
+                onClick={() => setDraft(build.request)}
+                disabled={pending}
+                aria-label={copy.project.queueEditLabel(position)}
+              >
+                {copy.project.queueEdit}
+              </button>
+            )}
             <button
               type="button"
               data-variant="danger"

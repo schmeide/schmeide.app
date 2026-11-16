@@ -82,6 +82,7 @@ describe("ProjectPage", () => {
         project: state.project,
         latestBuild: state.latestBuild,
         queued: [],
+        hasIcon: false,
         usage: noUsage,
       }),
       "projects.approveSpec": () => {
@@ -241,6 +242,61 @@ describe("ProjectPage", () => {
     expect(await screen.findByText(copy.project.failureTitle)).toBeInTheDocument();
     expect(screen.getByText("make test failed (exit 2)")).toBeInTheDocument();
     expect(screen.getByText(copy.status.failed.hint)).toBeInTheDocument();
+  });
+
+  it("saves the page title and icon, and goes back to the default icon", async () => {
+    const state = { project: aProject({ status: "live" }), hasIcon: false };
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer(state),
+      "projects.setSite": (input) => {
+        state.project = { ...state.project, pageTitle: String(input.title) || null };
+        if (input.icon !== undefined) state.hasIcon = input.icon !== null;
+        return state.project;
+      },
+    });
+    const title = await screen.findByLabelText(copy.project.site.titleLabel);
+    expect(title).toHaveValue("Invoices");
+    expect(screen.getByText(copy.project.site.iconNone)).toBeInTheDocument();
+
+    await userEvent.clear(title);
+    await userEvent.type(title, "Acme invoices");
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    await userEvent.upload(
+      screen.getByLabelText(copy.project.site.iconLabel),
+      new File([png], "icon.png", { type: "image/png" })
+    );
+    await userEvent.click(screen.getByRole("button", { name: copy.project.site.save }));
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        path: "projects.setSite",
+        input: { id: 7, title: "Acme invoices", icon: "iVBORw0KGgo=" },
+      })
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.site.removeIcon })
+    );
+    expect(calls).toContainEqual({
+      path: "projects.setSite",
+      input: { id: 7, title: "Acme invoices", icon: null },
+    });
+    expect(await screen.findByText(copy.project.site.iconNone)).toBeInTheDocument();
+  });
+
+  it("refuses an icon file that is too big before sending it", async () => {
+    const calls = renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject({ status: "live" }) })
+    );
+    await userEvent.upload(
+      await screen.findByLabelText(copy.project.site.iconLabel),
+      new File([new Uint8Array(256 * 1024 + 1)], "huge.png", { type: "image/png" })
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(copy.project.site.iconTooBig);
+    await userEvent.click(screen.getByRole("button", { name: copy.project.site.save }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({ path: "projects.setSite", input: { id: 7, title: "" } })
+    );
   });
 
   it("says when the project no longer exists", async () => {
