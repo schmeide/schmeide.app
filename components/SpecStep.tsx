@@ -1,47 +1,15 @@
 import { useMutation } from "@tanstack/react-query";
-import { createElement } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
-import { parseMarkdown } from "../utils/markdown";
 import { ErrorNote } from "./ErrorNote";
+import { Spec } from "./Spec";
 
 import styles from "./Step.module.css";
 
-// Renders **bold** runs; everything else is plain text.
-const inline = (text: string) =>
-  text
-    .split(/\*\*(.+?)\*\*/)
-    .map((part, index) => (index % 2 ? <strong key={index}>{part}</strong> : part));
-
-function Spec({ source }: { readonly source: string }) {
-  return (
-    <div className={styles.spec}>
-      {parseMarkdown(source).map((block, index) => {
-        if (block.kind === "heading") {
-          return createElement(
-            `h${Math.min(block.level + 1, 6)}`,
-            { key: index },
-            inline(block.text)
-          );
-        }
-        if (block.kind === "list") {
-          return (
-            <ul key={index}>
-              {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{inline(item)}</li>
-              ))}
-            </ul>
-          );
-        }
-        return <p key={index}>{inline(block.text)}</p>;
-      })}
-    </div>
-  );
-}
-
 type Props = { readonly project: Project; readonly onChangeFeatures: () => void };
 
+// Setup step 2: the spec being written, then ready to read and approve.
 export function SpecStep({ project, onChangeFeatures }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
@@ -72,12 +40,6 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
           </div>
           <ErrorNote error={approve.error} />
         </>
-      )}
-      {project.status !== "spec_ready" && project.spec && (
-        <details>
-          <summary>{copy.project.builtFrom}</summary>
-          <Spec source={project.spec} />
-        </details>
       )}
     </section>
   );

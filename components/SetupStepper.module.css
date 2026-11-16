@@ -1,0 +1,62 @@
+/* Four numbered badges in a row; the labels sit under them so the row fits a 320px screen. */
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-s);
+  margin: 0 0 var(--space-m);
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+
+.stepper li {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-xs);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  text-align: center;
+  counter-increment: step;
+}
+
+.stepper li::before {
+  content: counter(step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--hit-target);
+  height: var(--hit-target);
+  background: var(--color-surface);
+  border-radius: var(--radius-badge);
+  font-weight: 700;
+}
+
+.stepper li[data-state="done"]::before {
+  content: "✓";
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.stepper li[data-state="current"] {
+  color: var(--color-fg);
+  font-weight: 700;
+}
+
+.stepper li[data-state="current"]::before {
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+}
+
+.label {
+  overflow-wrap: anywhere;
+}
+
+/* Read by a screen reader, where the check mark is not. */
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

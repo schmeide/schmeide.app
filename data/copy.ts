@@ -24,6 +24,8 @@ export const copy = {
   routes: {
     apps: "Apps",
     project: "App",
+    projectChanges: "Changes",
+    projectSettings: "Settings",
     usage: "Usage",
     billing: "Billing",
     business: "Business",
@@ -76,6 +78,29 @@ export const copy = {
   project: {
     back: "← All projects",
     statusPrefix: "Status:",
+    // Setting an app up, until its first build passes: one step at a time.
+    setup: {
+      label: "Setting up your app",
+      steps: ["Describe", "Spec", "Build", "Live"],
+      done: "(done)",
+    },
+    // The app's home once it has been live.
+    views: {
+      label: "This app",
+      overview: "Overview",
+      changes: "Changes",
+      settings: "Settings",
+    },
+    viewTitle: (view: string, name: string) => `${view} · ${name}`,
+    toChanges: "Request a change",
+    seeChanges: "See what went wrong",
+    appBuildingHint:
+      "A change is being built. Follow it under “Changes”; this page updates by itself.",
+    appFailedHint:
+      "The last change did not finish. See what went wrong under “Changes”, then request a change to try again.",
+    retryTitle: "Try again",
+    firstBuildTitle: "First build",
+    manageBusy: "You can delete the project once the build has finished.",
     featuresTitle: "1. What your app should do",
     featuresIntro:
       "Write one request in each box, in your own words. Press Enter or “Add another request” for a new box.",
@@ -107,8 +132,10 @@ export const copy = {
     approving: "Starting the build…",
     changeFeatures: "Change the requests",
     builtFrom: "The spec this app was built from",
+    showSpec: "Show the spec",
     buildTitle: "3. Build",
     changeTitle: "Latest change",
+    retryBuildTitle: "3. Build, another try",
     changeRequestLabel: "What you asked for:",
     siteChangeRequest: "Update the page title and icon.",
     buildStatus: {
@@ -136,7 +163,6 @@ export const copy = {
       deploy: "Putting your app online.",
       error: "Something went wrong.",
     },
-    liveTitle: "4. Your app",
     open: "Open your app",
     opensInNewTab: "(opens in a new tab)",
     changeTitleForm: "Request a change",
@@ -210,10 +236,10 @@ export const copy = {
       label: "Building",
       hint: "Your app is being built. This can take several minutes; this page updates by itself.",
     },
-    live: { label: "Live", hint: "Your app is live. Open it below, or request a change." },
+    live: { label: "Live", hint: "Your app is live. Open it, or request a change." },
     failed: {
       label: "Build failed",
-      hint: "The build did not finish. See what went wrong below, then request a change to try again.",
+      hint: "The build did not finish. See what went wrong below, then try again.",
     },
     stopped: {
       label: "Offline",

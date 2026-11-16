@@ -125,6 +125,7 @@ export const projectServer = (state: {
   latestBuild?: Build | null;
   queued?: readonly Build[];
   hasIcon?: boolean;
+  hasBeenLive?: boolean;
   events?: BuildEvent[];
   usage?: Usage;
 }): Handlers => ({
@@ -134,6 +135,7 @@ export const projectServer = (state: {
     latestBuild: state.latestBuild ?? null,
     queued: state.queued ?? [],
     hasIcon: state.hasIcon ?? false,
+    hasBeenLive: state.hasBeenLive ?? false,
     usage: state.usage ?? noUsage,
   }),
   "builds.events": (input) =>

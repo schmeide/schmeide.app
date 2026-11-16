@@ -2,7 +2,9 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
+import type { Project } from "../../trpc";
 import { ProjectPage } from "../ProjectPage";
+import { Routes } from "../Routes";
 import {
   aBuild,
   anEvent,
@@ -154,8 +156,9 @@ describe("ProjectPage", () => {
       project: aProject({ status: "building", spec: SPEC }),
       latestBuild: aBuild({ kind: "change", request: "Add a due date" }),
       queued: [aBuild({ id: 4, kind: "change", status: "queued", request: "Sort by date" })],
+      hasBeenLive: true,
     };
-    const calls = renderWithApi(<ProjectPage id={7} />, {
+    const calls = renderWithApi(<ProjectPage id={7} view="changes" />, {
       ...projectServer(state),
       "projects.requestChange": (input) => {
         const build = aBuild({ id: 5, status: "queued", request: String(input.request) });
@@ -186,8 +189,9 @@ describe("ProjectPage", () => {
       project: aProject({ status: "building" }),
       latestBuild: aBuild(),
       queued: [aBuild({ id: 4, kind: "change", status: "queued", request: "Sort by dat" })],
+      hasBeenLive: true,
     };
-    const calls = renderWithApi(<ProjectPage id={7} />, {
+    const calls = renderWithApi(<ProjectPage id={7} view="changes" />, {
       ...projectServer(state),
       "builds.editQueued": (input) => {
         state.queued = [{ ...state.queued[0], request: String(input.request) }];
@@ -260,11 +264,14 @@ describe("ProjectPage", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByText("$0.42")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
-    expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: copy.project.toChanges })).toHaveAttribute(
+      "href",
+      "/projects/7/changes"
+    );
   });
 
   it("requests a change on a live app", async () => {
-    const calls = renderWithApi(<ProjectPage id={7} />, {
+    const calls = renderWithApi(<ProjectPage id={7} view="changes" />, {
       ...projectServer({
         project: aProject({ status: "live", previewUrl: "http://localhost:8100" }),
         latestBuild: aBuild({ status: "passed" }),
@@ -298,7 +305,7 @@ describe("ProjectPage", () => {
 
   it("saves the page title and icon, and goes back to the default icon", async () => {
     const state = { project: aProject({ status: "live" }), hasIcon: false };
-    const calls = renderWithApi(<ProjectPage id={7} />, {
+    const calls = renderWithApi(<ProjectPage id={7} view="settings" />, {
       ...projectServer(state),
       "projects.setSite": (input) => {
         state.project = { ...state.project, pageTitle: String(input.title) || null };
@@ -337,7 +344,7 @@ describe("ProjectPage", () => {
 
   it("refuses an icon file that is too big before sending it", async () => {
     const calls = renderWithApi(
-      <ProjectPage id={7} />,
+      <ProjectPage id={7} view="settings" />,
       projectServer({ project: aProject({ status: "live" }) })
     );
     await userEvent.upload(
@@ -376,7 +383,7 @@ describe("ProjectPage", () => {
 
   it("confirms before deleting, saying what goes, then returns to the list", async () => {
     window.history.replaceState(null, "", "/projects/7");
-    const calls = renderWithApi(<ProjectPage id={7} />, {
+    const calls = renderWithApi(<ProjectPage id={7} view="settings" />, {
       ...projectServer({ project: aProject({ status: "stopped" }) }),
       "projects.delete": () => undefined,
     });
@@ -386,5 +393,236 @@ describe("ProjectPage", () => {
     await userEvent.click(screen.getByRole("button", { name: copy.project.deleteYes }));
     expect(calls).toContainEqual({ path: "projects.delete", input: { id: 7 } });
     await waitFor(() => expect(window.location.pathname).toBe("/"));
+  });
+});
+
+const primaryButtons = () => document.querySelectorAll('[data-variant="primary"]');
+const currentStep = () =>
+  within(screen.getByRole("list", { name: copy.project.setup.label }))
+    .getAllByRole("listitem")
+    .find((step) => step.getAttribute("aria-current") === "step")?.textContent;
+
+describe("ProjectPage setup", () => {
+  const setup = (project: Partial<Project>, latestBuild: ReturnType<typeof aBuild> | null = null) =>
+    renderWithApi(
+      <ProjectPage id={7} view="settings" />,
+      projectServer({ project: aProject(project), latestBuild })
+    );
+
+  it("shows only the describe step in a new project, with one primary button", async () => {
+    setup({});
+    expect(await screen.findByRole("heading", { name: copy.project.featuresTitle })).toBeVisible();
+    expect(currentStep()).toBe("Describe");
+    expect(screen.queryByRole("heading", { name: copy.project.specTitle })).toBeNull();
+    expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
+    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    expect(screen.queryByRole("navigation", { name: copy.project.views.label })).toBeNull();
+    expect(primaryButtons()).toHaveLength(1);
+    expect(screen.getByRole("button", { name: copy.project.delete })).toBeInTheDocument();
+  });
+
+  it("moves the stepper to the spec, then back to describing while the requests are changed", async () => {
+    setup({ status: "spec_ready", features: "a", spec: SPEC });
+    expect(await screen.findByRole("heading", { name: copy.project.specTitle })).toBeVisible();
+    expect(currentStep()).toBe("Spec");
+    expect(screen.queryByRole("heading", { name: copy.project.featuresTitle })).toBeNull();
+    expect(primaryButtons()).toHaveLength(1);
+    expect(
+      within(screen.getByRole("list", { name: copy.project.setup.label })).getAllByRole("listitem")
+    ).toHaveLength(4);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.changeFeatures }));
+    expect(currentStep()).toBe("Describe");
+    expect(screen.queryByRole("button", { name: copy.project.approve })).toBeNull();
+    expect(primaryButtons()).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.cancelEdit }));
+    expect(screen.getByRole("button", { name: copy.project.approve })).toBeInTheDocument();
+  });
+
+  it("shows only the build during the first build: no change box, no primary button", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({
+        project: aProject({ status: "building", spec: SPEC }),
+        latestBuild: aBuild(),
+      }),
+      "projects.stop": () => aProject({ status: "failed" }),
+    });
+    expect(await screen.findByRole("heading", { name: copy.project.buildTitle })).toBeVisible();
+    expect(currentStep()).toBe("Build");
+    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
+    expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
+    expect(primaryButtons()).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.cancelBuild }));
+    expect(calls).toContainEqual({ path: "projects.stop", input: { id: 7 } });
+  });
+
+  it("keeps a project whose first build failed in setup, where it can be retried or deleted", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({
+        project: aProject({ status: "failed", spec: SPEC }),
+        // A retry is a change build, but nothing has passed yet.
+        latestBuild: aBuild({
+          kind: "change",
+          request: "try again",
+          status: "failed",
+          error: "boom",
+        }),
+        hasBeenLive: false,
+      }),
+      "projects.requestChange": () => ({ project: aProject(), build: aBuild() }),
+    });
+    expect(await screen.findByText(copy.status.failed.hint)).toBeInTheDocument();
+    expect(currentStep()).toBe("Build");
+    expect(screen.getByRole("heading", { name: copy.project.retryBuildTitle })).toBeVisible();
+    expect(screen.queryByRole("navigation", { name: copy.project.views.label })).toBeNull();
+    expect(screen.getByRole("button", { name: copy.project.delete })).toBeInTheDocument();
+    expect(primaryButtons()).toHaveLength(1);
+
+    await userEvent.type(screen.getByLabelText(copy.project.changeLabel), "try again");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.requestChange }));
+    expect(calls).toContainEqual({
+      path: "projects.requestChange",
+      input: { id: 7, request: "try again" },
+    });
+  });
+});
+
+describe("ProjectPage app workspace", () => {
+  const live = aProject({ status: "live", spec: SPEC, previewUrl: "http://localhost:8100" });
+  const passed = aBuild({ status: "passed", finishedAt: new Date() });
+
+  it("links its three views, marking the one shown", async () => {
+    renderWithApi(
+      <ProjectPage id={7} view="changes" />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    const views = await screen.findByRole("navigation", { name: copy.project.views.label });
+    expect(
+      within(views)
+        .getAllByRole("link")
+        .map((link) => [
+          link.textContent,
+          link.getAttribute("href"),
+          link.getAttribute("aria-current"),
+        ])
+    ).toEqual([
+      ["Overview", "/projects/7", null],
+      ["Changes", "/projects/7/changes", "page"],
+      ["Settings", "/projects/7/settings", null],
+    ]);
+    expect(screen.queryByRole("list", { name: copy.project.setup.label })).toBeNull();
+  });
+
+  it.each(["overview", "changes", "settings"] as const)(
+    "has at most one primary button on %s, and no numbered step",
+    async (view) => {
+      renderWithApi(
+        <ProjectPage id={7} view={view} />,
+        projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+      );
+      await screen.findByRole("navigation", { name: copy.project.views.label });
+      expect(primaryButtons()).toHaveLength(view === "settings" ? 0 : 1);
+      expect(
+        screen
+          .getAllByRole("heading", { level: 2 })
+          .filter((heading) => /^\d/.test(heading.textContent))
+      ).toEqual([]);
+    }
+  );
+
+  it("keeps the overview to opening the app: no change box, title, or delete there", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    await screen.findByRole("link", { name: new RegExp(copy.project.open) });
+    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
+    expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
+    expect(screen.queryByRole("log")).toBeNull();
+  });
+
+  it("stays in the workspace when a later change fails, pointing to what went wrong", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed", spec: SPEC }),
+        latestBuild: aBuild({
+          kind: "change",
+          request: "Add a logo",
+          status: "failed",
+          error: "boom",
+        }),
+        hasBeenLive: true,
+      })
+    );
+    expect(await screen.findByText(copy.project.appFailedHint)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: copy.project.seeChanges })).toHaveAttribute(
+      "href",
+      "/projects/7/changes"
+    );
+    expect(screen.queryByRole("link", { name: new RegExp(copy.project.open) })).toBeNull();
+    expect(primaryButtons()).toHaveLength(1);
+  });
+
+  it("stays in the workspace when the app is offline", async () => {
+    renderWithApi(
+      <ProjectPage id={7} view="settings" />,
+      projectServer({ project: aProject({ status: "stopped" }), hasBeenLive: true })
+    );
+    expect(await screen.findByLabelText(copy.project.site.titleLabel)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy.project.takeOffline })).toBeNull();
+    expect(screen.getByRole("button", { name: copy.project.delete })).toBeInTheDocument();
+  });
+
+  it("takes a live app offline from settings", async () => {
+    const state = { project: live, latestBuild: passed, hasBeenLive: true };
+    const calls = renderWithApi(<ProjectPage id={7} view="settings" />, {
+      ...projectServer(state),
+      "projects.stop": () => state.project,
+    });
+    await userEvent.click(await screen.findByRole("button", { name: copy.project.takeOffline }));
+    expect(calls).toContainEqual({ path: "projects.stop", input: { id: 7 } });
+  });
+
+  it("offers to cancel a running change beside its log, and says why delete is not there", async () => {
+    const building = {
+      project: aProject({ status: "building", spec: SPEC }),
+      latestBuild: aBuild({ kind: "change", request: "Add a logo" }),
+      hasBeenLive: true,
+    };
+    window.history.replaceState(null, "", "/projects/7/changes");
+    renderWithApi(<Routes />, projectServer(building));
+    expect(await screen.findByRole("button", { name: copy.project.cancelBuild })).toBeVisible();
+    expect(screen.getByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
+    expect(screen.getByText(copy.project.appBuildingHint)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: copy.project.views.settings }));
+    expect(window.location.pathname).toBe("/projects/7/settings");
+    expect(screen.getByText(copy.project.manageBusy)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
+    expect(screen.queryByRole("button", { name: copy.project.cancelBuild })).toBeNull();
+  });
+
+  it("keeps a half-typed change while moving between views, and names the tab after the view", async () => {
+    window.history.replaceState(null, "", "/projects/7/changes");
+    renderWithApi(
+      <Routes />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    await userEvent.type(await screen.findByLabelText(copy.project.changeLabel), "Add a due");
+    await waitFor(() =>
+      expect(document.title).toBe(copy.pageTitle(copy.project.viewTitle("Changes", "Invoices")))
+    );
+
+    await userEvent.click(screen.getByRole("link", { name: copy.project.views.overview }));
+    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    await waitFor(() => expect(document.title).toBe(copy.pageTitle("Invoices")));
+
+    await userEvent.click(screen.getByRole("link", { name: copy.project.toChanges }));
+    expect(screen.getByLabelText(copy.project.changeLabel)).toHaveValue("Add a due");
   });
 });

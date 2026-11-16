@@ -1,4 +1,4 @@
-/* Shared by the project steps: FeaturesStep, SpecStep, BuildStep, LiveStep, ProjectActions. */
+/* Shared by the cards of a project page: the setup steps and the sections of the app's views. */
 
 /* Each step is a mint card, like the pipeline cards on schmeide.com. */
 .step {

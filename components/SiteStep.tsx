@@ -77,7 +77,7 @@ export function SiteStep({ project, hasIcon }: Props) {
         </p>
         {tooBig && <p role="alert">{copy.project.site.iconTooBig}</p>}
         <div className={styles.actions}>
-          <button type="submit" data-variant="primary" disabled={save.isPending}>
+          <button type="submit" disabled={save.isPending}>
             {save.isPending ? copy.project.saving : copy.project.site.save}
           </button>
           {hasIcon && (

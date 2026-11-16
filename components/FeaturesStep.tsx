@@ -17,7 +17,6 @@ import styles from "./FeaturesStep.module.css";
 
 type Props = {
   readonly project: Project;
-  readonly editing: boolean;
   readonly onEditingChange: (editing: boolean) => void;
   readonly specFailed: boolean;
 };
@@ -34,7 +33,7 @@ const boxes = (features: string): readonly string[] => {
   return saved.length ? saved : [""];
 };
 
-export function FeaturesStep({ project, editing, onEditingChange, specFailed }: Props) {
+export function FeaturesStep({ project, onEditingChange, specFailed }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const [requests, setRequests] = useState(() => boxes(project.features));
@@ -56,8 +55,8 @@ export function FeaturesStep({ project, editing, onEditingChange, specFailed }: 
   const [empty, setEmpty] = useState(false);
   const save = useMutation(trpc.projects.setFeatures.mutationOptions());
   const generate = useMutation(trpc.projects.generateSpec.mutationOptions());
+  // Shown in draft, and from a ready spec to change the requests (which discards that spec).
   const reviewing = project.status === "spec_ready";
-  const editable = project.status === "draft" || (reviewing && editing);
   const dirty = text !== lines(project.features).join("\n");
 
   // Saving from spec_ready discards the spec, so only save when something changed.
@@ -108,89 +107,81 @@ export function FeaturesStep({ project, editing, onEditingChange, specFailed }: 
   return (
     <section aria-labelledby="features" className={stepStyles.step}>
       <h2 id="features">{copy.project.featuresTitle}</h2>
-      {editable ? (
-        <form onSubmit={onWriteSpec} className={stepStyles.form}>
-          <p className={stepStyles.muted}>{copy.project.featuresIntro}</p>
-          {specFailed && <p role="alert">{copy.project.specFailed}</p>}
-          <fieldset className={styles.requests}>
-            <legend>{copy.project.featuresLabel}</legend>
-            <ol className={styles.list}>
-              {requests.map((request, index) => (
-                // Index keys are safe: the inputs are controlled, so values follow the state.
-                <li key={index} className={styles.row}>
-                  <input
-                    ref={(input) => {
-                      inputs.current[index] = input;
-                    }}
-                    type="text"
-                    aria-label={copy.project.requestLabel(index + 1)}
-                    maxLength={1000}
-                    value={request}
-                    onChange={(event) =>
-                      setRequests(
-                        requests.map((old, at) => (at === index ? event.target.value : old))
-                      )
-                    }
-                    onKeyDown={onKeyDown(index)}
-                    onPaste={onPaste(index)}
-                    placeholder={copy.project.requestPlaceholders[index]}
-                    autoFocus={reviewing && index === 0}
-                  />
-                  {index > 0 && (
-                    <button
-                      type="button"
-                      className={styles.remove}
-                      aria-label={copy.project.removeRequestLabel(index + 1)}
-                      onClick={() => splice(index, [], index - 1)}
-                    >
-                      {copy.project.removeRequest}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ol>
+      <form onSubmit={onWriteSpec} className={stepStyles.form}>
+        <p className={stepStyles.muted}>{copy.project.featuresIntro}</p>
+        {specFailed && <p role="alert">{copy.project.specFailed}</p>}
+        <fieldset className={styles.requests}>
+          <legend>{copy.project.featuresLabel}</legend>
+          <ol className={styles.list}>
+            {requests.map((request, index) => (
+              // Index keys are safe: the inputs are controlled, so values follow the state.
+              <li key={index} className={styles.row}>
+                <input
+                  ref={(input) => {
+                    inputs.current[index] = input;
+                  }}
+                  type="text"
+                  aria-label={copy.project.requestLabel(index + 1)}
+                  maxLength={1000}
+                  value={request}
+                  onChange={(event) =>
+                    setRequests(
+                      requests.map((old, at) => (at === index ? event.target.value : old))
+                    )
+                  }
+                  onKeyDown={onKeyDown(index)}
+                  onPaste={onPaste(index)}
+                  placeholder={copy.project.requestPlaceholders[index]}
+                  autoFocus={reviewing && index === 0}
+                />
+                {index > 0 && (
+                  <button
+                    type="button"
+                    className={styles.remove}
+                    aria-label={copy.project.removeRequestLabel(index + 1)}
+                    onClick={() => splice(index, [], index - 1)}
+                  >
+                    {copy.project.removeRequest}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ol>
+          <button
+            type="button"
+            className={styles.add}
+            onClick={() => splice(requests.length, [""], requests.length)}
+          >
+            {copy.project.addRequest}
+          </button>
+        </fieldset>
+        {reviewing && <p className={stepStyles.warning}>{copy.project.discardWarning}</p>}
+        <div className={stepStyles.actions}>
+          <button type="button" onClick={onSave} disabled={pending || !dirty}>
+            {save.isPending ? copy.project.saving : copy.project.saveFeatures}
+          </button>
+          <button type="submit" data-variant="primary" disabled={pending}>
+            {generate.isPending ? copy.project.startingSpec : copy.project.writeSpec}
+          </button>
+          {reviewing && (
             <button
               type="button"
-              className={styles.add}
-              onClick={() => splice(requests.length, [""], requests.length)}
+              onClick={() => {
+                setRequests(boxes(project.features));
+                onEditingChange(false);
+              }}
+              disabled={pending}
             >
-              {copy.project.addRequest}
+              {copy.project.cancelEdit}
             </button>
-          </fieldset>
-          {reviewing && <p className={stepStyles.warning}>{copy.project.discardWarning}</p>}
-          <div className={stepStyles.actions}>
-            <button type="button" onClick={onSave} disabled={pending || !dirty}>
-              {save.isPending ? copy.project.saving : copy.project.saveFeatures}
-            </button>
-            <button type="submit" data-variant="primary" disabled={pending}>
-              {generate.isPending ? copy.project.startingSpec : copy.project.writeSpec}
-            </button>
-            {reviewing && (
-              <button
-                type="button"
-                onClick={() => {
-                  setRequests(boxes(project.features));
-                  onEditingChange(false);
-                }}
-                disabled={pending}
-              >
-                {copy.project.cancelEdit}
-              </button>
-            )}
-            {save.isSuccess && !dirty && (
-              <span className={stepStyles.muted}>{copy.project.saved}</span>
-            )}
-          </div>
-          {empty && <p role="alert">{copy.project.needFeatures}</p>}
-          <ErrorNote error={save.error ?? generate.error} />
-        </form>
-      ) : (
-        <ul>
-          {lines(project.features).map((line, index) => (
-            <li key={index}>{line}</li>
-          ))}
-        </ul>
-      )}
+          )}
+          {save.isSuccess && !dirty && (
+            <span className={stepStyles.muted}>{copy.project.saved}</span>
+          )}
+        </div>
+        {empty && <p role="alert">{copy.project.needFeatures}</p>}
+        <ErrorNote error={save.error ?? generate.error} />
+      </form>
     </section>
   );
 }

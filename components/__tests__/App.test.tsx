@@ -37,6 +37,7 @@ describe("App", () => {
         latestBuild: null,
         queued: [],
         hasIcon: false,
+        hasBeenLive: false,
         usage: {},
       }),
     });
