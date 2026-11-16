@@ -1,4 +1,5 @@
-// The one process: Fastify + tRPC API and the Temporal worker. The only place that reads the environment.
+// The one process: Fastify + tRPC API and the Temporal worker. With cli/access.ts, the only place
+// that reads the environment.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -8,6 +9,7 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { describeRouting, routingFromEnv } from "./agentModel.ts";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
+import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
 import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
@@ -58,6 +60,15 @@ const config = {
   claudeBin,
 } as const;
 
+const authConfig = (() => {
+  try {
+    return authConfigFromEnv(env);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+})();
+
 const db = createDb(databaseUrl);
 const connection = await Connection.connect({ address: temporalAddress }).catch(
   (error: unknown) => {
@@ -80,7 +91,8 @@ const worker = await Worker.create({
 
 await failOrphanedBuilds(deps);
 const interviewer = createInterviewer({ ...config, model: config.interviewModel });
-const app = buildApp({ ...deps, interviewer }, true);
+const providers = enabledProviders(authConfig);
+const app = buildApp({ ...deps, interviewer, auth: createAuth(db, authConfig), providers }, true);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
@@ -89,6 +101,9 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
+console.log(
+  `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
+);
 console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}`
 );
