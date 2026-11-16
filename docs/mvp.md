@@ -19,11 +19,16 @@ make serve    # Postgres + Temporal, migrations, the server on :3100, and Vite o
 - API: <http://localhost:3100/api/trpc>, health at <http://localhost:3100/api/healthz>
 - Temporal UI: <http://localhost:8233>
 
-`make serve/server` runs only the server (with reload). `make infra/down` stops Postgres and
-Temporal; the Postgres volume is kept.
+`make serve/server` runs only the server. `make infra/down` stops Postgres and Temporal; the
+Postgres volume is kept.
 
-The server reloads on code changes under `make serve`. A reload kills any running agent or check
-and fails that build, so do not edit server code while a build runs.
+`make serve` does not reload the server on code changes; restart it to pick them up.
+`make serve/watch` is the same with reload, for working on the server itself.
+
+A server restart in the middle of a build (Ctrl-C and `make serve` again, or a reload) does not
+fail it: the step that was running starts again once the server is back, and the agent continues
+from the work already in the project. Each step gets one such retry. If Temporal itself restarted,
+the build cannot resume; the server marks it failed at startup, and "Request a change" retries it.
 
 ## Using the UI
 
@@ -174,8 +179,8 @@ Each is marked in code with a `ponytail:` comment.
 
 - No auth, no rate limits, no per-tenant quotas; usage is recorded but not enforced.
 - Temporal history is lost when its container restarts; project and build rows survive in Postgres.
-  A build whose workflow vanished stays `running` and blocks new builds: mark it failed by hand
-  (`update builds set status = 'failed' where status = 'running'`) and set the project to `failed`.
-- A server restart mid-build fails that build (activities run once; nothing resumes the agent).
+  A build whose workflow vanished is marked failed when the server next starts.
+- A step restarted after a server restart begins again: an agent run starts a new session (with a
+  note to continue from the workspace), so it pays again for reading the project.
 - Deployments keep running until stopped. A new project takes the highest web port plus one, so
   ports below that are only reused once the projects above them are deleted.

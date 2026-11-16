@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Context } from "@temporalio/activity";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -10,7 +11,7 @@ import { createDb } from "../../db/client.ts";
 import { builds } from "../../db/schema.ts";
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
-import { GIT_CONFIG, createActivities, gitConfigFile } from "../activities.ts";
+import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
 import { MAX_FIX_ATTEMPTS, buildWorkflow } from "../workflows.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -25,7 +26,7 @@ afterAll(async () => {
 
 // A template whose `make test` fails while a file named `broken` exists, and a fake agent
 // (SCHMEIDE_AGENT_CMD) that creates `broken` on its first run and removes it on run `fixOnRun`.
-const setup = (fixOnRun: number) => {
+const setup = (fixOnRun: number, interruptFirstAgentRun = false) => {
   const root = mkdtempSync(join(tmpdir(), "schmeide-wf-"));
   const dataDir = join(root, "data");
   mkdirSync(join(dataDir, "bin"), { recursive: true });
@@ -66,11 +67,18 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
   });
   const runPrompts = () => readFileSync(prompts, "utf8").split("\n---\n").slice(0, -1);
   // Deploying needs Docker and a real app; the loop under test ends before it.
-  return { activities: { ...activities, deploy: async () => undefined }, runPrompts };
+  // A server restart fails the running activity on the dying worker ("Worker is shutting down").
+  const runAgent: typeof activities.runAgent = async (input) => {
+    if (interruptFirstAgentRun && Context.current().info.attempt === 1) {
+      throw new Error("Worker is shutting down and this activity did not complete in time");
+    }
+    return activities.runAgent(input);
+  };
+  return { activities: { ...activities, runAgent, deploy: async () => undefined }, runPrompts };
 };
 
-const runBuild = async (fixOnRun: number) => {
-  const { activities, runPrompts } = setup(fixOnRun);
+const runBuild = async (fixOnRun: number, interruptFirstAgentRun = false) => {
+  const { activities, runPrompts } = setup(fixOnRun, interruptFirstAgentRun);
   const project = await createProject(db, { name: `wf ${randomUUID()}` });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
@@ -126,5 +134,16 @@ describe("buildWorkflow check and fix loop", () => {
     expect(prompts).toHaveLength(3);
     expect(events).toEqual(expect.arrayContaining(["make test passed", "Build passed"]));
     expect(build.status).toBe("passed");
+  }, 120_000);
+
+  it("runs an interrupted agent step again, telling it to continue", async () => {
+    const { outcome, prompts, events } = await runBuild(1, true);
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain(INTERRUPTED_NOTE);
+    expect(events).toEqual(
+      expect.arrayContaining(["The server restarted; the agent picks up where it stopped"])
+    );
   }, 120_000);
 });

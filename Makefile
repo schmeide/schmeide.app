@@ -83,6 +83,12 @@ clean: ## Clean build artifacts
 serve: infra/up node_modules ## Infra, migrations, the platform server on :3100, and Vite on :5173 (proxies /api)
 	$(MAKE) db/migrate
 	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
+	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run start -w server" "$(JS_EXEC) run dev"
+
+.PHONY: serve/watch
+serve/watch: infra/up node_modules ## Like serve, but the server reloads on code changes (a reload restarts a running build's step)
+	$(MAKE) db/migrate
+	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
 
 .PHONY: serve/web
@@ -90,8 +96,8 @@ serve/web: node_modules ## Run only the Vite dev server
 	$(JS_EXEC) run dev
 
 .PHONY: serve/server
-serve/server: node_modules ## Run only the platform server (API + Temporal worker) with reload
-	$(JS_EXEC) run dev -w server
+serve/server: node_modules ## Run only the platform server (API + Temporal worker), no reload
+	$(JS_EXEC) run start -w server
 
 .PHONY: serve/prod
 serve/prod: build ## Serve the built static site locally

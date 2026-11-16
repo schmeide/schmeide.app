@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { appendEvent, finishBuild, recordUsage } from "../builds.ts";
+import { builds } from "../../db/schema.ts";
+import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../builds.ts";
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
   approveSpec,
   createProject,
   deleteProject,
   deleteProjectRows,
+  failOrphanedBuilds,
   findProject,
   getProject,
   generateSpec,
@@ -215,5 +218,38 @@ describe("deleting a project", () => {
     await deleteProjectRows(db, ready.id);
 
     await expect(findProject(db, ready.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("failOrphanedBuilds", () => {
+  it("fails running builds whose workflow is gone and leaves live workflows alone", async () => {
+    const { deps } = fakeWorkflows();
+    const orphan = await approveSpec(deps, (await specReady()).id);
+    await finishBuild(db, orphan.build.id);
+    const alive = await approveSpec(deps, (await specReady()).id);
+    await db.update(builds).set({ status: "running" }).where(eq(builds.id, orphan.build.id));
+    const workflows = {
+      ...deps.workflows,
+      // Every other workflow (other test files share the database) reports as running.
+      getHandle: vi.fn((id: string) => ({
+        describe: async () => {
+          if (id === `build-${orphan.build.id}`) throw new Error("workflow not found");
+          return { status: { name: "RUNNING" } };
+        },
+      })) as never,
+    };
+    try {
+      await failOrphanedBuilds({ ...deps, workflows });
+
+      const failed = await getBuild(db, orphan.build.id);
+      expect(failed.status).toBe("failed");
+      expect(failed.error).toMatch(/server stopped/);
+      expect((await findProject(db, orphan.project.id)).status).toBe("failed");
+      expect((await listEvents(db, orphan.build.id, 0)).at(-1)?.message).toMatch(/server stopped/);
+      expect((await getBuild(db, alive.build.id)).status).toBe("running");
+      expect((await findProject(db, alive.project.id)).status).toBe("building");
+    } finally {
+      await finishBuild(db, alive.build.id);
+    }
   });
 });

@@ -113,6 +113,9 @@ export const checksFeedbackPrompt = (output: string): string =>
 ${output}
 \`\`\``;
 
+export const INTERRUPTED_NOTE =
+  "An earlier run of this task was interrupted before it finished. Its partial work is in the workspace (see `git status`); continue from there rather than starting over.";
+
 const SPEC_PROMPT = (
   features: string
 ) => `A non-technical customer wants a small web app with these features, one per line:
@@ -403,14 +406,20 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
       feedback?: string;
     }): Promise<string> {
       const { build, project } = await projectOfBuild(input.buildId);
+      const retried = Context.current().info.attempt > 1;
       const prompt =
-        input.feedback !== undefined
+        (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
+        (input.feedback !== undefined
           ? checksFeedbackPrompt(input.feedback)
-          : buildPrompt(build.kind, project.spec ?? "", build.request);
+          : buildPrompt(build.kind, project.spec ?? "", build.request));
       await event(
         input.buildId,
         "step",
-        input.feedback !== undefined ? "Agent is fixing failed checks" : "Agent is building the app"
+        retried
+          ? "The server restarted; the agent picks up where it stopped"
+          : input.feedback !== undefined
+            ? "Agent is fixing failed checks"
+            : "Agent is building the app"
       );
       if (config.agentCmd) {
         await runAgentCmd(project, "build", prompt, workspaceOf(project), input.buildId);
