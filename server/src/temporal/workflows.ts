@@ -16,12 +16,11 @@ const { generateSpec } = proxyActivities<Activities>({
   startToCloseTimeout: "10 minutes",
   heartbeatTimeout: "1 minute",
 });
-const { prepareWorkspace, finishBuild, stopDeployment, removeProject } =
-  proxyActivities<Activities>({
-    startToCloseTimeout: "10 minutes",
-    heartbeatTimeout: "1 minute",
-    retry: { maximumAttempts: 3 },
-  });
+const { finishBuild, stopDeployment, removeProject } = proxyActivities<Activities>({
+  startToCloseTimeout: "10 minutes",
+  heartbeatTimeout: "1 minute",
+  retry: { maximumAttempts: 3 },
+});
 // The SDK throttles heartbeats to 80% of heartbeatTimeout, and cancellation only arrives with a
 // heartbeat, so a short timeout keeps cancellation prompt. Waiting for the cancellation to complete
 // means a canceled build is only marked failed once its agent or make process has stopped.
@@ -36,7 +35,7 @@ const { runAgent } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "90 minutes",
 });
-const { runChecks, deploy } = proxyActivities<Activities>({
+const { prepareWorkspace, runChecks, deploy } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "30 minutes",
 });
