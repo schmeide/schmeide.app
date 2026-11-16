@@ -113,6 +113,7 @@ describe("startInterview", () => {
         {
           projectId: asked.id,
           buildId: null,
+          runKind: "interview",
           model: "claude-test",
           inputTokens: 1,
           outputTokens: 2,
