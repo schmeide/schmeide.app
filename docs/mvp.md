@@ -38,9 +38,10 @@ subscription they count against its usage limits rather than being billed):
 
 ## When a build fails
 
-1. Read "What went wrong" on the project page; the last lines of the log say which step failed.
-2. Press "Request a change" with what to fix, or just "try again". The agent continues in the same
-   project with your note.
+1. Read "What went wrong" on the project page (under "Changes" once the app has been live); the last
+   lines of the log say which step failed.
+2. Describe what to fix under "Try again" (or "Request a change" once the app has been live), or just
+   write "try again". The agent continues in the same project with your note.
 3. "Checks still failing after 3 fix attempts" means the agent could not make `make check`,
    `make test`, and `make build` pass; the output under "What went wrong" is the last failure.
    Request a change that describes the problem.
@@ -80,24 +81,37 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install or log in to.
 
 1. **Create a project**: type a name and press "Create project". The project page opens.
-2. **What your app should do**: one request per box, in plain words. "Add another request" or Enter in a box adds a
+
+A project page has two phases. **Setup** lasts until the first build passes. It shows one step at a time, with a
+stepper (Describe, Spec, Build, Live) above it, and one main button per step:
+
+1. **What your app should do**: one request per box, in plain words. "Add another request" or Enter in a box adds a
    box below it, "Remove" drops one, and empty boxes are ignored. Pasting a list of several lines into a box puts each
    line in its own box (the [sample invoicing requests](#sample-invoicing-requests) work). "Save" keeps them; "Write
    the spec" saves and starts the spec.
-3. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
-   "Change the requests", which warns first that saving new requests throws the spec away.
-4. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
-   Problem) with the server's own message. A failed build shows what went wrong.
-5. **Your app**: "Open your app" at the top of the page opens the preview in a new tab. "Request a change"
-   starts a change build (also the way to retry a failed build or bring an offline app back). While a build
-   runs, the form stays open and a new change waits under "Waiting changes", where it can be edited or
-   removed until it starts. Token usage and the reported cost are listed below it.
-6. **Page title and icon**: the name on the browser tab (the project name unless changed) and a PNG or ICO
-   icon of at most 256 KB. Saving a live app publishes it again with them in under a minute, without the
-   builder; while a build runs, the update waits its turn. Before the first build they are only stored.
-   "Use the default icon" goes back to the template's.
-7. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
-   asks first and removes the running app, its data, the code, the spec, and the build history.
+2. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
+   "Change the requests", which goes back to step 1 and warns that saving new requests throws the spec away.
+3. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
+   Problem) with the server's own message. "Cancel the build" is below it. A failed or canceled first build stays on
+   this step: it shows what went wrong and a "Try again" box, where you describe what to fix or just write "try
+   again".
+
+"Delete project" is at the bottom of every setup step except while the spec is written or a build runs. It asks
+first and removes the running app, its data, the code, the spec, and the build history.
+
+**Your app** is the project's home once it has been live, and it stays so if a later change fails or the app is
+taken offline. It has three views, each with its own address:
+
+- **Overview** (`/projects/<id>`): "Open your app" opens the preview in a new tab, "Request a change" leads to
+  Changes, and below are token usage with the reported cost and the spec the app was built from.
+- **Changes** (`/projects/<id>/changes`): "Request a change" starts a change build (also the way to retry a failed
+  change or bring an offline app back). Below it are the latest build with its log, with "Cancel the build" while
+  it runs, and the "Waiting changes": while a build runs a new change waits there, where it can be edited or removed
+  until it starts.
+- **Settings** (`/projects/<id>/settings`): the page title (the project name unless changed) and a PNG or ICO icon
+  of at most 256 KB. Saving a live app publishes it again with them in under a minute, without the builder; while a
+  build runs, the update waits its turn. "Use the default icon" goes back to the template's. Under "Manage" are
+  "Take the app offline" while live and "Delete project".
 
 Every page sits in the app shell: the logo (back to the list), the business name, the navigation (Apps, Usage,
 Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal links in the footer. The
@@ -105,7 +119,8 @@ pages other than the project list and a project say "This page is not built yet"
 is the "Demo owner" of the "Demo business"; "Sign out" in the account menu shows the signed-out state until "Sign in"
 or a reload.
 
-The address is the view (`/` for the list, `/projects/<id>` for a project; the full table is `utils/routes.ts`), so
+The address is the view (`/` for the list, `/projects/<id>` and its views for a project; the full table is
+`utils/routes.ts`), so
 refresh and Back work. Different projects build at the same time; one project runs one build at a time, because its
 builds share its workspace. If the server is not running, the page says to start it with `make serve`. The production
 build (GitHub Pages) has no API and shows the "Coming soon" page instead, with no shell.

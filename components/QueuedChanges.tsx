@@ -71,7 +71,7 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
             autoFocus
           />
           <div className={stepStyles.actions}>
-            <button type="submit" data-variant="primary" disabled={pending || !draft.trim()}>
+            <button type="submit" disabled={pending || !draft.trim()}>
               {edit.isPending ? copy.project.saving : copy.project.queueSave}
             </button>
             <button type="button" onClick={() => setDraft(null)} disabled={pending}>

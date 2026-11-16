@@ -2,29 +2,25 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { copy } from "../data/copy";
-import { POLL_MS, useTRPC, type ProjectStatus } from "../trpc";
+import { POLL_MS, useTRPC } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { pathTo } from "../utils/routes";
-import { BuildStep } from "./BuildStep";
 import { ErrorNote } from "./ErrorNote";
-import { FeaturesStep } from "./FeaturesStep";
-import { LiveStep } from "./LiveStep";
-import { ProjectActions } from "./ProjectActions";
 import { Link } from "./Link";
-import { QueuedChanges } from "./QueuedChanges";
+import { ProjectSetup } from "./ProjectSetup";
+import { ProjectWorkspace, type ProjectView } from "./ProjectWorkspace";
 import { RouteProblem } from "./RouteProblem";
-import { SiteStep } from "./SiteStep";
-import { SpecStep } from "./SpecStep";
 
 import styles from "./ProjectPage.module.css";
 
-// A change can be requested once a build exists; while one runs, it waits in the queue.
-const CHANGEABLE: readonly ProjectStatus[] = ["building", "live", "failed", "stopped"];
+type Props = { readonly id: number; readonly view?: ProjectView };
 
-// One project, walked through in order: features, spec, build, the live app.
-export function ProjectPage({ id }: { readonly id: number }) {
+// One project, in one of two phases: setup (until its first build passes), then the app's home
+// with its views. `view` only matters in the second.
+export function ProjectPage({ id, view = "overview" }: Props) {
   const trpc = useTRPC();
-  const [editingFeatures, setEditingFeatures] = useState(false);
+  // The change being typed; kept here so it survives a move between the views.
+  const [request, setRequest] = useState("");
   // The updatedAt of a live project the owner asked to take offline; polled until it changes.
   const [stoppingAt, setStoppingAt] = useState<number | null>(null);
   const query = useQuery(
@@ -50,11 +46,18 @@ export function ProjectPage({ id }: { readonly id: number }) {
     setSeen({ status, specFailed: seen.status === "spec_generating" && status === "draft" });
   }
 
+  // A project that has been live stays in its home when a later change fails or it goes offline;
+  // one whose first build has not passed yet is still being set up.
+  const inApp = Boolean(query.data?.hasBeenLive) || status === "live" || status === "stopped";
+
   // The tab is named after the project once it is known; until then it keeps the route's title.
   const name = query.data?.project.name;
   useEffect(() => {
-    if (name) document.title = copy.pageTitle(name);
-  }, [name]);
+    if (!name) return;
+    document.title = copy.pageTitle(
+      inApp && view !== "overview" ? copy.project.viewTitle(copy.project.views[view], name) : name
+    );
+  }, [name, inApp, view]);
 
   const back = (
     <Link to={pathTo("apps")} className={styles.back}>
@@ -75,6 +78,13 @@ export function ProjectPage({ id }: { readonly id: number }) {
   }
 
   const { project, latestBuild, queued, hasIcon, usage } = query.data;
+  const onStop = () => setStoppingAt(project.updatedAt.getTime());
+  const hint =
+    inApp && project.status === "building"
+      ? copy.project.appBuildingHint
+      : inApp && project.status === "failed"
+        ? copy.project.appFailedHint
+        : copy.status[project.status].hint;
   return (
     <article>
       {back}
@@ -83,33 +93,31 @@ export function ProjectPage({ id }: { readonly id: number }) {
         <strong>
           {copy.project.statusPrefix} {copy.status[project.status].label}.
         </strong>{" "}
-        {copy.status[project.status].hint}
+        {hint}
       </p>
-      {/* The live app comes first: it is what the owner came back for. */}
-      {project.status === "live" && project.previewUrl && (
-        <p className={styles.preview}>
-          <a href={project.previewUrl} target="_blank" rel="noreferrer" className={styles.open}>
-            {copy.project.open} <span className={styles.hint}>{copy.project.opensInNewTab}</span>
-          </a>
-          <span className={styles.muted}>{project.previewUrl}</span>
-        </p>
-      )}
       <ErrorNote error={query.error} />
-
-      <FeaturesStep
-        project={project}
-        editing={editingFeatures}
-        onEditingChange={setEditingFeatures}
-        specFailed={seen.specFailed}
-      />
-      {(project.spec || project.status === "spec_generating") && (
-        <SpecStep project={project} onChangeFeatures={() => setEditingFeatures(true)} />
+      {inApp ? (
+        <ProjectWorkspace
+          view={view}
+          project={project}
+          latestBuild={latestBuild}
+          queued={queued}
+          hasIcon={hasIcon}
+          usage={usage}
+          request={request}
+          onRequestChange={setRequest}
+          onStop={onStop}
+        />
+      ) : (
+        <ProjectSetup
+          project={project}
+          latestBuild={latestBuild}
+          specFailed={seen.specFailed}
+          request={request}
+          onRequestChange={setRequest}
+          onStop={onStop}
+        />
       )}
-      {latestBuild && <BuildStep key={latestBuild.id} build={latestBuild} />}
-      <QueuedChanges queued={queued} />
-      {CHANGEABLE.includes(project.status) && <LiveStep project={project} usage={usage} />}
-      <SiteStep project={project} hasIcon={hasIcon} />
-      <ProjectActions project={project} onStop={() => setStoppingAt(project.updatedAt.getTime())} />
     </article>
   );
 }

@@ -115,6 +115,8 @@ export const getProject = async (
   latestBuild: Build | null;
   queued: readonly Build[];
   hasIcon: boolean;
+  // A build of this project has passed, so the app has been live at least once.
+  hasBeenLive: boolean;
   usage: UsageTotals;
 }> => {
   const project = await findProject(db, id);
@@ -143,11 +145,17 @@ export const getProject = async (
     .select({ projectId: projectIcons.projectId })
     .from(projectIcons)
     .where(eq(projectIcons.projectId, id));
+  const [passed] = await db
+    .select({ id: builds.id })
+    .from(builds)
+    .where(and(eq(builds.projectId, id), eq(builds.status, "passed")))
+    .limit(1);
   return {
     project,
     latestBuild: latestBuild ?? null,
     queued,
     hasIcon: Boolean(icon),
+    hasBeenLive: Boolean(passed),
     usage: totals,
   };
 };

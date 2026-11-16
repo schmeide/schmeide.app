@@ -93,6 +93,7 @@ describe("getProject", () => {
     const detail = await getProject(db, project.id);
 
     expect(detail.latestBuild).toBeNull();
+    expect(detail.hasBeenLive).toBe(false);
     expect(detail.usage).toEqual({
       inputTokens: 0,
       outputTokens: 0,
@@ -212,7 +213,10 @@ describe("the change queue", () => {
     expect(detail.latestBuild?.id).toBe(build.id);
     expect(detail.queued.map((queued) => queued.request)).toEqual(["first", "second"]);
 
+    expect(detail.hasBeenLive).toBe(false);
+
     await pass(build.id, project.id);
+    expect((await getProject(db, project.id)).hasBeenLive).toBe(true);
     expect((await startNextChange(deps, project.id))?.id).toBe(first.build.id);
     // Repeating it (an activity retry) does not start the second while the first runs.
     expect(await startNextChange(deps, project.id)).toBeUndefined();

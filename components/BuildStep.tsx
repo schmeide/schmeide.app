@@ -62,7 +62,8 @@ function useNow(ticking: boolean): number {
   return now;
 }
 
-export function BuildStep({ build }: { readonly build: Build }) {
+// `title` differs by place: a numbered setup step, or the latest change of a running app.
+export function BuildStep({ build, title }: { readonly build: Build; readonly title: string }) {
   const events = useBuildEvents(build);
   const running = build.status === "running";
   const now = useNow(running);
@@ -77,9 +78,7 @@ export function BuildStep({ build }: { readonly build: Build }) {
   const end = build.finishedAt?.getTime() ?? now;
   return (
     <section aria-labelledby="build" className={stepStyles.step}>
-      <h2 id="build">
-        {build.kind === "initial" ? copy.project.buildTitle : copy.project.changeTitle}
-      </h2>
+      <h2 id="build">{title}</h2>
       {build.kind !== "initial" && (
         <p>
           <span className={stepStyles.muted}>{copy.project.changeRequestLabel}</span>{" "}

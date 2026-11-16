@@ -1,0 +1,7 @@
+/* Cancel and delete: reachable from every step, but quiet and below the step itself. */
+.controls {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-s);
+  margin-top: var(--space-l);
+}
