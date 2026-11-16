@@ -11,8 +11,6 @@ const describe = (error: ApiError): string => {
       return copy.errors.serverDown;
     case "notFound":
       return copy.errors.notFound;
-    case "busy":
-      return copy.errors.busy;
     case "conflict":
       return `${copy.errors.conflict} ${error.message}`;
     case "badRequest":

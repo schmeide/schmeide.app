@@ -86,15 +86,16 @@ Open <http://localhost:5173> after `make serve`. The page is the whole tool; the
 4. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
    Problem) with the server's own message. A failed build shows what went wrong.
 5. **Your app**: "Open your app" at the top of the page opens the preview in a new tab. "Request a change"
-   starts a change build (also the way to retry a failed build or bring an offline app back). Token usage and
-   the reported cost are listed below it.
+   starts a change build (also the way to retry a failed build or bring an offline app back). While a build
+   runs, the form stays open and a new change waits under "Waiting changes", where it can be edited or
+   removed until it starts. Token usage and the reported cost are listed below it.
 6. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
    asks first and removes the running app, its data, the code, the spec, and the build history.
 
-The URL hash is the view (`#/` for the list, `#/projects/<id>` for a project), so refresh and Back work. Only one
-build runs at a time across all projects; approving while another runs says so. If the server is not running, the
-page says to start it with `make serve`. The production build (GitHub Pages) has no API and shows the
-"Coming soon" page instead.
+The URL hash is the view (`#/` for the list, `#/projects/<id>` for a project), so refresh and Back work. Different
+projects build at the same time; one project runs one build at a time, because its builds share its workspace. If
+the server is not running, the page says to start it with `make serve`. The production build (GitHub Pages) has no
+API and shows the "Coming soon" page instead.
 
 | Status shown         | Server status     | Meaning                                                  |
 | -------------------- | ----------------- | -------------------------------------------------------- |
@@ -116,7 +117,9 @@ volumes, workspace, and rows) whether it passed or failed. It exits non-zero on 
 - `make e2e/fake`: no Claude usage. Starts its own server on `:3199` (task queue `schmeide-fake`)
   with `SCHMEIDE_AGENT_CMD=server/e2e/fake-agent.sh`, which prints a fixed spec and makes one small
   real commit (it retitles the page). Clone, the independent checks, deploy, and preview all run for
-  real. About 35 seconds. Run this one while developing; it needs only `make infra/up`, which it runs.
+  real. It builds two projects at once and queues a change on one of them while it builds
+  (`E2E_CONCURRENT=1`), and fails unless both were seen building together. About 75 seconds. Run
+  this one while developing; it needs only `make infra/up`, which it runs.
 - `make e2e`: the same flow with Claude against the server from `make serve` (`:3100`). A few
   minutes and well under a dollar with `opus` so far. Run it sparingly.
 - `KEEP=1` on either leaves the app running and prints its preview URL and the `projects.delete`
@@ -155,7 +158,12 @@ Print an invoice as a clean page I can save as a PDF
    4. `deploy`: `make up`, then waits for `/` and `/api/healthz` on the web port to answer 200.
       Status `live` with `previewUrl`.
 5. `projects.requestChange({ id, request })` on a `live`, `failed`, or `stopped` project runs the
-   same workflow as a change build.
+   same workflow as a change build. On a `building` project it is queued instead (build status
+   `queued`). When a build passes, its last step starts the oldest queued change of the project. A
+   failed or canceled build leaves the queue waiting; the next change requested on the failed project
+   is the retry and starts at once, ahead of the queue, which follows once it passes.
+   `builds.editQueued({ buildId, request })` and `builds.removeQueued({ buildId })` change a queued
+   one and answer `CONFLICT` once it has started.
 6. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
    runs `make down` (status `stopped`, volumes kept).
 7. `projects.delete({ id })` removes the deployment and its volumes, the workspace, and every row.
@@ -216,7 +224,7 @@ Each is marked in code with a `ponytail:` comment.
 | Agent runs on the host in the workspace           | Sandbox pod per job                           |
 | Checks run on the host via the project Makefile   | Kubernetes Job                                |
 | `make up` with Docker Compose, `localhost:<port>` | AKS namespace per tenant, object storage, CDN |
-| One build at a time across all tenants            | Task queue per tenant                         |
+| Builds of all projects share one worker           | Task queue per tenant                         |
 | Temporal dev server, in memory                    | A real Temporal cluster                       |
 
 ## Known gaps

@@ -2,9 +2,9 @@ import { TRPCClientError } from "@trpc/client";
 
 import { classifyError } from "../apiError";
 
-const trpcError = (code: string, message: string, reason?: string) =>
+const trpcError = (code: string, message: string) =>
   TRPCClientError.from({
-    error: { code: -32000, message, data: { code, httpStatus: 400, reason } },
+    error: { code: -32000, message, data: { code, httpStatus: 400 } },
   });
 
 describe("classifyError", () => {
@@ -14,15 +14,10 @@ describe("classifyError", () => {
     );
   });
 
-  it("tells a running build apart from other conflicts by the error's reason, not its text", () => {
-    expect(classifyError(trpcError("CONFLICT", "Busy", "buildRunning"))).toBe("busy");
-    expect(classifyError(trpcError("CONFLICT", "Build 3 is still running"))).toBe("conflict");
+  it("maps the codes", () => {
     expect(
       classifyError(trpcError("CONFLICT", "Project 1 is live; this needs it to be draft"))
     ).toBe("conflict");
-  });
-
-  it("maps the other codes", () => {
     expect(classifyError(trpcError("NOT_FOUND", "Project 9 not found"))).toBe("notFound");
     expect(classifyError(trpcError("BAD_REQUEST", "too long"))).toBe("badRequest");
     expect(classifyError(trpcError("INTERNAL_SERVER_ERROR", "boom"))).toBe("other");

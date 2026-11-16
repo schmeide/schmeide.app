@@ -1,0 +1,18 @@
+.list {
+  display: grid;
+  gap: var(--space-s);
+  padding-left: var(--space-l);
+}
+
+.item {
+  padding: var(--space-s) var(--space-m);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.request {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -14,38 +14,24 @@ const deps: Deps = {
   taskQueue: "test",
 };
 
-const specReady = async () => {
-  const project = await createProject(db, { name: `api ${randomUUID()}` });
-  return transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
-};
-
 describe("the API", () => {
-  it("marks a build refused because another one runs with reason buildRunning", async () => {
+  it("answers CONFLICT when a running build is edited as if it were queued", async () => {
     const app = buildApp(deps);
-    const approve = (id: number) =>
-      app.inject({
-        method: "POST",
-        url: "/api/trpc/projects.approveSpec",
-        payload: { json: { id } },
-      });
-    const { build } = await approveSpec(deps, (await specReady()).id);
-    const other = await specReady();
+    const project = await createProject(db, { name: `api ${randomUUID()}` });
+    await transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
+    const { build } = await approveSpec(deps, project.id);
     try {
-      const busy = await approve(other.id);
-
-      expect(busy.statusCode).toBe(409);
-      expect(busy.json().error.json.data).toMatchObject({
-        code: "CONFLICT",
-        reason: "buildRunning",
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/trpc/builds.editQueued",
+        payload: { json: { buildId: build.id, request: "something else" } },
       });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.json.data).toMatchObject({ code: "CONFLICT" });
     } finally {
       await finishBuild(db, build.id);
+      await app.close();
     }
-    const draft = await createProject(db, { name: `api ${randomUUID()}` });
-    const conflict = await approve(draft.id);
-    await app.close();
-
-    expect(conflict.statusCode).toBe(409);
-    expect(conflict.json().error.json.data).not.toHaveProperty("reason");
   });
 });

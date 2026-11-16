@@ -152,7 +152,7 @@ e2e: node_modules ## Real Claude run of the to-do fixture against `make serve`, 
 E2E_FAKE_PORT ?= 3199
 
 .PHONY: e2e/fake
-e2e/fake: infra/up node_modules ## Same run with a fake agent and its own server on :3199: no Claude usage
+e2e/fake: infra/up node_modules ## Fake-agent run on its own server (:3199): two projects at once plus a queued change; no Claude usage
 	$(MAKE) db/migrate
 	mkdir -p $(SCHMEIDE_DATA_DIR)/logs
 	log=$(SCHMEIDE_DATA_DIR)/logs/e2e-fake-server.log
@@ -164,7 +164,7 @@ e2e/fake: infra/up node_modules ## Same run with a fake agent and its own server
 		if ! kill -0 $$server 2>/dev/null; then echo "Error: the fake-agent server exited; see $$log"; exit 1; fi
 		sleep 1
 	done
-	PORT=$(E2E_FAKE_PORT) $(JS_EXEC) run e2e -w server
+	PORT=$(E2E_FAKE_PORT) E2E_CONCURRENT=1 $(JS_EXEC) run e2e -w server
 
 .PHONY: test/watch
 test/watch: ## Run tests in watch mode

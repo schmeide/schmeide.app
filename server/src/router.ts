@@ -1,21 +1,25 @@
 import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import {
+  buildIdSchema,
   changeRequestSchema,
+  editChangeSchema,
   eventsQuerySchema,
   newProjectSchema,
   projectIdSchema,
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { listEvents } from "./services/builds.ts";
-import { BuildRunningError, ConflictError, NotFoundError } from "./services/errors.ts";
+import { ConflictError, NotFoundError } from "./services/errors.ts";
 import {
   approveSpec,
   createProject,
   deleteProject,
+  editQueuedChange,
   generateSpec,
   getProject,
   listProjects,
+  removeQueuedChange,
   requestChange,
   setFeatures,
   stopProject,
@@ -24,17 +28,7 @@ import {
 
 export type Context = Deps;
 
-const t = initTRPC.context<Context>().create({
-  transformer: superjson,
-  // `reason` tells conflicts the UI treats differently apart without matching message text.
-  errorFormatter: ({ shape, error }) => ({
-    ...shape,
-    data: {
-      ...shape.data,
-      ...(error.cause instanceof BuildRunningError && { reason: "buildRunning" as const }),
-    },
-  }),
-});
+const t = initTRPC.context<Context>().create({ transformer: superjson });
 
 const procedure = t.procedure.use(async ({ next }) => {
   const result = await next();
@@ -76,6 +70,13 @@ export const appRouter = t.router({
     events: procedure
       .input(eventsQuerySchema)
       .query(({ ctx, input }) => listEvents(ctx.db, input.buildId, input.afterId)),
+    // A queued change only; CONFLICT once it has started.
+    editQueued: procedure
+      .input(editChangeSchema)
+      .mutation(({ ctx, input }) => editQueuedChange(ctx.db, input)),
+    removeQueued: procedure
+      .input(buildIdSchema)
+      .mutation(({ ctx, input }) => removeQueuedChange(ctx.db, input.buildId)),
   }),
 });
 

@@ -16,8 +16,7 @@ export type Call = { readonly path: string; readonly input: Input };
 export class ApiFailure extends Error {
   constructor(
     readonly code: string | undefined,
-    message: string = code ?? "Failed to fetch",
-    readonly reason?: string
+    message: string = code ?? "Failed to fetch"
   ) {
     super(message);
   }
@@ -29,7 +28,7 @@ const toClientError = (error: unknown) =>
         error: {
           code: -32000,
           message: error.message,
-          data: { code: error.code, httpStatus: 400, reason: error.reason },
+          data: { code: error.code, httpStatus: 400 },
         },
       })
     : TRPCClientError.from(error instanceof Error ? error : new Error(String(error)));
@@ -120,6 +119,7 @@ export const noUsage: Usage = {
 export const projectServer = (state: {
   project: Project;
   latestBuild?: Build | null;
+  queued?: readonly Build[];
   events?: BuildEvent[];
   usage?: Usage;
 }): Handlers => ({
@@ -127,6 +127,7 @@ export const projectServer = (state: {
   "projects.get": () => ({
     project: state.project,
     latestBuild: state.latestBuild ?? null,
+    queued: state.queued ?? [],
     usage: state.usage ?? noUsage,
   }),
   "builds.events": (input) =>

@@ -3,7 +3,15 @@ import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
 import { ProjectPage } from "../ProjectPage";
-import { aBuild, anEvent, aProject, ApiFailure, projectServer, renderWithApi } from "./fakeApi";
+import {
+  aBuild,
+  anEvent,
+  aProject,
+  ApiFailure,
+  noUsage,
+  projectServer,
+  renderWithApi,
+} from "./fakeApi";
 
 const SPEC = "## Features\n- Keep a list of clients\n\n## Screens\n- Client list";
 
@@ -70,7 +78,12 @@ describe("ProjectPage", () => {
     };
     const calls = renderWithApi(<ProjectPage id={7} />, {
       ...projectServer(state),
-      "projects.get": () => ({ project: state.project, latestBuild: state.latestBuild, usage: {} }),
+      "projects.get": () => ({
+        project: state.project,
+        latestBuild: state.latestBuild,
+        queued: [],
+        usage: noUsage,
+      }),
       "projects.approveSpec": () => {
         state.project = { ...state.project, status: "building" };
         state.latestBuild = aBuild();
@@ -83,15 +96,75 @@ describe("ProjectPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent(copy.status.building.label);
   });
 
-  it("says plainly when another build is already running", async () => {
-    renderWithApi(<ProjectPage id={7} />, {
-      ...projectServer({ project: aProject({ status: "spec_ready", features: "a", spec: SPEC }) }),
-      "projects.approveSpec": () => {
-        throw new ApiFailure("CONFLICT", "Build 2 is busy", "buildRunning");
+  it("lets a change be requested while a build runs, and lists the waiting changes", async () => {
+    const state = {
+      project: aProject({ status: "building", spec: SPEC }),
+      latestBuild: aBuild({ kind: "change", request: "Add a due date" }),
+      queued: [aBuild({ id: 4, kind: "change", status: "queued", request: "Sort by date" })],
+    };
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer(state),
+      "projects.requestChange": (input) => {
+        const build = aBuild({ id: 5, status: "queued", request: String(input.request) });
+        state.queued = [...state.queued, build];
+        return { project: state.project, build };
       },
     });
-    await userEvent.click(await screen.findByRole("button", { name: copy.project.approve }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(copy.errors.busy);
+
+    expect(await screen.findByText(copy.project.changeQueueIntro)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(copy.project.changeLabel), "Add a logo");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.requestChange }));
+
+    expect(calls).toContainEqual({
+      path: "projects.requestChange",
+      input: { id: 7, request: "Add a logo" },
+    });
+    const queue = await screen.findByRole("region", { name: copy.project.queueTitle });
+    await within(queue).findByText("Add a logo");
+    expect(
+      within(queue)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual([expect.stringContaining("Sort by date"), expect.stringContaining("Add a logo")]);
+  });
+
+  it("edits and removes a waiting change", async () => {
+    const state = {
+      project: aProject({ status: "building" }),
+      latestBuild: aBuild(),
+      queued: [aBuild({ id: 4, kind: "change", status: "queued", request: "Sort by dat" })],
+    };
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer(state),
+      "builds.editQueued": (input) => {
+        state.queued = [{ ...state.queued[0], request: String(input.request) }];
+        return state.queued[0];
+      },
+      "builds.removeQueued": () => {
+        const [removed] = state.queued;
+        state.queued = [];
+        return removed;
+      },
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.queueEditLabel(1) })
+    );
+    const field = screen.getByLabelText(copy.project.queueEditFieldLabel(1));
+    await userEvent.clear(field);
+    await userEvent.type(field, "Sort by date");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.queueSave }));
+    expect(calls).toContainEqual({
+      path: "builds.editQueued",
+      input: { buildId: 4, request: "Sort by date" },
+    });
+    expect(await screen.findByText("Sort by date")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.queueRemoveLabel(1) }));
+    expect(calls).toContainEqual({ path: "builds.removeQueued", input: { buildId: 4 } });
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: copy.project.queueTitle })).toBeNull()
+    );
   });
 
   it("appends new build events as they arrive, in plain words", async () => {

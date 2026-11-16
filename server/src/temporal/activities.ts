@@ -14,7 +14,14 @@ import {
   getBuild,
   recordUsage,
 } from "../services/builds.ts";
-import { deleteProjectRows, findProject, testDbPort, transition } from "../services/projects.ts";
+import {
+  deleteProjectRows,
+  findProject,
+  startNextChange,
+  testDbPort,
+  transition,
+  type Deps,
+} from "../services/projects.ts";
 
 export type Config = {
   readonly dataDir: string;
@@ -199,7 +206,8 @@ export const describeToolUse = (
   }
 };
 
-export const createActivities = (db: Db, config: Config, query: Query = sdkQuery) => {
+export const createActivities = (deps: Deps, config: Config, query: Query = sdkQuery) => {
+  const db: Db = deps.db;
   const workspaceOf = (project: Project) => join(config.dataDir, "projects", project.slug);
   const logFile = (buildId: number) => join(config.dataDir, "logs", `build-${buildId}.log`);
 
@@ -547,6 +555,10 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
         await db.update(projects).set({ status: "failed" }).where(eq(projects.id, build.projectId));
       } else {
         await event(buildId, "step", "Build passed");
+        // Here, not in the workflow, so a retry of this activity cannot start a second change.
+        const next = await startNextChange(deps, build.projectId);
+        if (next)
+          await event(buildId, "step", `Starting the next queued change (build ${next.id})`);
       }
     },
 
