@@ -1,9 +1,10 @@
+import { apiUrl } from "./apiUrl";
 import type { Provider } from "./session";
 
 // Sign-in and sign-out are the server's own routes under /api/auth, not tRPC procedures: they set
 // and clear the session cookie. Plain fetch, so no auth library ships to the browser.
 const post = async (path: string, body: unknown) => {
-  const response = await fetch(`/api/auth${path}`, {
+  const response = await fetch(apiUrl(`/api/auth${path}`), {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",

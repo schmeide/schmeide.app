@@ -38,8 +38,12 @@ jobs:
       - name: Test
         run: npm test
 
+      # VITE_API_URL is a repository variable. Unset, the site has no API and shows "Coming soon";
+      # set to the server's address, the site signs people in against it (docs/auth.md).
       - name: Build static site
         run: npm run build
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

@@ -117,7 +117,13 @@ export const createAuth = (db: Db, config: AuthConfig) =>
     rateLimit: { enabled: config.rateLimit ?? true, storage: "database" },
     // A refused provider sign-in returns to the sign-in page with `?error=<reason>`.
     onAPIError: { errorURL: `${config.publicUrl}/sign-in` },
-    advanced: { useSecureCookies: config.publicUrl.startsWith("https://") },
+    advanced: {
+      useSecureCookies: config.publicUrl.startsWith("https://"),
+      // Said outright, because Better Auth turns both checks off by itself under a test runner:
+      // a request that carries cookies must come from one of the trusted origins above.
+      disableOriginCheck: false,
+      disableCSRFCheck: false,
+    },
     telemetry: { enabled: false },
   });
 

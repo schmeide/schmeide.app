@@ -92,7 +92,10 @@ const worker = await Worker.create({
 await failOrphanedBuilds(deps);
 const interviewer = createInterviewer({ ...config, model: config.interviewModel });
 const providers = enabledProviders(authConfig);
-const app = buildApp({ ...deps, interviewer, auth: createAuth(db, authConfig), providers }, true);
+const app = buildApp(
+  { ...deps, interviewer, auth: createAuth(db, authConfig), providers },
+  { logger: true, allowOrigin: authConfig.publicUrl }
+);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
@@ -107,6 +110,7 @@ console.log(
 console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}`
 );
-await app.listen({ host: "127.0.0.1", port });
+// Loopback unless told otherwise: a hosted server sits behind a proxy that ends https.
+await app.listen({ host: env.SCHMEIDE_HOST ?? "127.0.0.1", port });
 await worker.run();
 await connection.close();

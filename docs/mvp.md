@@ -4,7 +4,8 @@ A minimal, local version of the Schmeide software factory: create a project, lis
 a plain-language spec, approve it, and a Claude agent builds the app from the
 [Schmeide template](https://github.com/schmeide/template), the server checks it independently, and
 deploys it on this machine. People sign in, and only approved email addresses can. Each person works in a business
-of their own and sees only its projects.
+of their own and sees only its projects. [Sign-in and the approved list](auth.md) has the settings, the provider
+setup, and how to connect the hosted site.
 
 ## Quick start
 

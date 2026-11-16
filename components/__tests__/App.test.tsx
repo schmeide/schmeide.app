@@ -22,6 +22,25 @@ describe("App", () => {
     expect(screen.queryByText(copy.errors.serverDownTitle)).not.toBeInTheDocument();
   });
 
+  it("waits for a hosted API to answer rather than flashing the hero first", async () => {
+    const hold: { answer: (session: unknown) => void } = { answer: () => undefined };
+    const pending = new Promise((resolve) => {
+      hold.answer = resolve;
+    });
+    renderWithApi(<App isPublicSite expectsApi />, { "session.get": () => pending }, "server");
+    expect(screen.getByText(copy.loading)).toBeInTheDocument();
+    expect(screen.queryByText(copy.hero.tagline)).toBeNull();
+    hold.answer({ person: null, businesses: [], providers: [] });
+    expect(
+      await screen.findByRole("heading", { level: 1, name: copy.routes.signIn })
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the hero when the hosted API does not answer", async () => {
+    renderWithApi(<App isPublicSite expectsApi />, unreachable, "server");
+    expect(await screen.findByText(copy.hero.tagline)).toBeInTheDocument();
+  });
+
   it("tells a developer how to start the server when it is down", async () => {
     renderWithApi(<App isPublicSite={false} />, unreachable, "server");
     expect(await screen.findByText(copy.errors.serverDownTitle)).toBeInTheDocument();

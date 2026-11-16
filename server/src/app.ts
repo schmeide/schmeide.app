@@ -1,10 +1,36 @@
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import Fastify from "fastify";
-import { appRouter, type AppContext } from "./router.ts";
+import { appRouter, BUSINESS_HEADER, type AppContext } from "./router.ts";
 
-export const buildApp = (context: AppContext, logger = false) => {
+type Options = {
+  readonly logger?: boolean;
+  // The address people open the app at. When the API is on another origin (the hosted site),
+  // that origin alone may call it from a browser, with the session cookie.
+  readonly allowOrigin?: string;
+};
+
+export const buildApp = (context: AppContext, { logger = false, allowOrigin }: Options = {}) => {
   const app = Fastify({ logger });
+  // Every answer is about one signed-in person (or one origin), so nothing may keep a copy.
+  app.addHook("onRequest", async (_request, reply) => {
+    reply.header("cache-control", "no-store");
+  });
+  if (allowOrigin) {
+    app.addHook("onRequest", async (request, reply) => {
+      if (request.headers.origin !== allowOrigin) return;
+      reply.header("access-control-allow-origin", allowOrigin);
+      reply.header("access-control-allow-credentials", "true");
+      if (request.method !== "OPTIONS") return;
+      // The browser asks first whether a call with JSON, or with the business header, is allowed.
+      return reply
+        .header("access-control-allow-methods", "GET, POST")
+        .header("access-control-allow-headers", `content-type, ${BUSINESS_HEADER}`)
+        .header("access-control-max-age", "600")
+        .status(204)
+        .send();
+    });
+  }
   app.get("/api/healthz", async () => ({ ok: true }));
   app.register(fastifyTRPCPlugin, {
     prefix: "/api/trpc",
