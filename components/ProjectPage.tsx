@@ -68,6 +68,15 @@ export function ProjectPage({ id }: { readonly id: number }) {
         </strong>{" "}
         {copy.status[project.status].hint}
       </p>
+      {/* The live app comes first: it is what the owner came back for. */}
+      {project.status === "live" && project.previewUrl && (
+        <p className={styles.preview}>
+          <a href={project.previewUrl} target="_blank" rel="noreferrer" className={styles.open}>
+            {copy.project.open} <span className={styles.hint}>{copy.project.opensInNewTab}</span>
+          </a>
+          <span className={styles.muted}>{project.previewUrl}</span>
+        </p>
+      )}
       <ErrorNote error={query.error} />
 
       <FeaturesStep

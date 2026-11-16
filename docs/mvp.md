@@ -25,6 +25,38 @@ Temporal; the Postgres volume is kept.
 The server reloads on code changes under `make serve`. A reload kills any running agent or check
 and fails that build, so do not edit server code while a build runs.
 
+## Using the UI
+
+Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install or log in to.
+
+1. **Create a project**: type a name and press "Create project". The project page opens.
+2. **Features**: one feature per line, in plain words (the [sample invoicing features](#sample-invoicing-features)
+   work). "Save" keeps them; "Write the spec" saves and starts the spec.
+3. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
+   "Change the features", which warns first that saving new features throws the spec away.
+4. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
+   Problem) with the server's own message. A failed build shows what went wrong.
+5. **Your app**: "Open your app" at the top of the page opens the preview in a new tab. "Request a change"
+   starts a change build (also the way to retry a failed build or bring an offline app back). Token usage and
+   the reported cost are listed below it.
+6. **Manage**: "Cancel the build" while building, "Take the app offline" while live, and "Delete project", which
+   asks first and removes the running app, its data, the code, the spec, and the build history.
+
+The URL hash is the view (`#/` for the list, `#/projects/<id>` for a project), so refresh and Back work. Only one
+build runs at a time across all projects; approving while another runs says so. If the server is not running, the
+page says to start it with `make serve`. The production build (GitHub Pages) has no API and shows the
+"Coming soon" page instead.
+
+| Status shown         | Server status     | Meaning                                                  |
+| -------------------- | ----------------- | -------------------------------------------------------- |
+| Describing           | `draft`           | Features being written; no spec yet                      |
+| Writing the spec     | `spec_generating` | The spec is being written                                |
+| Spec ready to review | `spec_ready`      | Approve it, or change the features (discards the spec)   |
+| Building             | `building`        | A build or change build is running                       |
+| Live                 | `live`            | The app is running at its preview link                   |
+| Build failed         | `failed`          | The last build failed or was canceled; request a change  |
+| Offline              | `stopped`         | The app was taken offline; a change build brings it back |
+
 ## End-to-end runs
 
 The standing fixture is a tiny to-do app whose features live in `server/e2e/todo-features.txt`.

@@ -18,7 +18,7 @@ const TOKEN_FIELDS = [
 
 type Props = { readonly project: Project; readonly usage: Usage };
 
-// The built app: its preview link, a box to request a change, and what it has cost so far.
+// After a build: a box to request a change, and what the project has cost so far.
 export function LiveStep({ project, usage }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
@@ -37,17 +37,9 @@ export function LiveStep({ project, usage }: Props) {
   return (
     <section aria-labelledby="live" className={stepStyles.step}>
       <h2 id="live">{copy.project.liveTitle}</h2>
-      {project.status === "live" && project.previewUrl && (
-        <p className={styles.preview}>
-          <a href={project.previewUrl} target="_blank" rel="noreferrer" className={styles.open}>
-            {copy.project.open} <span className={styles.hint}>{copy.project.opensInNewTab}</span>
-          </a>
-          <span className={stepStyles.muted}>{project.previewUrl}</span>
-        </p>
-      )}
 
       <form onSubmit={onSubmit} className={stepStyles.form}>
-        <h3>{copy.project.changeTitleForm}</h3>
+        <h3 className={styles.formTitle}>{copy.project.changeTitleForm}</h3>
         <p className={stepStyles.muted}>
           {project.status === "failed" ? copy.project.changeRetryIntro : copy.project.changeIntro}
         </p>

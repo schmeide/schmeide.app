@@ -62,7 +62,7 @@ export const copy = {
     logHint: "The newest step is at the bottom.",
     logEmpty: "Waiting for the first step…",
     eventKind: {
-      step: "Setting up",
+      step: "Progress",
       agent: "Builder",
       check: "Checking",
       deploy: "Publishing",
@@ -136,7 +136,7 @@ export const copy = {
   errors: {
     serverDownTitle: "Cannot reach the Schmeide server",
     serverDown:
-      "The server is not running. In a terminal, from the schmeide.app folder, run “make serve” (or “gmake serve”), wait for it to say the app is ready, then try again.",
+      "The server is not running. In a terminal, from the schmeide.app folder, run “make serve” (or “gmake serve”), wait until it prints the App address, then press “Try again”.",
     retry: "Try again",
     notFound: "This project no longer exists. It may have been deleted.",
     busy: "Another app is being built right now. Only one build runs at a time, so try again when it finishes.",

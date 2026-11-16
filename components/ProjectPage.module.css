@@ -24,3 +24,34 @@
 .status[data-status="failed"] {
   border-left-color: var(--color-danger);
 }
+
+.preview {
+  display: grid;
+  gap: var(--space-s);
+  justify-items: start;
+  overflow-wrap: anywhere;
+}
+
+.open {
+  display: inline-block;
+  padding: var(--space-m) var(--space-l);
+  background: var(--color-success);
+  color: var(--color-on-accent);
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-decoration: none;
+  border-radius: var(--radius);
+}
+
+.open:hover {
+  text-decoration: underline;
+}
+
+.hint {
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.muted {
+  color: var(--color-muted);
+}
