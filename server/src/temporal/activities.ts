@@ -68,9 +68,11 @@ const OUTPUT_TAIL = 12_000;
 const MAX_EVENT = 300;
 
 // Bash commands the agent may run; everything else is denied without prompting (dontAsk).
-export const AGENT_TOOLS = ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "TodoWrite"];
+// Skill runs the design skills the template vendors in .claude/skills/.
+export const AGENT_TOOLS = ["Read", "Edit", "Write", "Glob", "Grep", "Bash", "TodoWrite", "Skill"];
 export const AGENT_ALLOWED_TOOLS = [
   "Read",
+  "Skill",
   "Glob",
   "Grep",
   "TodoWrite",
