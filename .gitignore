@@ -26,3 +26,6 @@ logs
 # Local env files
 .env
 .env.*
+
+# Agent worktrees
+.claude/worktrees/
