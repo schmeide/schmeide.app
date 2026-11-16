@@ -389,6 +389,7 @@ describe("deleting a project", () => {
       {
         projectId: ready.id,
         buildId: build.id,
+        runKind: "initial",
         model: "m",
         inputTokens: 1,
         outputTokens: 1,

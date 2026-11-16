@@ -1,6 +1,6 @@
 {
-  "id": "1e24059b-561b-427b-94c3-baea658e87b2",
-  "prevId": "4c9e2a0d-ee70-458d-9d12-4f7576ff4344",
+  "id": "1faf3c0d-846b-486c-804a-a6d53c0782a9",
+  "prevId": "78e49ce8-81f7-45c1-93c2-24c045e31cdc",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -154,12 +154,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -169,17 +163,7 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {
-        "approved_emails_tenant_id_tenants_id_fk": {
-          "name": "approved_emails_tenant_id_tenants_id_fk",
-          "tableFrom": "approved_emails",
-          "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -495,69 +479,6 @@
           "columns": ["token_hash"]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.memberships": {
-      "name": "memberships",
-      "schema": "",
-      "columns": {
-        "user_id": {
-          "name": "user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "member_role",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "memberships_user_id_users_id_fk": {
-          "name": "memberships_user_id_users_id_fk",
-          "tableFrom": "memberships",
-          "tableTo": "users",
-          "columnsFrom": ["user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "memberships_tenant_id_tenants_id_fk": {
-          "name": "memberships_tenant_id_tenants_id_fk",
-          "tableFrom": "memberships",
-          "tableTo": "tenants",
-          "columnsFrom": ["tenant_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "memberships_user_id_tenant_id_pk": {
-          "name": "memberships_user_id_tenant_id_pk",
-          "columns": ["user_id", "tenant_id"]
-        }
-      },
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -933,13 +854,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "name": {
-          "name": "name",
-          "type": "varchar(120)",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -983,6 +897,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "run_kind": {
+          "name": "run_kind",
+          "type": "agent_run_kind",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
         },
         "model": {
           "name": "model",
@@ -1188,6 +1109,11 @@
     }
   },
   "enums": {
+    "public.agent_run_kind": {
+      "name": "agent_run_kind",
+      "schema": "public",
+      "values": ["spec", "initial", "change", "interview"]
+    },
     "public.build_event_kind": {
       "name": "build_event_kind",
       "schema": "public",
@@ -1202,11 +1128,6 @@
       "name": "build_status",
       "schema": "public",
       "values": ["queued", "running", "passed", "failed"]
-    },
-    "public.member_role": {
-      "name": "member_role",
-      "schema": "public",
-      "values": ["owner", "editor"]
     },
     "public.plan_phase": {
       "name": "plan_phase",

@@ -40,15 +40,22 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1794864395982,
-      "tag": "0005_sign_in_and_approved_emails",
+      "when": 1794864010266,
+      "tag": "0005_usage_run_kind",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1794865399152,
-      "tag": "0006_businesses_and_memberships",
+      "when": 1794865531301,
+      "tag": "0006_sign_in_and_approved_emails",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1794866296683,
+      "tag": "0007_businesses_and_memberships",
       "breakpoints": true
     }
   ]

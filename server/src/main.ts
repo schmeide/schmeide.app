@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import { Client, Connection } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
+import { describeRouting, routingFromEnv } from "./agentModel.ts";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
 import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
@@ -53,7 +54,7 @@ const config = {
   dataDir,
   makeBin,
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
-  agentModel: env.SCHMEIDE_AGENT_MODEL ?? "opus",
+  agentModels: routingFromEnv(env),
   interviewModel: env.SCHMEIDE_INTERVIEW_MODEL ?? "sonnet",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
@@ -104,7 +105,7 @@ console.log(
   `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
 );
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent model ${config.agentModel}, interview model ${config.interviewModel}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}`
 );
 await app.listen({ host: "127.0.0.1", port });
 await worker.run();

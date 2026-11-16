@@ -257,11 +257,36 @@ Each item is for `day_one` or `later`, and is marked `you` or `schmeide` by who 
 | `TEMPORAL_ADDRESS`         | `localhost:7233`                           | Temporal frontend                    |
 | `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, logs, make shim          |
 | `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
-| `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Model for spec and build runs        |
+| `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run   |
 | `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for interview questions        |
 | `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
 | `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
+
+### Model per run kind
+
+Each agent run gets its model from what the run is. `pickModel` in `server/src/agentModel.ts` is the one place that
+decides, and the run kind is its only input.
+
+| Run kind  | What it is                                           | Variable                       |
+| --------- | ---------------------------------------------------- | ------------------------------ |
+| `spec`    | Writing the plain-language spec                      | `SCHMEIDE_AGENT_MODEL_SPEC`    |
+| `initial` | The first build from the spec, and its fix-up runs   | `SCHMEIDE_AGENT_MODEL_INITIAL` |
+| `change`  | A change request on a built app, and its fix-up runs | `SCHMEIDE_AGENT_MODEL_CHANGE`  |
+
+- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`. With none of the three set, every run uses that
+  one model, as before.
+- The server prints the resolved table at startup. Each build run adds an event with the model and the reason, for
+  example `Model sonnet for this change run (SCHMEIDE_AGENT_MODEL_CHANGE routes change runs)`, just before
+  `Agent started (...)`, which shows the model the SDK resolved it to.
+- Every `usage` row carries `run_kind`, so cost per kind is one query:
+  `select run_kind, model, sum(cost_usd) from usage group by 1, 2`. An interview question is a fourth kind there,
+  `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table.
+- The request size, the tenant's plan, and the remaining allowance do not change the model.
+- Nothing escalates. A fix-up run after failed checks resumes the same session on the same model, and a build that
+  still fails after its fix-up rounds fails as before.
+- Names are passed to the Claude Agent SDK unchanged, and the table is the same for every tenant. Whatever serves the
+  models (one Foundry resource per tenant in production) must serve every name in the table.
 
 ## Where things live
 

@@ -64,19 +64,19 @@ const setup = () => {
   const config: Config = {
     dataDir,
     template,
-    agentModel: "opus",
+    agentModels: { fallback: "opus", byKind: {} },
     claudeBin: undefined,
     makeBin: "make",
   };
   return { config, dataDir };
 };
 
-const newBuild = async () => {
+const newBuild = async (kind: "initial" | "change" = "initial") => {
   const project = await createProject(db, { name: `a ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)
-    .values({ projectId: project.id, kind: "initial", request: "spec", status: "passed" })
+    .values({ projectId: project.id, kind, request: "spec", status: "passed" })
     .returning();
   return { project, build };
 };
@@ -113,6 +113,7 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
         num_turns: 3,
         total_cost_usd: 0.5,
         session_id: "session-1",
+        result: "## Features\n- notes",
         permission_denials: [],
         modelUsage: {
           "claude-test": {
@@ -195,6 +196,7 @@ describe("build activities", () => {
     expect(calls[0].options.env?.DATABASE_URL).toBeUndefined();
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining([
+        "Model opus for this initial run (SCHMEIDE_AGENT_MODEL fallback, SCHMEIDE_AGENT_MODEL_INITIAL is not set)",
         "Agent started (claude-test)",
         "Writing the to-do service.",
         "Editing todos.ts",
@@ -202,8 +204,58 @@ describe("build activities", () => {
       ])
     );
     expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([
-      expect.objectContaining({ model: "claude-test", inputTokens: 10, costUsd: 0.5 }),
+      expect.objectContaining({
+        runKind: "initial",
+        model: "claude-test",
+        inputTokens: 10,
+        costUsd: 0.5,
+      }),
     ]);
+  });
+
+  it("routes spec, initial, and change runs to their own models and labels their usage", async () => {
+    const { config } = setup();
+    const routed: Config = {
+      ...config,
+      agentModels: {
+        fallback: "opus",
+        byKind: { spec: "haiku", initial: "fable", change: "sonnet" },
+      },
+    };
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, routed, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    const initial = await newBuild("initial");
+    const change = await newBuild("change");
+    const drafted = await createProject(db, {
+      name: `a ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await transition(db, drafted.id, ["draft"], { status: "spec_generating" });
+
+    await env.run(activities.generateSpec, drafted.id);
+    for (const { build } of [initial, change]) {
+      await env.run(activities.prepareWorkspace, build.id);
+      await env.run(activities.runAgent, { buildId: build.id });
+    }
+    // A fix-up run resumes the build's session on the same model.
+    await env.run(activities.runAgent, {
+      buildId: change.build.id,
+      resume: "session-1",
+      feedback: "make test failed",
+    });
+
+    expect(calls.map((call) => call.options.model)).toEqual(["haiku", "fable", "sonnet", "sonnet"]);
+    expect(await messages(change.build.id)).toContain(
+      "Model sonnet for this change run (SCHMEIDE_AGENT_MODEL_CHANGE routes change runs)"
+    );
+    const kindsOf = async (projectId: number) =>
+      (await db.select().from(usage).where(eq(usage.projectId, projectId))).map(
+        (row) => row.runKind
+      );
+    expect(await kindsOf(drafted.id)).toEqual(["spec"]);
+    expect(await kindsOf(initial.project.id)).toEqual(["initial"]);
+    expect(await kindsOf(change.project.id)).toEqual(["change", "change"]);
   });
 
   it("fails the activity when the agent run does not succeed", async () => {

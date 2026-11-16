@@ -169,7 +169,7 @@ export const createInterviewer = (
         }
         return {
           turn: parseTurn(message.structured_output ?? parseJson(message.result)),
-          usage: usageRows(message, projectId, null),
+          usage: usageRows(message, projectId, null, "interview"),
         };
       }
       throw new InterviewUnavailableError("Claude ended without a result");

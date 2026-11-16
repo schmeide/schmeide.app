@@ -78,7 +78,13 @@ describe("createInterviewer", () => {
 
     expect(result.turn).toEqual(TURN);
     expect(result.usage).toEqual([
-      expect.objectContaining({ projectId: 7, buildId: null, model: "claude-test", costUsd: 0.01 }),
+      expect.objectContaining({
+        projectId: 7,
+        buildId: null,
+        runKind: "interview",
+        model: "claude-test",
+        costUsd: 0.01,
+      }),
     ]);
     const [{ prompt, options }] = calls;
     expect(prompt).toContain("Invoices");
