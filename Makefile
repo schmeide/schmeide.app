@@ -1,3 +1,8 @@
+# Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS, so every recipe below would fail cryptically.
+ifneq (,$(filter 3.% 2.%,$(MAKE_VERSION)))
+$(error GNU make 4 or newer is required (this is $(MAKE_VERSION)). Install it with `brew install make`, then run `gmake` instead of `make`)
+endif
+
 SHELL := /usr/bin/env
 .SHELLFLAGS = bash -e -o pipefail -c
 .DEFAULT_GOAL := help
@@ -123,7 +128,7 @@ db/generate: node_modules ## Generate a migration from server/src/db/schema.ts (
 	$(JS_EXEC) exec prettier -- --write server/drizzle >/dev/null
 
 .PHONY: doctor
-doctor: node_modules ## Check Docker, claude, git, node, the template, and ports; print the fix for each failure
+doctor: node_modules ## Check Docker, claude, git, node, the template, ports, and leftover app containers; print each fix
 	bash server/scripts/doctor.sh
 
 ##@ Testing
