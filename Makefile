@@ -63,6 +63,7 @@ setup/js: ## Install Node.js via nvm and project dependencies
 	. $$HOME/.nvm/nvm.sh
 	nvm install
 	$(JS_EXEC) $(JS_INSTALL)
+	touch node_modules/.installed
 
 ##@ Build
 
@@ -234,18 +235,25 @@ fix/ts: ## Fix lint and format errors
 
 ##@ Helpers
 
-# Installs dependencies only when node_modules is missing.
-node_modules:
+# Installs dependencies when node_modules is missing or older than any manifest
+# or the lockfile, so a pulled change (a new workspace dependency such as
+# drizzle-kit) is installed instead of failing with "command not found".
+.PHONY: node_modules
+node_modules: node_modules/.installed
+
+node_modules/.installed: package.json package-lock.json server/package.json
 	$(JS_EXEC) $(JS_INSTALL)
+	touch node_modules/.installed
 
 .PHONY: docker/check
 docker/check:
 	if ! command -v docker >/dev/null 2>&1; then \
-		echo "Error: docker not found. Install Docker Desktop (https://docs.docker.com/get-docker/) and retry."; \
+		echo "Error: docker not found. Install Docker (https://docs.docker.com/get-docker/) and retry."; \
 		exit 1; \
 	fi
-	if ! docker info >/dev/null 2>&1; then \
-		echo "Error: the Docker daemon is not running. Start Docker Desktop and retry."; \
+	if ! out=$$(docker info 2>&1 >/dev/null); then \
+		echo "Error: cannot reach the Docker daemon. Is it running, and are you allowed to use it?"; \
+		echo "$$out"; \
 		exit 1; \
 	fi
 
