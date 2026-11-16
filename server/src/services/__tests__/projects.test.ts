@@ -1,11 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { finishBuild } from "../builds.ts";
-import { ConflictError } from "../errors.ts";
+import { appendEvent, finishBuild, recordUsage } from "../builds.ts";
+import { ConflictError, NotFoundError } from "../errors.ts";
 import {
   approveSpec,
   createProject,
+  deleteProject,
+  deleteProjectRows,
+  findProject,
+  getProject,
   generateSpec,
   requestChange,
   setFeatures,
@@ -23,10 +27,10 @@ afterAll(() => db.$client.end());
 const fakeWorkflows = () => {
   const cancel = vi.fn(async () => undefined);
   const workflows = {
-    start: vi.fn(async () => ({}) as never),
+    start: vi.fn(async () => ({ result: async () => undefined }) as never),
     getHandle: vi.fn(() => ({ cancel }) as never),
   } satisfies Deps["workflows"];
-  return { deps: { db, workflows } satisfies Deps, workflows, cancel };
+  return { deps: { db, workflows, taskQueue: "test" } satisfies Deps, workflows, cancel };
 };
 
 const startArgs = (workflows: ReturnType<typeof fakeWorkflows>["workflows"]) =>
@@ -72,6 +76,23 @@ describe("createProject", () => {
 
     expect(new Set(created.map((project) => project.slug)).size).toBe(4);
     expect(new Set(created.map((project) => project.webPort)).size).toBe(4);
+  });
+});
+
+describe("getProject", () => {
+  it("reports zero usage and no build for a new project", async () => {
+    const project = await createProject(db, { name: `g ${randomUUID()}` });
+
+    const detail = await getProject(db, project.id);
+
+    expect(detail.latestBuild).toBeNull();
+    expect(detail.usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+    });
   });
 });
 
@@ -152,5 +173,47 @@ describe("project state machine", () => {
 
     const draft = await createProject(db, { name: `p ${randomUUID()}` });
     await expect(stopProject(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
+describe("deleting a project", () => {
+  it("is refused while a build runs and goes through the delete workflow otherwise", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const ready = await specReady();
+    const { build } = await approveSpec(deps, ready.id);
+    try {
+      await expect(deleteProject(deps, ready.id)).rejects.toBeInstanceOf(ConflictError);
+    } finally {
+      await finishBuild(db, build.id);
+    }
+    await transition(db, ready.id, ["building"], { status: "failed" });
+
+    await deleteProject(deps, ready.id);
+
+    expect(startArgs(workflows)).toContain("deleteWorkflow");
+  });
+
+  it("removes the project with its builds, events, and usage", async () => {
+    const { deps } = fakeWorkflows();
+    const ready = await specReady();
+    const { build } = await approveSpec(deps, ready.id);
+    await finishBuild(db, build.id);
+    await appendEvent(db, build.id, "step", "hello");
+    await recordUsage(db, [
+      {
+        projectId: ready.id,
+        buildId: build.id,
+        model: "m",
+        inputTokens: 1,
+        outputTokens: 1,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+      },
+    ]);
+
+    await deleteProjectRows(db, ready.id);
+
+    await expect(findProject(db, ready.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

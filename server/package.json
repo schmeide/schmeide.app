@@ -7,7 +7,7 @@
     "dev": "node --watch src/main.ts",
     "start": "node src/main.ts",
     "test": "vitest run",
-    "e2e": "node scripts/e2e.ts",
+    "e2e": "node e2e/run.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate"
   },

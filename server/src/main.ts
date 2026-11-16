@@ -7,13 +7,13 @@ import { Client, Connection } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
-import { TASK_QUEUE } from "./services/projects.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
 const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide";
 const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
 const port = Number(env.PORT ?? 3100);
+const taskQueue = env.SCHMEIDE_TASK_QUEUE ?? "schmeide";
 const onPath = (name: string) =>
   (env.PATH ?? "")
     .split(delimiter)
@@ -50,6 +50,7 @@ const config = {
   makeBin,
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
   agentModel: env.SCHMEIDE_AGENT_MODEL ?? "opus",
+  agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
 } as const;
 
@@ -67,12 +68,12 @@ const client = new Client({ connection });
 
 const worker = await Worker.create({
   connection: await NativeConnection.connect({ address: temporalAddress }),
-  taskQueue: TASK_QUEUE,
+  taskQueue,
   workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
   activities: createActivities(db, config),
 });
 
-const app = buildApp({ db, workflows: client.workflow }, true);
+const app = buildApp({ db, workflows: client.workflow, taskQueue }, true);
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {

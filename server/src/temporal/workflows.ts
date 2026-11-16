@@ -1,4 +1,5 @@
 import {
+  ActivityCancellationType,
   CancellationScope,
   isCancellation,
   proxyActivities,
@@ -14,20 +15,27 @@ const { generateSpec } = proxyActivities<Activities>({
   startToCloseTimeout: "10 minutes",
   heartbeatTimeout: "1 minute",
 });
-const { prepareWorkspace, finishBuild, stopDeployment } = proxyActivities<Activities>({
-  startToCloseTimeout: "10 minutes",
-  heartbeatTimeout: "1 minute",
-  retry: { maximumAttempts: 3 },
-});
-const { runAgent } = proxyActivities<Activities>({
+const { prepareWorkspace, finishBuild, stopDeployment, removeProject } =
+  proxyActivities<Activities>({
+    startToCloseTimeout: "10 minutes",
+    heartbeatTimeout: "1 minute",
+    retry: { maximumAttempts: 3 },
+  });
+// The SDK throttles heartbeats to 80% of heartbeatTimeout, and cancellation only arrives with a
+// heartbeat, so a short timeout keeps cancellation prompt. Waiting for the cancellation to complete
+// means a canceled build is only marked failed once its agent or make process has stopped.
+const longRunning: ActivityOptions = {
   ...once,
+  heartbeatTimeout: "30 seconds",
+  cancellationType: ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+};
+const { runAgent } = proxyActivities<Activities>({
+  ...longRunning,
   startToCloseTimeout: "90 minutes",
-  heartbeatTimeout: "2 minutes",
 });
 const { runChecks, deploy } = proxyActivities<Activities>({
-  ...once,
+  ...longRunning,
   startToCloseTimeout: "30 minutes",
-  heartbeatTimeout: "2 minutes",
 });
 
 // Fix-up rounds after the first independent check run fails.
@@ -69,4 +77,8 @@ export async function buildWorkflow(_projectId: number, buildId: number): Promis
 
 export async function stopWorkflow(projectId: number): Promise<void> {
   await stopDeployment(projectId);
+}
+
+export async function deleteWorkflow(projectId: number): Promise<void> {
+  await removeProject(projectId);
 }

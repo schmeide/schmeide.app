@@ -135,8 +135,25 @@ test/server: node_modules ## Migrate and run server tests against an existing DA
 	$(JS_EXEC) run test -w server
 
 .PHONY: e2e
-e2e: node_modules ## Drive a tiny project from features to a live app against a running server (spends Claude usage)
+e2e: node_modules ## Real Claude run of the to-do fixture against `make serve`, then delete it (KEEP=1 keeps it)
 	$(JS_EXEC) run e2e -w server
+
+E2E_FAKE_PORT ?= 3199
+
+.PHONY: e2e/fake
+e2e/fake: infra/up node_modules ## Same run with a fake agent and its own server on :3199: no Claude usage
+	$(MAKE) db/migrate
+	mkdir -p $(SCHMEIDE_DATA_DIR)/logs
+	log=$(SCHMEIDE_DATA_DIR)/logs/e2e-fake-server.log
+	(cd server && PORT=$(E2E_FAKE_PORT) SCHMEIDE_TASK_QUEUE=schmeide-fake \
+		SCHMEIDE_AGENT_CMD=$(CURDIR)/server/e2e/fake-agent.sh exec node src/main.ts) >$$log 2>&1 &
+	server=$$!
+	trap 'kill $$server 2>/dev/null || true' EXIT
+	until curl -sf localhost:$(E2E_FAKE_PORT)/api/healthz >/dev/null; do
+		if ! kill -0 $$server 2>/dev/null; then echo "Error: the fake-agent server exited; see $$log"; exit 1; fi
+		sleep 1
+	done
+	PORT=$(E2E_FAKE_PORT) $(JS_EXEC) run e2e -w server
 
 .PHONY: test/watch
 test/watch: ## Run tests in watch mode

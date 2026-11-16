@@ -14,7 +14,7 @@ import {
   getBuild,
   recordUsage,
 } from "../services/builds.ts";
-import { findProject, testDbPort, transition } from "../services/projects.ts";
+import { deleteProjectRows, findProject, testDbPort, transition } from "../services/projects.ts";
 
 export type Config = {
   readonly dataDir: string;
@@ -23,6 +23,9 @@ export type Config = {
   readonly claudeBin: string | undefined;
   // GNU make 4+. Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS and fails every template target.
   readonly makeBin: string;
+  // A command that stands in for Claude (SCHMEIDE_AGENT_CMD): `<cmd> spec` prints a spec and
+  // `<cmd> build` edits the workspace, both with the prompt in AGENT_PROMPT. Used by `make e2e/fake`.
+  readonly agentCmd?: string;
 };
 
 // Written by main.ts under the data dir: bin/make points at GNU make, gitconfig is a neutral identity.
@@ -68,6 +71,7 @@ export const AGENT_ALLOWED_TOOLS = [
     "cp",
     "rm",
     "grep",
+    "echo",
   ].map((command) => `Bash(${command}:*)`),
   "Bash(pwd)",
 ];
@@ -164,9 +168,11 @@ const usageRows = (
 // One short line per tool call, so the UI shows progress rather than raw output.
 export const describeToolUse = (
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  workspace: string
 ): string | undefined => {
-  const str = (key: string) => (typeof input[key] === "string" ? (input[key] as string) : "");
+  const str = (key: string) =>
+    typeof input[key] === "string" ? (input[key] as string).replaceAll(`${workspace}/`, "") : "";
   switch (name) {
     case "Bash":
       return `$ ${truncate(str("command"), 160)}`;
@@ -215,6 +221,9 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
     const timer = setInterval(() => context.heartbeat(), HEARTBEAT_MS);
     try {
       return await work(context.cancellationSignal);
+    } catch (error) {
+      // Report cancellation as such (a CancelledFailure), not as whatever the aborted work threw.
+      throw context.cancellationSignal.aborted ? context.cancellationSignal.reason : error;
     } finally {
       clearInterval(timer);
     }
@@ -295,34 +304,56 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
     permissionMode: "dontAsk",
   });
 
+  const runAgentCmd = async (
+    project: Project,
+    mode: "spec" | "build",
+    prompt: string,
+    cwd: string,
+    buildId?: number
+  ): Promise<string> => {
+    const result = await run(config.agentCmd ?? "", [mode], {
+      cwd,
+      env: { ...projectEnv(project, config.dataDir), AGENT_PROMPT: prompt },
+      buildId,
+    });
+    if (result.code !== 0) {
+      throw ApplicationFailure.nonRetryable(
+        `Agent command failed (exit ${result.code}): ${result.output.slice(-2000)}`
+      );
+    }
+    return result.output.trim();
+  };
+
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
       await mkdir(config.dataDir, { recursive: true });
       try {
-        const spec = await withHeartbeat(async (signal) => {
-          const abortController = new AbortController();
-          signal.addEventListener("abort", () => abortController.abort(), { once: true });
-          for await (const message of query({
-            prompt: SPEC_PROMPT(project.features),
-            options: {
-              ...agentOptions(config.dataDir, agentEnv(project)),
-              settingSources: [],
-              tools: [],
-              maxTurns: 1,
-              persistSession: false,
-              abortController,
-            },
-          })) {
-            if (message.type !== "result") continue;
-            await recordUsage(db, usageRows(message, projectId, null));
-            if (message.subtype !== "success" || message.is_error) {
-              throw new Error(`Spec generation failed: ${message.subtype}`);
-            }
-            return message.result.replace(/^```(?:markdown)?\n|\n```\s*$/g, "").trim();
-          }
-          throw new Error("Claude ended without a result");
-        });
+        const spec = config.agentCmd
+          ? await runAgentCmd(project, "spec", SPEC_PROMPT(project.features), config.dataDir)
+          : await withHeartbeat(async (signal) => {
+              const abortController = new AbortController();
+              signal.addEventListener("abort", () => abortController.abort(), { once: true });
+              for await (const message of query({
+                prompt: SPEC_PROMPT(project.features),
+                options: {
+                  ...agentOptions(config.dataDir, agentEnv(project)),
+                  settingSources: [],
+                  tools: [],
+                  maxTurns: 1,
+                  persistSession: false,
+                  abortController,
+                },
+              })) {
+                if (message.type !== "result") continue;
+                await recordUsage(db, usageRows(message, projectId, null));
+                if (message.subtype !== "success" || message.is_error) {
+                  throw new Error(`Spec generation failed: ${message.subtype}`);
+                }
+                return message.result.replace(/^```(?:markdown)?\n|\n```\s*$/g, "").trim();
+              }
+              throw new Error("Claude ended without a result");
+            });
         await transition(db, projectId, ["spec_generating"], { status: "spec_ready", spec });
       } catch (error) {
         await transition(db, projectId, ["spec_generating"], { status: "draft" });
@@ -381,6 +412,11 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
         "step",
         input.feedback !== undefined ? "Agent is fixing failed checks" : "Agent is building the app"
       );
+      if (config.agentCmd) {
+        await runAgentCmd(project, "build", prompt, workspaceOf(project), input.buildId);
+        await event(input.buildId, "agent", `Fake agent ${config.agentCmd} finished`);
+        return "fake-session";
+      }
       return withHeartbeat(async (signal) => {
         const abortController = new AbortController();
         signal.addEventListener("abort", () => abortController.abort(), { once: true });
@@ -404,7 +440,11 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
                 block.type === "text"
                   ? block.text.trim() && truncate(block.text)
                   : block.type === "tool_use"
-                    ? describeToolUse(block.name, block.input as Record<string, unknown>)
+                    ? describeToolUse(
+                        block.name,
+                        block.input as Record<string, unknown>,
+                        workspaceOf(project)
+                      )
                     : undefined;
               if (line) await event(input.buildId, "agent", line);
             }
@@ -516,6 +556,25 @@ export const createActivities = (db: Db, config: Config, query: Query = sdkQuery
         .update(projects)
         .set({ status: "stopped", previewUrl: null })
         .where(eq(projects.id, projectId));
+    },
+
+    async removeProject(projectId: number): Promise<void> {
+      const project = await findProject(db, projectId);
+      const workspace = workspaceOf(project);
+      if (await stat(workspace).catch(() => undefined)) {
+        const result = await run(
+          "docker",
+          ["compose", "--profile", "test", "down", "--volumes", "--remove-orphans"],
+          { cwd: workspace, env: projectEnv(project, config.dataDir) }
+        );
+        if (result.code !== 0) {
+          throw new Error(
+            `docker compose down failed (exit ${result.code}): ${result.output.slice(-2000)}`
+          );
+        }
+        await rm(workspace, { recursive: true, force: true });
+      }
+      await deleteProjectRows(db, projectId);
     },
   };
 };

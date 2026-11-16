@@ -1,11 +1,24 @@
 import type { WorkflowClient } from "@temporalio/client";
-import { and, desc, eq, inArray, like, sql, sum } from "drizzle-orm";
+import { and, desc, eq, inArray, like, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
-import { builds, projects, tenants, usage, type Build, type Project } from "../db/schema.ts";
-import type { buildWorkflow, specWorkflow, stopWorkflow } from "../temporal/workflows.ts";
+import {
+  buildEvents,
+  builds,
+  projects,
+  tenants,
+  usage,
+  type Build,
+  type Project,
+} from "../db/schema.ts";
+import type {
+  buildWorkflow,
+  deleteWorkflow,
+  specWorkflow,
+  stopWorkflow,
+} from "../temporal/workflows.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
 
-export const TASK_QUEUE = "schmeide";
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
 
@@ -15,6 +28,7 @@ const DEMO_TENANT = "demo";
 export type Deps = {
   readonly db: Db;
   readonly workflows: Pick<WorkflowClient, "start" | "getHandle">;
+  readonly taskQueue: string;
 };
 
 type Status = Project["status"];
@@ -81,6 +95,8 @@ export const findProject = async (db: Db, id: number): Promise<Project> => {
   return project;
 };
 
+const total = (column: AnyPgColumn) => sql`coalesce(sum(${column}), 0)`.mapWith(Number);
+
 export type UsageTotals = {
   readonly inputTokens: number;
   readonly outputTokens: number;
@@ -102,11 +118,11 @@ export const getProject = async (
     .limit(1);
   const [totals] = await db
     .select({
-      inputTokens: sum(usage.inputTokens).mapWith(Number),
-      outputTokens: sum(usage.outputTokens).mapWith(Number),
-      cacheReadTokens: sum(usage.cacheReadTokens).mapWith(Number),
-      cacheCreationTokens: sum(usage.cacheCreationTokens).mapWith(Number),
-      costUsd: sum(usage.costUsd).mapWith(Number),
+      inputTokens: total(usage.inputTokens),
+      outputTokens: total(usage.outputTokens),
+      cacheReadTokens: total(usage.cacheReadTokens),
+      cacheCreationTokens: total(usage.cacheCreationTokens),
+      costUsd: total(usage.costUsd),
     })
     .from(usage)
     .where(eq(usage.projectId, id));
@@ -142,7 +158,10 @@ export const setFeatures = (
     spec: null,
   });
 
-export const generateSpec = async ({ db, workflows }: Deps, id: number): Promise<Project> => {
+export const generateSpec = async (
+  { db, workflows, taskQueue }: Deps,
+  id: number
+): Promise<Project> => {
   const current = await findProject(db, id);
   if (!current.features.trim()) throw new ConflictError("Add at least one feature first");
   return db.transaction(async (tx) => {
@@ -150,7 +169,7 @@ export const generateSpec = async ({ db, workflows }: Deps, id: number): Promise
       status: "spec_generating",
     });
     await workflows.start<typeof specWorkflow>("specWorkflow", {
-      taskQueue: TASK_QUEUE,
+      taskQueue,
       workflowId: `spec-${id}-${Date.now()}`,
       args: [id],
     });
@@ -159,7 +178,7 @@ export const generateSpec = async ({ db, workflows }: Deps, id: number): Promise
 };
 
 const startBuild = async (
-  { db, workflows }: Deps,
+  { db, workflows, taskQueue }: Deps,
   id: number,
   from: readonly Status[],
   kind: Build["kind"],
@@ -180,7 +199,7 @@ const startBuild = async (
       .values({ projectId: id, kind, request: request(project) })
       .returning();
     await workflows.start<typeof buildWorkflow>("buildWorkflow", {
-      taskQueue: TASK_QUEUE,
+      taskQueue,
       workflowId: `build-${build.id}`,
       args: [id, build.id],
     });
@@ -197,7 +216,10 @@ export const requestChange = (
 ) => startBuild(deps, input.id, ["live", "failed", "stopped"], "change", () => input.request);
 
 // A running build is canceled; otherwise the deployment is taken down.
-export const stopProject = async ({ db, workflows }: Deps, id: number): Promise<Project> => {
+export const stopProject = async (
+  { db, workflows, taskQueue }: Deps,
+  id: number
+): Promise<Project> => {
   const project = await findProject(db, id);
   if (project.status === "building") {
     const [build] = await db
@@ -212,9 +234,35 @@ export const stopProject = async ({ db, workflows }: Deps, id: number): Promise<
     throw new ConflictError(`Project ${id} is ${project.status}; there is no deployment to stop`);
   }
   await workflows.start<typeof stopWorkflow>("stopWorkflow", {
-    taskQueue: TASK_QUEUE,
+    taskQueue,
     workflowId: `stop-${id}-${Date.now()}`,
     args: [id],
   });
   return project;
 };
+
+// Removes the deployment, its volumes, the workspace, and every row of the project. Waits for it.
+export const deleteProject = async (
+  { db, workflows, taskQueue }: Deps,
+  id: number
+): Promise<void> => {
+  const project = await findProject(db, id);
+  if (project.status === "building" || project.status === "spec_generating") {
+    throw new ConflictError(`Project ${id} is ${project.status}; stop it first`);
+  }
+  const handle = await workflows.start<typeof deleteWorkflow>("deleteWorkflow", {
+    taskQueue,
+    workflowId: `delete-${id}-${Date.now()}`,
+    args: [id],
+  });
+  await handle.result();
+};
+
+export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
+  db.transaction(async (tx) => {
+    const ids = tx.select({ id: builds.id }).from(builds).where(eq(builds.projectId, id));
+    await tx.delete(usage).where(eq(usage.projectId, id));
+    await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
+    await tx.delete(builds).where(eq(builds.projectId, id));
+    await tx.delete(projects).where(eq(projects.id, id));
+  });

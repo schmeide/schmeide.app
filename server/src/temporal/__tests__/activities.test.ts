@@ -88,6 +88,12 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
           content: [
             { type: "text", text: "Writing the to-do service." },
             { type: "tool_use", id: "1", name: "Bash", input: { command: "make test" } },
+            {
+              type: "tool_use",
+              id: "2",
+              name: "Edit",
+              input: { file_path: join(params.options.cwd ?? "", "todos.ts") },
+            },
           ],
         },
       } as SDKMessage;
@@ -163,6 +169,7 @@ describe("build activities", () => {
       expect.arrayContaining([
         "Agent started (claude-test)",
         "Writing the to-do service.",
+        "Editing todos.ts",
         "$ make test",
       ])
     );

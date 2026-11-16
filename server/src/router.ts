@@ -12,6 +12,7 @@ import { ConflictError, NotFoundError } from "./services/errors.ts";
 import {
   approveSpec,
   createProject,
+  deleteProject,
   generateSpec,
   getProject,
   listProjects,
@@ -57,6 +58,9 @@ export const appRouter = t.router({
       .input(changeRequestSchema)
       .mutation(({ ctx, input }) => requestChange(ctx, input)),
     stop: procedure.input(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
+    delete: procedure
+      .input(projectIdSchema)
+      .mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
   }),
   builds: t.router({
     events: procedure
