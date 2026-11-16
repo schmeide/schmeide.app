@@ -5,6 +5,7 @@ import type { Db } from "../db/client.ts";
 import {
   buildEvents,
   builds,
+  projectIcons,
   projects,
   tenants,
   usage,
@@ -113,6 +114,7 @@ export const getProject = async (
   project: Project;
   latestBuild: Build | null;
   queued: readonly Build[];
+  hasIcon: boolean;
   usage: UsageTotals;
 }> => {
   const project = await findProject(db, id);
@@ -137,7 +139,17 @@ export const getProject = async (
     })
     .from(usage)
     .where(eq(usage.projectId, id));
-  return { project, latestBuild: latestBuild ?? null, queued, usage: totals };
+  const [icon] = await db
+    .select({ projectId: projectIcons.projectId })
+    .from(projectIcons)
+    .where(eq(projectIcons.projectId, id));
+  return {
+    project,
+    latestBuild: latestBuild ?? null,
+    queued,
+    hasIcon: Boolean(icon),
+    usage: totals,
+  };
 };
 
 // Moves a project between statuses only if it is in one of `from`; this is the state machine.
@@ -213,7 +225,7 @@ const startWorkflow = async ({ workflows, taskQueue }: Deps, build: Build): Prom
     await workflows.start<typeof buildWorkflow>("buildWorkflow", {
       taskQueue,
       workflowId: `build-${build.id}`,
-      args: [build.projectId, build.id],
+      args: [build.projectId, build.id, build.kind],
     });
   } catch (error) {
     if (!(error instanceof WorkflowExecutionAlreadyStartedError)) throw error;
@@ -250,30 +262,70 @@ export const approveSpec = (deps: Deps, id: number) =>
     )
   );
 
-// Starts the change now, or queues it behind the project's running build. On a failed or offline
-// project it starts now even with changes queued: it is the retry, and the queue follows it.
+// Starts the build now, or queues it behind the project's running build.
+const startOrQueue = async (
+  deps: Deps,
+  tx: Db,
+  project: Project,
+  kind: Build["kind"],
+  request: string
+): Promise<{ project: Project; build: Build }> => {
+  if (project.status === "building" || (await hasRunningBuild(tx, project.id))) {
+    const [build] = await tx
+      .insert(builds)
+      .values({ projectId: project.id, kind, request, status: "queued" })
+      .returning();
+    return { project, build };
+  }
+  return startBuild(deps, tx, project.id, ["live", "failed", "stopped"], kind, () => request);
+};
+
+// On a failed or offline project a change starts now even with changes queued: it is the retry,
+// and the queue follows it.
 export const requestChange = (
   deps: Deps,
   input: { readonly id: number; readonly request: string }
 ): Promise<{ project: Project; build: Build }> =>
   deps.db.transaction(async (raw) => {
     const tx = raw as unknown as Db;
-    const project = await lockProject(tx, input.id);
-    if (project.status === "building" || (await hasRunningBuild(tx, input.id))) {
-      const [build] = await tx
-        .insert(builds)
-        .values({ projectId: input.id, kind: "change", request: input.request, status: "queued" })
-        .returning();
-      return { project, build };
+    return startOrQueue(deps, tx, await lockProject(tx, input.id), "change", input.request);
+  });
+
+export const SITE_REQUEST = "Apply the page title and icon";
+
+// Stores the page title and icon (null removes it, undefined keeps it). A live or building app gets
+// them through a `site` build, which redeploys without the agent; otherwise they are only stored,
+// since every deploy applies them.
+export const setSite = (
+  deps: Deps,
+  input: { readonly id: number; readonly title: string; readonly icon?: string | null }
+): Promise<Project> =>
+  deps.db.transaction(async (raw) => {
+    const tx = raw as unknown as Db;
+    const current = await lockProject(tx, input.id);
+    const [project] = await tx
+      .update(projects)
+      .set({ pageTitle: input.title || null })
+      .where(eq(projects.id, input.id))
+      .returning();
+    if (input.icon === null) {
+      await tx.delete(projectIcons).where(eq(projectIcons.projectId, input.id));
+    } else if (input.icon !== undefined) {
+      await tx
+        .insert(projectIcons)
+        .values({ projectId: input.id, data: input.icon })
+        .onConflictDoUpdate({ target: projectIcons.projectId, set: { data: input.icon } });
     }
-    return startBuild(
-      deps,
-      tx,
-      input.id,
-      ["live", "failed", "stopped"],
-      "change",
-      () => input.request
-    );
+    if (current.status !== "live" && current.status !== "building") return project;
+    // One waiting site build applies whatever is stored when it runs, so a second is not needed.
+    const [waiting] = await tx
+      .select({ id: builds.id })
+      .from(builds)
+      .where(
+        and(eq(builds.projectId, input.id), eq(builds.status, "queued"), eq(builds.kind, "site"))
+      );
+    if (waiting) return project;
+    return (await startOrQueue(deps, tx, project, "site", SITE_REQUEST)).project;
   });
 
 // When a build passes: starts the project's oldest queued change. Safe to repeat (an activity retry,
@@ -326,7 +378,9 @@ export const editQueuedChange = (
     tx
       .update(builds)
       .set({ request: input.request })
-      .where(and(eq(builds.id, input.buildId), eq(builds.status, "queued")))
+      .where(
+        and(eq(builds.id, input.buildId), eq(builds.status, "queued"), eq(builds.kind, "change"))
+      )
       .returning()
   );
 
@@ -385,6 +439,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
   db.transaction(async (tx) => {
     const ids = tx.select({ id: builds.id }).from(builds).where(eq(builds.projectId, id));
     await tx.delete(usage).where(eq(usage.projectId, id));
+    await tx.delete(projectIcons).where(eq(projectIcons.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
     await tx.delete(builds).where(eq(builds.projectId, id));
     await tx.delete(projects).where(eq(projects.id, id));

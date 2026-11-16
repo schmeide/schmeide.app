@@ -82,6 +82,7 @@ export const aProject = (overrides: Partial<Project> = {}): Project => ({
   spec: null,
   webPort: 8100,
   previewUrl: null,
+  pageTitle: null,
   createdAt: at,
   updatedAt: at,
   ...overrides,
@@ -120,6 +121,7 @@ export const projectServer = (state: {
   project: Project;
   latestBuild?: Build | null;
   queued?: readonly Build[];
+  hasIcon?: boolean;
   events?: BuildEvent[];
   usage?: Usage;
 }): Handlers => ({
@@ -128,6 +130,7 @@ export const projectServer = (state: {
     project: state.project,
     latestBuild: state.latestBuild ?? null,
     queued: state.queued ?? [],
+    hasIcon: state.hasIcon ?? false,
     usage: state.usage ?? noUsage,
   }),
   "builds.events": (input) =>

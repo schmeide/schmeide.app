@@ -41,6 +41,8 @@ export const projects = pgTable("projects", {
   features: text("features").notNull().default(""),
   spec: text("spec"),
   webPort: integer("web_port").notNull().unique(),
+  // The deployed app's <title>; null means the project name.
+  pageTitle: varchar("page_title", { length: 100 }),
   previewUrl: text("preview_url"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
@@ -49,7 +51,8 @@ export const projects = pgTable("projects", {
     .$onUpdate(() => new Date()),
 });
 
-export const buildKind = pgEnum("build_kind", ["initial", "change"]);
+// `site`: applies the page title and icon and redeploys, without the agent.
+export const buildKind = pgEnum("build_kind", ["initial", "change", "site"]);
 // `queued`: a change waiting for the project's running build; it starts once that one passes.
 export const buildStatus = pgEnum("build_status", ["queued", "running", "passed", "failed"]);
 
@@ -64,6 +67,15 @@ export const builds = pgTable("builds", {
   error: text("error"),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
+});
+
+// Kept out of projects so project rows, polled by the UI, stay small.
+export const projectIcons = pgTable("project_icons", {
+  projectId: integer("project_id")
+    .primaryKey()
+    .references(() => projects.id),
+  // Base64 of a PNG or ICO, checked by siteSchema.
+  data: text("data").notNull(),
 });
 
 export const buildEventKind = pgEnum("build_event_kind", [

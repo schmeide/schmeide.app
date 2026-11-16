@@ -40,6 +40,7 @@ type Options = {
   readonly cancelDuringPrepare?: boolean;
   // Requests queued behind the build; each starts after the one before it passes.
   readonly queued?: readonly string[];
+  readonly kind?: "initial" | "site";
 };
 
 const setup = (
@@ -114,7 +115,7 @@ const runBuild = async (options: Options) => {
   await transition(db, project.id, ["draft"], { status: "building", spec: "## Features\n- notes" });
   const [build] = await db
     .insert(builds)
-    .values({ projectId: project.id, kind: "initial", request: "spec" })
+    .values({ projectId: project.id, kind: options.kind ?? "initial", request: "spec" })
     .returning();
   const queued = await Promise.all(
     (options.queued ?? []).map(async (request) => {
@@ -135,7 +136,7 @@ const runBuild = async (options: Options) => {
     const handle = await env.client.workflow.start(buildWorkflow, {
       taskQueue,
       workflowId: `build-${build.id}`,
-      args: [project.id, build.id],
+      args: [project.id, build.id, options.kind ?? "initial"],
     });
     if (options.cancelDuringPrepare) {
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -240,5 +241,18 @@ describe("buildWorkflow check and fix loop", () => {
 
     expect(outcome).toBe("failed");
     expect(queued.map((build) => build.status)).toEqual(["queued"]);
+  }, 120_000);
+
+  it("applies the page title and icon and deploys without the agent for a site build", async () => {
+    const { outcome, prompts, events } = await runBuild({ fixOnRun: 1, kind: "site" });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(0);
+    expect(events).toEqual([
+      "Copying the template into a fresh workspace",
+      "Workspace ready",
+      "No frontend/index.html; the page title and icon were not set",
+      "Build passed",
+    ]);
   }, 120_000);
 });

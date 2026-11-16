@@ -9,6 +9,7 @@ import { FeaturesStep } from "./FeaturesStep";
 import { LiveStep } from "./LiveStep";
 import { ProjectActions } from "./ProjectActions";
 import { QueuedChanges } from "./QueuedChanges";
+import { SiteStep } from "./SiteStep";
 import { SpecStep } from "./SpecStep";
 
 import styles from "./ProjectPage.module.css";
@@ -59,7 +60,7 @@ export function ProjectPage({ id }: { readonly id: number }) {
     );
   }
 
-  const { project, latestBuild, queued, usage } = query.data;
+  const { project, latestBuild, queued, hasIcon, usage } = query.data;
   return (
     <article>
       {back}
@@ -93,6 +94,7 @@ export function ProjectPage({ id }: { readonly id: number }) {
       {latestBuild && <BuildStep key={latestBuild.id} build={latestBuild} />}
       <QueuedChanges queued={queued} />
       {CHANGEABLE.includes(project.status) && <LiveStep project={project} usage={usage} />}
+      <SiteStep project={project} hasIcon={hasIcon} />
       <ProjectActions project={project} onStop={() => setStoppingAt(project.updatedAt.getTime())} />
     </article>
   );

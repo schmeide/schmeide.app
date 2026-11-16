@@ -55,6 +55,7 @@ export const copy = {
     buildTitle: "3. Build",
     changeTitle: "Latest change",
     changeRequestLabel: "What you asked for:",
+    siteChangeRequest: "Update the page title and icon.",
     buildStatus: {
       queued: "Waiting",
       running: "Building now",
@@ -112,6 +113,19 @@ export const copy = {
       cacheReadTokens: "Tokens reused from cache",
       cacheCreationTokens: "Tokens saved to cache",
       costUsd: "Reported cost",
+    },
+    site: {
+      title: "Page title and icon",
+      intro:
+        "The name shown on the browser tab, and the small picture beside it. Saving publishes your app again with them; this does not use the builder.",
+      titleLabel: "Page title",
+      iconLabel: "Icon (a PNG or ICO file, up to 256 KB)",
+      iconSet: "Your app uses your own icon. Choose a new file to replace it.",
+      iconNone: "Your app uses the default icon.",
+      iconTooBig: "That file is too big. Choose an icon of at most 256 KB.",
+      save: "Save title and icon",
+      removeIcon: "Use the default icon",
+      saved: "Saved.",
     },
     manageTitle: "Manage",
     cancelBuild: "Cancel the build",
