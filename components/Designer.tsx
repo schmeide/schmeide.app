@@ -1,5 +1,5 @@
 import { copy } from "../data/copy";
-import type { Build, BuiltChange, Project, Usage } from "../trpc";
+import type { Build, BuiltChange, Project, TimeTotals, Usage } from "../trpc";
 import { pathTo } from "../utils/routes";
 import { AppFrame } from "./AppFrame";
 import { BuildStep } from "./BuildStep";
@@ -27,6 +27,7 @@ type Props = {
   readonly queued: readonly Build[];
   readonly changes: readonly BuiltChange[];
   readonly usage: Usage;
+  readonly time: TimeTotals;
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly onStop: () => void;
@@ -46,6 +47,7 @@ export function Designer({
   queued,
   changes,
   usage,
+  time,
   request,
   onRequestChange,
   onStop,
@@ -146,7 +148,11 @@ export function Designer({
             </details>
           </section>
         )}
-        <UsageSummary usage={usage} />
+        <UsageSummary
+          usage={usage}
+          time={time}
+          runningSince={latestBuild?.status === "running" ? latestBuild.startedAt : null}
+        />
       </div>
     </>
   );

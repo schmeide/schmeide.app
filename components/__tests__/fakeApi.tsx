@@ -6,7 +6,16 @@ import type { ReactNode } from "react";
 
 import { SessionProvider } from "../SessionProvider";
 import type { AppRouter } from "../../server/src/router.ts";
-import type { Build, BuildEvent, Interview, PlanItem, Project, Question, Usage } from "../../trpc";
+import type {
+  Build,
+  BuildEvent,
+  Interview,
+  PlanItem,
+  Project,
+  Question,
+  TimeTotals,
+  Usage,
+} from "../../trpc";
 import { TRPCProvider } from "../../trpc";
 import type { Provider, Session } from "../../utils/session";
 
@@ -130,6 +139,13 @@ export const noUsage: Usage = {
   costUsd: 0,
 };
 
+export const noTime: TimeTotals = {
+  buildingMs: 0,
+  failedBuildingMs: 0,
+  builderMs: 0,
+  builderUnrecorded: false,
+};
+
 export const anInterview = (overrides: Partial<Interview> = {}): Interview => ({
   items: [],
   questions: [],
@@ -178,6 +194,7 @@ export const projectServer = (state: {
   hasBeenLive?: boolean;
   events?: BuildEvent[];
   usage?: Usage;
+  time?: TimeTotals;
   interview?: Interview;
 }): Handlers => ({
   "interview.get": () => state.interview ?? anInterview(),
@@ -190,6 +207,7 @@ export const projectServer = (state: {
     hasIcon: state.hasIcon ?? false,
     hasBeenLive: state.hasBeenLive ?? false,
     usage: state.usage ?? noUsage,
+    time: state.time ?? noTime,
   }),
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),

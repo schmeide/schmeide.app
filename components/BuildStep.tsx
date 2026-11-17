@@ -2,16 +2,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { copy } from "../data/copy";
 import { POLL_MS, useTRPCClient, type Build, type BuildEvent } from "../trpc";
+import { formatDuration } from "../utils/usage";
+import { useNow } from "./useNow";
 
 import stepStyles from "./Step.module.css";
 import styles from "./BuildStep.module.css";
 
 const EVENTS_PAGE = 500;
-
-const duration = (ms: number) => {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  return copy.duration(Math.floor(seconds / 60), seconds % 60);
-};
 
 // Pages the build's events forward with afterId, every POLL_MS while the build runs and once more
 // when it ends. Mount it with key={build.id} so a new build starts a fresh log.
@@ -52,16 +49,6 @@ function useBuildEvents(build: Build): readonly BuildEvent[] {
   return events;
 }
 
-function useNow(ticking: boolean): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!ticking) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [ticking]);
-  return now;
-}
-
 // `title` differs by place: a numbered setup step, or the latest change of a running app.
 export function BuildStep({ build, title }: { readonly build: Build; readonly title: string }) {
   const events = useBuildEvents(build);
@@ -89,7 +76,7 @@ export function BuildStep({ build, title }: { readonly build: Build; readonly ti
         <strong>{copy.project.buildStatus[build.status]}</strong>
         {running && last && <span>{copy.project.phase[last.kind]}</span>}
         <span className={stepStyles.muted}>
-          {copy.project.elapsed} {duration(end - build.startedAt.getTime())}
+          {copy.project.elapsed} {formatDuration(end - build.startedAt.getTime())}
         </span>
       </p>
 

@@ -77,7 +77,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
     );
   }
 
-  const { project, latestBuild, queued, changes, hasIcon, usage } = query.data;
+  const { project, latestBuild, queued, changes, hasIcon, usage, time } = query.data;
   const onStop = () => setStoppingAt(project.updatedAt.getTime());
   const hint =
     inApp && project.status === "building"
@@ -105,6 +105,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
           changes={changes}
           hasIcon={hasIcon}
           usage={usage}
+          time={time}
           request={request}
           onRequestChange={setRequest}
           onStop={onStop}

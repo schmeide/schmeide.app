@@ -4,7 +4,8 @@ import { useId, useState } from "react";
 import { copy } from "../data/copy";
 import { useTRPC } from "../trpc";
 import { pathTo } from "../utils/routes";
-import { currentMonth } from "../utils/usage";
+import { currentMonth, formatDuration } from "../utils/usage";
+import { AdminTable } from "./AdminTable";
 import { AdminUsageTable } from "./AdminUsageTable";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
@@ -118,6 +119,34 @@ export function AdminUsagePage() {
             />
           </section>
         </>
+      )}
+      {data && data.times.length > 0 && (
+        <section aria-labelledby="usage-time" className={styles.section}>
+          <h2 id="usage-time">{copy.usage.timeTitle}</h2>
+          <p className={styles.note}>{copy.usage.timeNote}</p>
+          <AdminTable
+            caption={copy.usage.timeCaption}
+            columns={[
+              copy.usage.business,
+              copy.project.time.building,
+              copy.usage.failedBuilding,
+              copy.project.time.builder,
+            ]}
+          >
+            {data.times.map((business) => (
+              <tr key={business.id}>
+                <td>
+                  <Link to={pathTo("adminBusiness", { id: business.id })}>
+                    {business.name || business.id}
+                  </Link>
+                </td>
+                <td className={styles.number}>{formatDuration(business.buildingMs)}</td>
+                <td className={styles.number}>{formatDuration(business.failedBuildingMs)}</td>
+                <td className={styles.number}>{formatDuration(business.builderMs)}</td>
+              </tr>
+            ))}
+          </AdminTable>
+        </section>
       )}
     </>
   );
