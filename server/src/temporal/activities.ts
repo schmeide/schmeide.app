@@ -1079,9 +1079,15 @@ export const createActivities = (
         ["checkout", "-q", "FETCH_HEAD", "--", ...PLATFORM_FILES],
       ])
         await mustRun(project, "git", args, dir, buildId, env);
+      // Plain ustar: ACR fails to read a context with pax or extended-attribute headers.
       const archive = `${dir}.tar.gz`;
       try {
-        await mustRun(project, "tar", ["--exclude=.git", "-czf", archive, "-C", dir, "."], dir);
+        await mustRun(
+          project,
+          "tar",
+          ["--format=ustar", "--exclude=.git", "-czf", archive, "-C", dir, "."],
+          dir
+        );
         await event(buildId, "deploy", `Building the app's images for ${commit.slice(0, 12)}`);
         await withHeartbeat((signal) =>
           runner.hosting.acr.build(archive, taskYaml(project.tenantId, project.slug, commit), {

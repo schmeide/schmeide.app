@@ -498,7 +498,7 @@ With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `
   ACR, and runs one ACR quick run that builds the frontend and pushes `apps/t<tenant>/<slug>/web` and `.../api`
   tagged with the commit. A failed run's event carries the end of its log and a link to all of it.
 - **Namespace**: `tenant-<tenant id>`, applied on every deploy (server-side apply, so it is idempotent) with the
-  worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and a NetworkPolicy that lets
+  worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and NetworkPolicies that let
   in only Traefik on 8080 and out only DNS and Postgres on 5432.
 - **Each copy** (`app-<id>` for production, `app-<id>-staging`): a Deployment (nginx `web` on 8080 and Node `api` on
   3000, a `migrate` init container, restricted pod security with a read-only root and an `emptyDir` `/tmp`), a

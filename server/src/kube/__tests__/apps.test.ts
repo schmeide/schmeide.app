@@ -109,25 +109,40 @@ describe("tenantObjects", () => {
       hard: { pods: "20", "services.loadbalancers": "0", "services.nodeports": "0" },
     });
     expect(objects.LimitRange.metadata.namespace).toBe("tenant-3");
-    const policy = objects.NetworkPolicy.spec as {
-      podSelector: object;
-      policyTypes: string[];
-      ingress: { from: unknown[]; ports: unknown[] }[];
-      egress: { ports: { port: number }[] }[];
-    };
-    expect(policy.podSelector).toEqual({});
-    expect(policy.policyTypes).toEqual(["Ingress", "Egress"]);
-    expect(policy.ingress).toEqual([
-      {
-        from: [
-          { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "traefik" } } },
+    const policies = Object.fromEntries(
+      (tenantObjects(3) as Obj[])
+        .filter((object) => object.kind === "NetworkPolicy")
+        .map((object) => [object.metadata.name, object.spec])
+    );
+    expect(policies).toEqual({
+      "default-deny": { podSelector: {}, policyTypes: ["Ingress", "Egress"] },
+      "allow-traefik": {
+        podSelector: {},
+        policyTypes: ["Ingress"],
+        ingress: [
+          {
+            from: [
+              {
+                namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "traefik" } },
+                podSelector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+              },
+            ],
+            ports: [{ protocol: "TCP", port: 8080 }],
+          },
         ],
-        ports: [{ protocol: "TCP", port: 8080 }],
       },
-    ]);
-    expect(policy.egress.flatMap((rule) => rule.ports.map((port) => port.port))).toEqual([
-      53, 53, 5432,
-    ]);
+      "allow-dns": expect.objectContaining({ policyTypes: ["Egress"] }),
+      "allow-postgres": {
+        podSelector: {},
+        policyTypes: ["Egress"],
+        egress: [
+          {
+            to: [{ ipBlock: { cidr: "10.16.16.0/24" } }],
+            ports: [{ protocol: "TCP", port: 5432 }],
+          },
+        ],
+      },
+    });
   });
 });
 
