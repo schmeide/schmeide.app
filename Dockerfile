@@ -7,9 +7,10 @@
 ARG NODE_VERSION
 FROM node:${NODE_VERSION}-trixie-slim
 
-# GNU make 4 and git: the server refuses to start without make, and builds call git.
+# GNU make 4 and git: the server refuses to start without make, and builds call git. openssh-client:
+# build pods (SCHMEIDE_RUNNER=kubernetes) reach Forgejo with a deploy key.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git make \
+    && apt-get install -y --no-install-recommends ca-certificates git make openssh-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

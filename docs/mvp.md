@@ -391,6 +391,22 @@ What the server does with a file:
 | `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only   |
 | `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only     |
 
+### Building on the cluster
+
+`SCHMEIDE_RUNNER=kubernetes` (default `host`) makes the worker keep each project in a Forgejo repository and run the
+agent and the checks as Jobs in `schmeide-builds` (`docs/stage2.md`, slice 1 step 2). Only the worker reads these; it
+checks at startup that it can use Forgejo and the Kubernetes API and refuses to start with what to fix. Builds stop
+before deploying until #194, and files attached to a change are refused until slice 2.
+
+- `SCHMEIDE_BUILD_IMAGE` (required): the server's own image, which build pods run.
+- `SCHMEIDE_FORGEJO_TOKEN` (required): an API token of the `schmeide-platform` Forgejo user.
+- `SCHMEIDE_FORGEJO_URL`: Forgejo's API and the worker's git. Default
+  `http://forgejo-http.forgejo.svc.cluster.local:3000`.
+- `SCHMEIDE_FORGEJO_SSH`: Forgejo as build pods reach it. Default `ssh://git@forgejo-ssh.forgejo.svc.cluster.local`.
+- `SCHMEIDE_FORGEJO_KNOWN_HOSTS`: Forgejo's SSH host key as a `known_hosts` line. Unset, pods trust the first key.
+- `SCHMEIDE_BUILD_POSTGRES_IMAGE`: each pod's test database. Default `schmeide.azurecr.io/mirror/postgres:18-alpine`.
+- `NODE_EXTRA_CA_CERTS=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt`, so the worker trusts the API server.
+
 ### Model per run kind
 
 Each agent run gets its model from what the run is. `pickModel` in `server/src/agentModel.ts` is the one place that

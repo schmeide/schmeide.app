@@ -26,7 +26,14 @@ import { createSummaries } from "./services/summaries.ts";
 import { createSummarizer } from "./services/summarizer.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
 import { createHealthServer, parseBuilds, parseRole } from "./role.ts";
-import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
+import { checkRunner, parseRunner, runnerFromEnv } from "./runner.ts";
+import {
+  createActivities,
+  GIT_CONFIG,
+  gitConfigFile,
+  shimDir,
+  sweepLeftoverRuns,
+} from "./temporal/activities.ts";
 
 const env = process.env;
 const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide";
@@ -36,6 +43,17 @@ const taskQueue = env.SCHMEIDE_TASK_QUEUE ?? "schmeide";
 const role = (() => {
   try {
     return parseRole(env.SCHMEIDE_ROLE);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+})();
+// Only the worker builds, so only it reads the Kubernetes settings (runner.ts).
+const runner = (() => {
+  try {
+    return parseRunner(env.SCHMEIDE_RUNNER) === "kubernetes" && role.runWorker
+      ? runnerFromEnv(env)
+      : undefined;
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -142,19 +160,25 @@ const client = new Client({ connection });
 const deps = { db, workflows: client.workflow, taskQueue, buildsOff } as const;
 
 const startWorker = async () => {
+  const problems = runner ? await checkRunner(runner) : [];
+  if (problems.length > 0) {
+    console.error(`SCHMEIDE_RUNNER=kubernetes cannot build yet:\n- ${problems.join("\n- ")}`);
+    process.exit(1);
+  }
   const worker = await Worker.create({
     connection: await NativeConnection.connect({ address: temporalAddress }),
     taskQueue,
     workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
     activities: createActivities(
       deps,
-      config,
+      { ...config, runner },
       undefined,
       undefined,
       createSummaries(db, createSummarizer({ ...config, model: config.summaryModel }))
     ),
   });
   await failOrphanedBuilds(deps);
+  if (runner) console.log(`Swept ${await sweepLeftoverRuns(db, runner)} leftover build Jobs.`);
   return worker;
 };
 
@@ -205,6 +229,10 @@ console.log(
 console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}`
 );
+if (runner)
+  console.log(
+    `Runner kubernetes: the agent and the checks run as Jobs in ${runner.kube.namespace} from ${runner.image}; code lives on Forgejo.`
+  );
 // Loopback unless told otherwise: a hosted server sits behind a proxy that ends https.
 const host = env.SCHMEIDE_HOST ?? "127.0.0.1";
 await app?.listen({ host, port });

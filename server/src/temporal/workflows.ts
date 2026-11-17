@@ -45,11 +45,12 @@ const { prepareWorkspace, runChecks, deploy, release } = proxyActivities<Activit
 // Fix-up rounds after the first independent check run fails.
 export const MAX_FIX_ATTEMPTS = 3;
 
-// The agent builds, then the server's own checks run, with fix-up rounds while they fail.
+// The agent builds, then the server's own checks run, with fix-up rounds while they fail. Each run
+// is told its round, which names its Job on the cluster.
 async function buildAndCheck(buildId: number): Promise<void> {
-  let session = await runAgent({ buildId });
+  let session = await runAgent({ buildId, round: 0 });
   for (let attempt = 0; ; attempt++) {
-    const checks = await runChecks(buildId);
+    const checks = await runChecks(buildId, attempt);
     if (checks.ok) return;
     if (attempt === MAX_FIX_ATTEMPTS) {
       // A plain Error would fail only the workflow task, which Temporal retries forever.
@@ -57,7 +58,12 @@ async function buildAndCheck(buildId: number): Promise<void> {
         `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
       );
     }
-    session = await runAgent({ buildId, resume: session, feedback: checks.output });
+    session = await runAgent({
+      buildId,
+      round: attempt + 1,
+      resume: session,
+      feedback: checks.output,
+    });
   }
 }
 
