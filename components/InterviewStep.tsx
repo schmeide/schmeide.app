@@ -242,7 +242,7 @@ type Props = {
   readonly editing: boolean;
   readonly onEditingChange: (editing: boolean) => void;
   readonly onWriteMyself: () => void;
-  readonly specFailed: boolean;
+  readonly specFailed: Project["specError"];
 };
 
 // Describes the app by answering questions: one question at a time on one side, and the plan the
@@ -310,7 +310,7 @@ export function InterviewStep({
       <div className={styles.layout} data-open={open || undefined}>
         {open && (
           <div className={styles.ask}>
-            {specFailed && <p role="alert">{copy.project.specFailed}</p>}
+            {specFailed && <p role="alert">{copy.project.specFailed[specFailed]}</p>}
             {reviewing && <p className={stepStyles.warning}>{copy.interview.discardWarning}</p>}
             {!started && !thinking && (
               <>

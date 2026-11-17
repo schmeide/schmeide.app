@@ -396,9 +396,10 @@ describe("project state machine", () => {
 
     await expect(generateSpec(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
     await setFeatures(db, { id: project.id, features: "a list of to-dos" });
+    await db.update(projects).set({ specError: "usage_limit" }).where(eq(projects.id, project.id));
     const generating = await generateSpec(deps, project.id);
 
-    expect(generating.status).toBe("spec_generating");
+    expect(generating).toMatchObject({ status: "spec_generating", specError: null });
     expect(startArgs(workflows)).toEqual(["specWorkflow"]);
     await expect(
       setFeatures(db, { id: project.id, features: "changed my mind" })

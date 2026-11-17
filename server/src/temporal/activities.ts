@@ -16,7 +16,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
-import { ApplicationFailure } from "@temporalio/common";
+import { ApplicationFailure, CancelledFailure } from "@temporalio/common";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
@@ -57,6 +57,7 @@ import {
   type FileRow,
   type NewAgentRun,
   type Project,
+  type SpecFailure,
 } from "../db/schema.ts";
 import {
   appendEvent,
@@ -348,6 +349,19 @@ export const POD_NOTE =
 // Until slice 2 stores files where a build pod can read them (docs/stage2.md, slice 1 step 4).
 export const ATTACHMENTS_REFUSED =
   "Files attached to a change cannot reach the builder on the cluster yet. Ask for the change again without them.";
+
+// What the page tells the person about a failed spec run, read from what Claude or Temporal said.
+// ponytail: matches the CLI's wording, so a reworded message falls through to "unknown".
+export const specFailure = (error: unknown): SpecFailure => {
+  if (error instanceof CancelledFailure) return "timed_out";
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes(BUSINESS_SUSPENDED)) return "suspended";
+  if (/not logged in|\/login|invalid api key|oauth token|authenticat/i.test(message)) {
+    return "claude_login";
+  }
+  if (/usage limit|hit your limit|rate limit/i.test(message)) return "usage_limit";
+  return "unknown";
+};
 
 const SPEC_FORMAT = `Write a short plain-language spec for it in markdown with exactly three sections: "## Features", "## Screens", and "## Data it stores". Use short bullet points a non-technical reader understands. No code, no technology names, no title. Reply with only the markdown.`;
 
@@ -1542,15 +1556,23 @@ export const createActivities = (
                 if (message.type !== "result") continue;
                 await recordUsage(db, runUsage(message, projectId, null, "spec"));
                 if (message.subtype !== "success" || message.is_error) {
-                  throw new Error(`Spec generation failed: ${message.subtype}`);
+                  const said = message.subtype === "success" ? `: ${message.result}` : "";
+                  throw new Error(`Spec generation failed: ${message.subtype}${said}`);
                 }
                 return message.result.replace(/^```(?:markdown)?\n|\n```\s*$/g, "").trim();
               }
               throw new Error("Claude ended without a result");
             });
-        await transition(db, projectId, ["spec_generating"], { status: "spec_ready", spec });
+        await transition(db, projectId, ["spec_generating"], {
+          status: "spec_ready",
+          spec,
+          specError: null,
+        });
       } catch (error) {
-        await transition(db, projectId, ["spec_generating"], { status: "draft" });
+        await transition(db, projectId, ["spec_generating"], {
+          status: "draft",
+          specError: specFailure(error),
+        });
         throw error;
       }
     },

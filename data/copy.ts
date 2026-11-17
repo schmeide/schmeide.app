@@ -507,8 +507,19 @@ export const copy = {
     discardWarning:
       "Saving new requests throws away the spec below. You will then write a new spec from the new requests.",
     cancelEdit: "Keep the current spec",
-    specFailed:
-      "The spec could not be written this time. Check your requests and press “Write the spec” again.",
+    // Why the last spec run failed, keyed by the server's reason, and what to do about it.
+    specFailed: {
+      claude_login:
+        "The spec could not be written because this Schmeide server is not signed in to Claude. You cannot fix that from this page: whoever runs the server should run “make doctor” and follow what it says. Then press “Write the spec” again.",
+      usage_limit:
+        "The spec could not be written because this Schmeide server has reached its Claude usage limit for now. Your requests are fine. Wait a few hours, then press “Write the spec” again.",
+      timed_out:
+        "Writing the spec took too long and was stopped. Your requests are fine. Press “Write the spec” again.",
+      suspended:
+        "The spec could not be written because this business is suspended. You cannot fix that from this page: ask whoever runs Schmeide to restore it.",
+      unknown:
+        "The spec could not be written because something went wrong on the server. Press “Write the spec” again. If it fails again, you cannot fix it from this page: whoever runs the server should run “make doctor”.",
+    },
     specTitle: "2. Spec",
     specWriting:
       "Writing your spec. This usually takes under a minute, and this page updates by itself.",

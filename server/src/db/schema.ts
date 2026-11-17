@@ -51,6 +51,17 @@ export const projectStatus = pgEnum("project_status", [
   "stopped",
 ]);
 
+// Why the last spec run failed: the server's Claude login, Claude's usage limit, a run that took
+// too long, a suspended business, or anything else. The page says what to do about each.
+export const SPEC_FAILURES = [
+  "claude_login",
+  "usage_limit",
+  "timed_out",
+  "suspended",
+  "unknown",
+] as const;
+export type SpecFailure = (typeof SPEC_FAILURES)[number];
+
 export const projects = pgTable(
   "projects",
   {
@@ -64,6 +75,8 @@ export const projects = pgTable(
     need: text("need").notNull().default(""),
     features: text("features").notNull().default(""),
     spec: text("spec"),
+    // Null unless the last spec run failed; cleared when a run starts or writes the spec.
+    specError: varchar("spec_error", { length: 32 }).$type<SpecFailure>(),
     webPort: integer("web_port").notNull().unique(),
     // The deployed app's <title>; null means the project name.
     pageTitle: varchar("page_title", { length: 100 }),
