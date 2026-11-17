@@ -63,6 +63,8 @@ export const projects = pgTable("projects", {
   // The deployed app's <title>; null means the project name.
   pageTitle: varchar("page_title", { length: 100 }),
   previewUrl: text("preview_url"),
+  // The commit the app runs, from its own checkout; null for an app deployed before there was one.
+  productionCommit: varchar("production_commit", { length: 40 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

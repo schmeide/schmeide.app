@@ -10,7 +10,9 @@ const run = promisify(execFile);
 
 // The Docker Compose project a project's containers run under (temporal/activities.ts).
 export const composeProjectOf = (slug: string) => `schmeide-${slug}`;
+// The builder's git repository. The app runs from its own checkout of it, at one commit.
 export const workspaceOf = (dataDir: string, slug: string) => join(dataDir, "projects", slug);
+export const productionDirOf = (dataDir: string, slug: string) => join(dataDir, "production", slug);
 
 export type RuntimeFigures = {
   readonly containers: number;
@@ -159,13 +161,18 @@ export const createResourceReader = (dataDir: string, docker = "docker"): Resour
     );
     return figuresByProject(ps.stdout, stats.stdout);
   },
+  // The workspace and the app's checkout together.
   workspaceBytes: async (slug, signal) => {
-    const dir = workspaceOf(dataDir, slug);
-    // A project that has never been built has no workspace yet.
-    if (!(await stat(dir).catch(() => undefined))) return 0;
-    const { stdout } = await run("du", ["-sk", dir], { signal });
-    const kib = Number.parseInt(stdout, 10);
-    if (Number.isNaN(kib)) throw new Error(`Cannot read du's answer for ${dir}`);
-    return kib * 1024;
+    const sizes = await Promise.all(
+      [workspaceOf(dataDir, slug), productionDirOf(dataDir, slug)].map(async (dir) => {
+        // A project that has never been built has neither yet.
+        if (!(await stat(dir).catch(() => undefined))) return 0;
+        const { stdout } = await run("du", ["-sk", dir], { signal });
+        const kib = Number.parseInt(stdout, 10);
+        if (Number.isNaN(kib)) throw new Error(`Cannot read du's answer for ${dir}`);
+        return kib * 1024;
+      })
+    );
+    return sizes.reduce((sum, bytes) => sum + bytes, 0);
   },
 });

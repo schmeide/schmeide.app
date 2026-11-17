@@ -52,7 +52,11 @@ import {
   transition,
   type Deps,
 } from "../services/projects.ts";
-import { composeProjectOf, workspaceOf as workspaceDir } from "../services/resources.ts";
+import {
+  composeProjectOf,
+  productionDirOf,
+  workspaceOf as workspaceDir,
+} from "../services/resources.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
 
@@ -242,6 +246,15 @@ export const projectEnv = (project: Project, dataDir: string): Record<string, st
     TEST_DB_PORT: String(testDbPort(project)),
   };
 };
+
+// What a running app's git, make, and docker get: the project environment without the model's
+// credentials (ANTHROPIC_*, CLAUDE_*), which no deployed app needs.
+export const appEnv = (project: Project, dataDir: string): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(projectEnv(project, dataDir)).filter(
+      ([key]) => !/^(ANTHROPIC|CLAUDE)_/.test(key)
+    )
+  );
 
 export const describeToolUse = (
   name: string,
@@ -440,13 +453,10 @@ export const createActivities = (
     command: string,
     args: readonly string[],
     cwd: string,
-    buildId?: number
+    buildId?: number,
+    env: Record<string, string> = projectEnv(project, config.dataDir)
   ) => {
-    const result = await run(command, args, {
-      cwd,
-      buildId,
-      env: projectEnv(project, config.dataDir),
-    });
+    const result = await run(command, args, { cwd, buildId, env });
     if (result.code !== 0) {
       throw new Error(
         `${command} ${args.join(" ")} failed (exit ${result.code}): ${result.output.slice(-2000)}`
@@ -547,6 +557,82 @@ export const createActivities = (
     if (head.code !== 0 || !isCommit(commit))
       throw ApplicationFailure.nonRetryable(`The workspace has no commit to deploy: ${commit}`);
     return commit;
+  };
+
+  const productionDir = (project: Project) => productionDirOf(config.dataDir, project.slug);
+  const exists = async (path: string) => Boolean(await stat(path).catch(() => undefined));
+
+  // Where Compose finds the app's compose.yaml to stop or remove it: its checkout, or for an app
+  // deployed before it had one, the workspace. Undefined for a project never built.
+  const composeDir = async (project: Project): Promise<string | undefined> => {
+    for (const dir of [productionDir(project), workspaceOf(project)])
+      if (await exists(join(dir, ".git"))) return dir;
+    return undefined;
+  };
+
+  // Moves the app's own checkout to `commit`, fetched from the workspace, with nothing else in
+  // it: untracked and ignored files go too, so `make up` installs and builds that commit afresh.
+  const checkOut = async (project: Project, commit: string, buildId: number): Promise<string> => {
+    if (!isCommit(commit)) throw ApplicationFailure.nonRetryable(`Not a commit: ${commit}`);
+    const dir = productionDir(project);
+    await mkdir(dir, { recursive: true });
+    const env = appEnv(project, config.dataDir);
+    if (!(await exists(join(dir, ".git"))))
+      await mustRun(project, "git", ["init", "-q"], dir, buildId, env);
+    await event(buildId, "deploy", `Checking out ${commit.slice(0, 12)} for the app`);
+    for (const args of [
+      ["fetch", "-q", "--no-tags", workspaceOf(project), commit],
+      ["checkout", "-q", "--force", "--detach", commit],
+      ["clean", "-q", "-ffdx"],
+    ])
+      await mustRun(project, "git", args, dir, buildId, env);
+    return dir;
+  };
+
+  // `make up` in `dir` under the project's Compose name and port, given on make's command line so
+  // nothing in the app's own files can change them. Answers the address once it answers 200.
+  // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
+  const up = async (project: Project, dir: string, buildId: number): Promise<string> => {
+    await event(buildId, "deploy", "Starting the app (make up)");
+    const result = await run(
+      config.makeBin,
+      [
+        "up",
+        `COMPOSE_PROJECT_NAME=${composeProjectOf(project.slug)}`,
+        `WEB_PORT=${project.webPort}`,
+      ],
+      { cwd: dir, env: appEnv(project, config.dataDir), buildId }
+    );
+    if (result.code !== 0) {
+      throw ApplicationFailure.nonRetryable(
+        `make up failed (exit ${result.code}):\n${result.output.slice(-4000)}`
+      );
+    }
+    const url = `http://localhost:${project.webPort}`;
+    await event(buildId, "deploy", `Waiting for ${url} to answer`);
+    await withHeartbeat(async (signal) => {
+      const deadline = Date.now() + 180_000;
+      for (;;) {
+        const statuses = await Promise.all(
+          [`${url}/`, `${url}/api/healthz`].map((target) =>
+            (config.fetch ?? fetch)(target, {
+              signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+            })
+              .then((response) => response.status)
+              .catch(() => 0)
+          )
+        );
+        if (statuses.every((status) => status === 200)) return;
+        if (signal.aborted) throw new Error("deploy canceled");
+        if (Date.now() > deadline) {
+          throw ApplicationFailure.nonRetryable(
+            `${url} did not answer 200 within 3 minutes (got ${statuses.join(", ")})`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    });
+    return url;
   };
 
   return {
@@ -795,48 +881,14 @@ export const createActivities = (
       await event(buildId, "deploy", "Set the page title and icon");
     },
 
-    // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
+    // Deploys the build's commit: production runs from its own checkout of the workspace.
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
       const commit = await commitAll(project, buildId);
-      await event(buildId, "deploy", "Starting the app (make up)");
-      const result = await run(config.makeBin, ["up"], {
-        cwd: workspaceOf(project),
-        env: projectEnv(project, config.dataDir),
-        buildId,
-      });
-      if (result.code !== 0) {
-        throw ApplicationFailure.nonRetryable(
-          `make up failed (exit ${result.code}):\n${result.output.slice(-4000)}`
-        );
-      }
-      const url = `http://localhost:${project.webPort}`;
-      await event(buildId, "deploy", `Waiting for ${url} to answer`);
-      await withHeartbeat(async (signal) => {
-        const deadline = Date.now() + 180_000;
-        for (;;) {
-          const statuses = await Promise.all(
-            [`${url}/`, `${url}/api/healthz`].map((target) =>
-              (config.fetch ?? fetch)(target, {
-                signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
-              })
-                .then((response) => response.status)
-                .catch(() => 0)
-            )
-          );
-          if (statuses.every((status) => status === 200)) return;
-          if (signal.aborted) throw new Error("deploy canceled");
-          if (Date.now() > deadline) {
-            throw ApplicationFailure.nonRetryable(
-              `${url} did not answer 200 within 3 minutes (got ${statuses.join(", ")})`
-            );
-          }
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
-      });
+      const url = await up(project, await checkOut(project, commit, buildId), buildId);
       await db
         .update(projects)
-        .set({ previewUrl: url, status: "live" })
+        .set({ previewUrl: url, productionCommit: commit, status: "live" })
         .where(eq(projects.id, project.id));
       await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
       await event(buildId, "deploy", `Live at ${url}`);
@@ -875,12 +927,13 @@ export const createActivities = (
 
     async stopDeployment(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
-      const workspace = workspaceOf(project);
-      if (await stat(workspace).catch(() => undefined)) {
-        const result = await run(config.makeBin, ["down"], {
-          cwd: workspace,
-          env: projectEnv(project, config.dataDir),
-        });
+      const dir = await composeDir(project);
+      if (dir) {
+        const result = await run(
+          config.makeBin,
+          ["down", `COMPOSE_PROJECT_NAME=${composeProjectOf(project.slug)}`],
+          { cwd: dir, env: appEnv(project, config.dataDir) }
+        );
         if (result.code !== 0)
           throw new Error(`make down failed (exit ${result.code}): ${result.output.slice(-2000)}`);
       }
@@ -892,20 +945,30 @@ export const createActivities = (
 
     async removeProject(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
-      const workspace = workspaceOf(project);
-      if (await stat(workspace).catch(() => undefined)) {
+      const dir = await composeDir(project);
+      if (dir) {
         const result = await run(
           "docker",
-          ["compose", "--profile", "test", "down", "--volumes", "--remove-orphans"],
-          { cwd: workspace, env: projectEnv(project, config.dataDir) }
+          [
+            "compose",
+            "-p",
+            composeProjectOf(project.slug),
+            "--profile",
+            "*",
+            "down",
+            "--volumes",
+            "--remove-orphans",
+          ],
+          { cwd: dir, env: appEnv(project, config.dataDir) }
         );
         if (result.code !== 0) {
           throw new Error(
             `docker compose down failed (exit ${result.code}): ${result.output.slice(-2000)}`
           );
         }
-        await rm(workspace, { recursive: true, force: true });
       }
+      await rm(productionDir(project), { recursive: true, force: true });
+      await rm(workspaceOf(project), { recursive: true, force: true });
       await store.removeProject({ tenantId: project.tenantId, projectId });
       await deleteProjectRows(db, projectId);
     },
