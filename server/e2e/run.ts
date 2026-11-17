@@ -22,9 +22,7 @@ const features = readFileSync(new URL("./todo-features.txt", import.meta.url), "
 // The run signs in as an approved account it makes for itself (below) and sends its cookie.
 let cookie = "";
 const api = createTRPCClient<AppRouter>({
-  links: [
-    httpLink({ url: `${base}/api/trpc`, transformer: superjson, headers: () => ({ cookie }) }),
-  ],
+  links: [httpLink({ url: `${base}/trpc`, transformer: superjson, headers: () => ({ cookie }) })],
 });
 const db = createDb(
   process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5440/schmeide"
@@ -159,7 +157,7 @@ const cleanUp = async (projectId: number) => {
   log(`deleted project ${projectId} (deployment, volumes, workspace, rows)`);
 };
 
-const health = await fetch(`${base}/api/healthz`).catch(() => undefined);
+const health = await fetch(`${base}/healthz`).catch(() => undefined);
 if (!health?.ok) {
   console.error(`No server at ${base}. Start it with \`make serve\` (or \`make serve/server\`).`);
   process.exit(1);
@@ -169,7 +167,7 @@ if (!health?.ok) {
 const signIn = async () => {
   const { token } = await approveEmail(db, account.email);
   await api.invites.accept.mutate({ token, name: "E2E run", password: account.password });
-  const response = await fetch(`${base}/api/auth/sign-in/email`, {
+  const response = await fetch(`${base}/auth/sign-in/email`, {
     method: "POST",
     headers: { "content-type": "application/json", origin },
     body: JSON.stringify(account),

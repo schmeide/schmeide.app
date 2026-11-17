@@ -2,7 +2,7 @@ import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import Fastify from "fastify";
 import { appRouter, BUSINESS_HEADER, type AppContext, type Context } from "./router.ts";
-import { AUTH_PATHS_WHILE_IMPERSONATING, currentPerson } from "./services/auth.ts";
+import { AUTH_PATH, AUTH_PATHS_WHILE_IMPERSONATING, currentPerson } from "./services/auth.ts";
 import type { UploadLimits } from "./services/files.ts";
 import { registerUploads } from "./uploads.ts";
 
@@ -38,10 +38,10 @@ export const buildApp = (
         .send();
     });
   }
-  app.get("/api/healthz", async () => ({ ok: true }));
+  app.get("/healthz", async () => ({ ok: true }));
   registerUploads(app, context, uploadLimits);
   app.register(fastifyTRPCPlugin, {
-    prefix: "/api/trpc",
+    prefix: "/trpc",
     trpcOptions: {
       router: appRouter,
       createContext: ({
@@ -69,20 +69,20 @@ export const buildApp = (
     );
     scope.route({
       method: ["GET", "POST"],
-      url: "/api/auth/*",
+      url: `${AUTH_PATH}/*`,
       handler: async (request, reply) => {
         const body = request.body as Buffer | undefined;
-        const url = new URL(request.url, `http://${request.headers.host ?? "localhost"}`);
+        // The route below Better Auth's address, which is the one the browser used: in `make
+        // serve` it has the /api in front that Vite strips before it gets here.
+        const route = request.url.slice(AUTH_PATH.length);
+        const url = new URL(`${context.auth.options.baseURL}${route}`);
         const headers = fromNodeHeaders(request.headers);
         // A session an admin views the app through reaches only the routes on the list: none
         // that change how the person signs in. Default deny, so a route an upgrade adds is
         // refused too. Stopping the view is the `impersonation.stop` procedure. Asked on every
         // route, so a view that is over is ended before Better Auth sees it.
         const person = await currentPerson(context, headers);
-        if (
-          person?.impersonatedBy &&
-          !AUTH_PATHS_WHILE_IMPERSONATING.includes(url.pathname.slice("/api/auth".length))
-        )
+        if (person?.impersonatedBy && !AUTH_PATHS_WHILE_IMPERSONATING.includes(route.split("?")[0]))
           return reply
             .status(403)
             .send({ code: "IMPERSONATING", message: "Not while viewing as someone else" });

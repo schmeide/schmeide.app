@@ -27,7 +27,7 @@ const app = buildApp(
 afterAll(() => app.close());
 
 const sessionFrom = (origin: string) =>
-  app.inject({ method: "GET", url: "/api/trpc/session.get", headers: { origin } });
+  app.inject({ method: "GET", url: "/trpc/session.get", headers: { origin } });
 
 describe("a hosted API on another origin", () => {
   it("lets the site call it with the session cookie", async () => {
@@ -51,7 +51,7 @@ describe("a hosted API on another origin", () => {
     const ask = (origin: string) =>
       app.inject({
         method: "OPTIONS",
-        url: "/api/trpc/projects.create",
+        url: "/trpc/projects.create",
         headers: {
           origin,
           "access-control-request-method": "POST",
@@ -72,7 +72,7 @@ describe("a hosted API on another origin", () => {
   it("refuses a sign-in posted from another site", async () => {
     const response = await app.inject({
       method: "POST",
-      url: "/api/auth/sign-in/email",
+      url: "/auth/sign-in/email",
       headers: { origin: "https://evil.example", cookie: "anything=1" },
       payload: { email: "ada@example.com", password: "correct horse battery" },
     });

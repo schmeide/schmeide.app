@@ -56,7 +56,7 @@ beforeEach(() => {
 const mutate = async (path: string, input: unknown, cookie: string) => {
   const response = await app.inject({
     method: "POST",
-    url: `/api/trpc/${path}`,
+    url: `/trpc/${path}`,
     headers: { cookie, origin: TEST_ORIGIN },
     payload: { json: input },
   });
@@ -79,7 +79,7 @@ const auditOf = (adminEmail: string) =>
 const upload = async (cookie: string, projectId: number, headers = {}) => {
   const response = await app.inject({
     method: "POST",
-    url: `/api/projects/${projectId}/files?owner=mine&name=prices.csv`,
+    url: `/projects/${projectId}/files?owner=mine&name=prices.csv`,
     headers: { cookie, "content-type": "text/csv", ...headers },
     payload: "item,price\nbread,3\n",
   });
@@ -385,7 +385,7 @@ describe("a suspended business", () => {
     const other = await aSignedInAdmin(app, deps);
     const view = await app.inject({
       method: "POST",
-      url: "/api/trpc/admin.impersonation.start",
+      url: "/trpc/admin.impersonation.start",
       headers: { cookie: other.cookie, origin: TEST_ORIGIN },
       payload: { json: { email: owner.email, reason: "Why can they not get in" } },
     });

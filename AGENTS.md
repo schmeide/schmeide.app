@@ -56,7 +56,8 @@ For a pure refactor, run the existing tests before and after.
 
 - A Vite + React + TypeScript app, built to static files and served by GitHub
   Pages. In dev (`make serve`) it is the project UI over the `server/` tRPC API
-  at `/api/trpc`; the Pages build has no API and shows the "Coming soon" hero.
+  at `/api/trpc` (Vite proxies `/api` to the server's `/trpc`); the Pages build
+  has no API and shows the "Coming soon" hero.
 - No router library, state library, or CSS framework. Do not introduce one
   without a reason in the PR body. Routing is our own: path routes on the
   History API, one table in `utils/routes.ts`.

@@ -79,7 +79,7 @@ describe("the approved list", () => {
     const { email } = await approveEmail(db, anEmail());
     const response = await app.inject({
       method: "POST",
-      url: "/api/auth/sign-up/email",
+      url: "/auth/sign-up/email",
       headers: { origin: TEST_ORIGIN },
       payload: { email, name: "Mallory", password: PASSWORD },
     });
@@ -202,7 +202,7 @@ describe("a session", () => {
     const { cookie } = await signIn(email);
     const response = await app.inject({
       method: "POST",
-      url: "/api/auth/sign-out",
+      url: "/auth/sign-out",
       headers: { origin: TEST_ORIGIN, cookie },
     });
     expect(response.statusCode).toBe(200);
@@ -222,7 +222,7 @@ describe("a session", () => {
     const attempt = () =>
       limited.inject({
         method: "POST",
-        url: "/api/auth/sign-in/email",
+        url: "/auth/sign-in/email",
         headers: { origin: TEST_ORIGIN, "x-forwarded-for": "203.0.113.9" },
         payload: { email, password: "guess guess guess" },
       });
@@ -233,12 +233,53 @@ describe("a session", () => {
   });
 });
 
+describe("a provider sign-in", () => {
+  // The address the provider is told to send the person back to: the one registered with it.
+  const returnAddress = async (apiUrl?: string) => {
+    const google = { clientId: "id", clientSecret: "secret" };
+    const withGoogle = buildApp({
+      ...context,
+      auth: testAuth(db, { providers: { google }, ...(apiUrl && { apiUrl }) }),
+    });
+    const response = await withGoogle.inject({
+      method: "POST",
+      url: "/auth/sign-in/social",
+      headers: { origin: TEST_ORIGIN },
+      payload: { provider: "google", callbackURL: `${TEST_ORIGIN}/` },
+    });
+    await withGoogle.close();
+    expect(response.statusCode).toBe(200);
+    return new URL(response.json().url).searchParams.get("redirect_uri");
+  };
+
+  it("returns through the site's /api in `make serve`", async () => {
+    expect(await returnAddress()).toBe(`${TEST_ORIGIN}/api/auth/callback/google`);
+  });
+
+  it("returns to the API's own address when it has one", async () => {
+    expect(await returnAddress("https://api.schmeide.app")).toBe(
+      "https://api.schmeide.app/auth/callback/google"
+    );
+  });
+});
+
 describe("sign-in settings", () => {
   it("needs a secret once the address is public", () => {
     expect(() => authConfigFromEnv({ SCHMEIDE_PUBLIC_URL: "https://schmeide.app" })).toThrow(
       /SCHMEIDE_AUTH_SECRET/
     );
     expect(authConfigFromEnv({}).publicUrl).toBe("http://localhost:5173");
+  });
+
+  it("reaches the API through the site's /api unless told where it is", () => {
+    expect(authConfigFromEnv({}).apiUrl).toBe("http://localhost:5173/api");
+    expect(
+      authConfigFromEnv({
+        SCHMEIDE_PUBLIC_URL: "https://schmeide.app",
+        SCHMEIDE_API_URL: "https://api.schmeide.app/",
+        SCHMEIDE_AUTH_SECRET: "x".repeat(32),
+      }).apiUrl
+    ).toBe("https://api.schmeide.app");
   });
 
   it("turns a provider on only when both of its values are set", () => {

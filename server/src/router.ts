@@ -226,7 +226,7 @@ const impersonating = procedure.use(async ({ ctx, path, next }) => {
 });
 
 // Refused while an admin views the app as the person: what changes how the person signs in
-// (`/api/auth` is refused as a whole in app.ts), and anything that charges money (#82 builds its
+// (`/auth` is refused as a whole in app.ts), and anything that charges money (#82 builds its
 // payment procedures with `.use(refuseImpersonation)`).
 const refuseImpersonation = t.middleware(async ({ ctx, next }) => {
   if ((await currentPerson(ctx, ctx.headers))?.impersonatedBy)

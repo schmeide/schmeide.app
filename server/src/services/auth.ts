@@ -28,7 +28,8 @@ export type AuthConfig = {
   readonly secret: string;
   // The address people open in a browser, and where a provider sign-in returns them.
   readonly publicUrl: string;
-  // Where `/api/auth` answers, as the browser sees it. The same as publicUrl behind one origin.
+  // Where the API answers, as the browser sees it: `<publicUrl>/api` behind one origin (Vite
+  // strips the /api in `make serve`), or the API's own address (https://api.schmeide.app).
   readonly apiUrl: string;
   // A provider is offered only when its credentials are given.
   readonly providers: Partial<Record<Provider, Credentials>>;
@@ -77,7 +78,10 @@ const impersonator = async (
 // How long an admin may view the app as someone else (docs/auth.md), counted from the start.
 export const IMPERSONATION_SECONDS = 3600;
 
-// The only `/api/auth` route a session an admin is viewing through answers. Everything else,
+// Where the server answers Better Auth's routes.
+export const AUTH_PATH = "/auth";
+
+// The only `/auth` route a session an admin is viewing through answers. Everything else,
 // a route a Better Auth upgrade adds included, is refused (app.ts): changing the password or
 // email, linking a provider, deleting the account, ending sessions, and signing in or out.
 export const AUTH_PATHS_WHILE_IMPERSONATING: readonly string[] = ["/get-session"];
@@ -95,8 +99,10 @@ export const createAuth = (db: Db, config: AuthConfig) =>
   betterAuth({
     appName: "Schmeide",
     secret: config.secret,
-    baseURL: config.apiUrl,
-    basePath: "/api/auth",
+    // The address the browser and providers use, so provider returns go back the way they came.
+    // Better Auth takes a baseURL that has a path as it is, and answers below it.
+    baseURL: `${config.apiUrl}${AUTH_PATH}`,
+    basePath: AUTH_PATH,
     // Apple answers with a form post from its own origin.
     trustedOrigins: [
       config.publicUrl,
@@ -236,7 +242,7 @@ export const authConfigFromEnv = (
   env: Readonly<Record<string, string | undefined>>
 ): AuthConfig => {
   const publicUrl = publicUrlFromEnv(env);
-  const apiUrl = (env.SCHMEIDE_API_URL ?? publicUrl).replace(/\/+$/, "");
+  const apiUrl = (env.SCHMEIDE_API_URL ?? `${publicUrl}/api`).replace(/\/+$/, "");
   const secret = env.SCHMEIDE_AUTH_SECRET ?? (isLocal(publicUrl) ? DEV_SECRET : undefined);
   if (!secret || secret.length < 32)
     throw new Error(

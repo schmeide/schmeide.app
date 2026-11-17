@@ -53,7 +53,7 @@ const noProcedure = (path: string) => ({
 const mutate = async (path: string, input: unknown, cookie: string) => {
   const response = await app.inject({
     method: "POST",
-    url: `/api/trpc/${path}`,
+    url: `/trpc/${path}`,
     headers: { cookie, origin: TEST_ORIGIN },
     payload: { json: input },
   });

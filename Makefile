@@ -89,14 +89,14 @@ clean: ## Clean build artifacts
 serve: infra/up node_modules ## Infra, migrations, the local logins, the platform server on :3100, and Vite on :5173 (proxies /api)
 	$(MAKE) db/migrate
 	$(MAKE) db/seed
-	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
+	echo "App: http://localhost:5173  API: http://localhost:$(PORT)  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run start -w server" "$(JS_EXEC) run dev"
 
 .PHONY: serve/watch
 serve/watch: infra/up node_modules ## Like serve, but the server reloads on code changes (a reload restarts a running build's step)
 	$(MAKE) db/migrate
 	$(MAKE) db/seed
-	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
+	echo "App: http://localhost:5173  API: http://localhost:$(PORT)  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
 
 .PHONY: serve/web
@@ -193,7 +193,7 @@ e2e/fake: infra/up node_modules ## Fake-agent run on its own server (:3199): two
 		SCHMEIDE_AGENT_CMD=$(CURDIR)/server/e2e/fake-agent.sh exec node src/main.ts) >$$log 2>&1 &
 	server=$$!
 	trap 'kill $$server 2>/dev/null || true' EXIT
-	until curl -sf localhost:$(E2E_FAKE_PORT)/api/healthz >/dev/null; do
+	until curl -sf localhost:$(E2E_FAKE_PORT)/healthz >/dev/null; do
 		if ! kill -0 $$server 2>/dev/null; then echo "Error: the fake-agent server exited; see $$log"; exit 1; fi
 		sleep 1
 	done

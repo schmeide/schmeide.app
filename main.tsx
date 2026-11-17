@@ -34,7 +34,7 @@ const queryClient: QueryClient = new QueryClient({
 const trpcClient = createTRPCClient<AppRouter>({
   links: [
     httpBatchLink({
-      url: apiUrl("/api/trpc"),
+      url: apiUrl("/trpc"),
       transformer: superjson,
       headers: businessHeaders,
       // The session cookie goes along when the API is on another origin of this site.

@@ -24,7 +24,7 @@ import {
   type UploadLimits,
 } from "./services/files.ts";
 
-export const UPLOAD_PATH = "/api/projects/:id/files";
+export const UPLOAD_PATH = "/projects/:id/files";
 
 const querySchema = z.object({
   name: z.string().max(1000).default(""),
