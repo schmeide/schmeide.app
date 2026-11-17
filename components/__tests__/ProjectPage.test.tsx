@@ -155,6 +155,31 @@ describe("ProjectPage", () => {
     expect(screen.getByLabelText(copy.project.requestLabel(2))).toHaveValue("b");
   });
 
+  it("says when the page was out of date, and brings it up to date", async () => {
+    const state = {
+      project: aProject({ status: "live", previewUrl: "http://localhost:8100" }),
+      latestBuild: aBuild({ status: "passed" }),
+      hasBeenLive: true,
+    };
+    const stale =
+      "This page was out of date: the app is “Offline” now, and this needs it to be “Live”, “Build failed” or “Offline”.";
+    renderWithApi(<ProjectPage id={7} view="changes" />, {
+      ...projectServer(state),
+      // Someone took the app offline in another tab since this page loaded.
+      "projects.requestChange": () => {
+        state.project = aProject({ status: "stopped" });
+        throw new ApiFailure("CONFLICT", stale);
+      },
+    });
+    await userEvent.type(await screen.findByLabelText(copy.project.changeLabel), "Add a due date");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.requestChange }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(`${stale} ${copy.errors.refreshed}`);
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(copy.status.stopped.label)
+    );
+  });
+
   it("approves the spec and starts the build", async () => {
     const state = {
       project: aProject({ status: "spec_ready", features: "a", spec: SPEC }),

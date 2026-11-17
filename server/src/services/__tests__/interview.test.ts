@@ -156,7 +156,9 @@ describe("startInterview", () => {
     await transition(db, project.id, ["draft"], { status: "building" });
     const { deps, interviewer } = scripted(turn({ question: WHO }));
 
-    await expect(startInterview(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
+    await expect(startInterview(deps, project.id)).rejects.toThrow(
+      "The plan can only change before the app is built, and it is “Building” now."
+    );
     expect(interviewer).not.toHaveBeenCalled();
   });
 

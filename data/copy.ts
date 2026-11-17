@@ -584,7 +584,8 @@ export const copy = {
       agent: "The builder is writing your app.",
       check: "Checking that everything works.",
       deploy: "Putting your app online.",
-      error: "Something went wrong.",
+      error:
+        "The builder hit a problem and is working past it. Watch the steps below; if the build stops, it says what went wrong and how to try again.",
     },
     openStaging: "Open the version being worked on",
     openLive: "Open your live app",
@@ -735,11 +736,15 @@ export const copy = {
     signedOut: "You are signed out. Sign in again to continue.",
     notFound: "This project no longer exists. It may have been deleted.",
     forbidden: "You do not have access to this.",
-    conflict: "That cannot be done right now:",
+    // After the server's own sentence on why: the page refetches what it shows (ErrorNote).
+    refreshed:
+      "The page now shows where things stand; check it, then try again if it still applies.",
     badRequest: "That was not accepted:",
+    badRequestNext: "Change it, then send it again.",
     unavailable: "That is not available right now. Wait a moment, then try again.",
     suspended: "This business is suspended. Get in touch through Help.",
-    other: "Something went wrong:",
+    other:
+      "Something went wrong. Try again; if it keeps happening, the full output is in ~/.schmeide/logs.",
   },
   duration: (minutes: number, seconds: number) =>
     minutes > 0 ? `${minutes} min ${seconds} s` : `${seconds} s`,
