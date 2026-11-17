@@ -57,9 +57,11 @@ export const contextTarFlags = (version: string): readonly string[] => [
   "--exclude=.git",
 ];
 
-// One run that builds the frontend, then both images from the platform-owned Dockerfiles, and
-// pushes them tagged with the commit. The registry is the run's own ({{.Run.Registry}}), signed in
-// to as the caller: in ABAC mode a quick run has no other way to push.
+// One run that builds both images from the platform-owned Dockerfiles and pushes them tagged with
+// the commit. The registry is the run's own ({{.Run.Registry}}), signed in to as the caller: in ABAC
+// mode a quick run has no other way to push. That sign-in sits in every `cmd` step's home and Docker
+// socket, so the project's code runs only inside `build` steps, which see neither (#214): the web
+// image bundles the frontend in its own build stage.
 export const taskYaml = (tenantId: number, slug: string, commit: string): string => {
   const repos = imageRepos(tenantId, slug);
   const web = `{{.Run.Registry}}/${repos.web}:${commit}`;
@@ -67,8 +69,6 @@ export const taskYaml = (tenantId: number, slug: string, commit: string): string
   return [
     "version: v1.1.0",
     "steps:",
-    // frontend/Dockerfile serves the frontend/dist that `make build` leaves; this is that bundle.
-    '  - cmd: docker.io/library/node:26.13.1-alpine sh -c "npm ci && npm run build -w frontend"',
     `  - build: -t ${web} -f frontend/Dockerfile .`,
     `  - build: -t ${api} -f backend/Dockerfile .`,
     "  - push:",
