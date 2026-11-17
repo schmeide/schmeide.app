@@ -478,7 +478,12 @@ export const copy = {
     },
     elapsed: "Time:",
     failureTitle: "What went wrong",
-    logTitle: "What is happening",
+    summaryTitle: "What is happening",
+    summaryWaiting: "An account of the build in plain words appears here as it goes.",
+    summaryNone:
+      "There is no account in plain words for this build. Look behind the scenes for every step.",
+    behindTheScenes: "Look behind the scenes",
+    logTitle: "Every step, as the builder logged it",
     logHint: "The newest step is at the bottom.",
     logEmpty: "Waiting for the first step…",
     eventKind: {

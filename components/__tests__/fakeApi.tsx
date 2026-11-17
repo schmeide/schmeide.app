@@ -9,6 +9,7 @@ import type { AppRouter } from "../../server/src/router.ts";
 import type {
   Build,
   BuildEvent,
+  BuildSummary,
   Interview,
   PlanItem,
   Project,
@@ -111,6 +112,15 @@ export const aProject = (overrides: Partial<Project> = {}): Project => ({
   ...overrides,
 });
 
+export const aSummary = (id: number, text: string, final = false): BuildSummary => ({
+  id,
+  buildId: 3,
+  throughEventId: id,
+  final,
+  text,
+  at,
+});
+
 export const aBuild = (overrides: Partial<Build> = {}): Build => ({
   id: 3,
   projectId: 7,
@@ -193,6 +203,7 @@ export const projectServer = (state: {
   hasIcon?: boolean;
   hasBeenLive?: boolean;
   events?: BuildEvent[];
+  summaries?: BuildSummary[];
   usage?: Usage;
   time?: TimeTotals;
   interview?: Interview;
@@ -211,6 +222,7 @@ export const projectServer = (state: {
   }),
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),
+  "builds.summaries": () => state.summaries ?? [],
 });
 
 // The server's side of sign-in: `session.get` answers whoever `state.session` says, and the

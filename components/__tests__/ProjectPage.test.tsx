@@ -8,6 +8,7 @@ import { Routes } from "../Routes";
 import {
   aBuild,
   anEvent,
+  aSummary,
   aProject,
   ApiFailure,
   demoOwner,
@@ -249,6 +250,9 @@ describe("ProjectPage", () => {
       <ProjectPage id={7} />,
       projectServer({ project: aProject({ status: "building" }), latestBuild: aBuild(), events })
     );
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.behindTheScenes })
+    );
     const log = await screen.findByRole("log");
     expect(
       await within(log).findByText("Copying the template into a fresh workspace")
@@ -261,6 +265,76 @@ describe("ProjectPage", () => {
     ).toBeInTheDocument();
     expect(within(log).getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByText(copy.project.phase.check)).toBeInTheDocument();
+  });
+
+  it("shows the summary first, and the log behind a real button that stays open as it runs", async () => {
+    const events = [anEvent(1, "agent", "Editing frontend/src/Invoices.tsx")];
+    const summaries = [aSummary(1, "Getting your project ready.")];
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "building" }),
+        latestBuild: aBuild(),
+        events,
+        summaries,
+      })
+    );
+
+    expect(await screen.findByText("Getting your project ready.")).toBeInTheDocument();
+    const button = screen.getByRole("button", { name: copy.project.behindTheScenes });
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("log")).toBeNull();
+
+    await userEvent.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    const log = screen.getByRole("log");
+    expect(await within(log).findByText("Editing frontend/src/Invoices.tsx")).toBeInTheDocument();
+
+    // New events and a new summary arrive by polling; the log stays open and complete.
+    events.push(anEvent(2, "check", "Running make test"));
+    summaries.push(aSummary(2, "Adding the invoices screen."));
+    expect(
+      await screen.findByText("Adding the invoices screen.", {}, { timeout: 4000 })
+    ).toBeInTheDocument();
+    expect(await within(log).findByText("Running make test", {}, { timeout: 4000 })).toBeVisible();
+    expect(button).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("log")).toBe(log);
+    expect(within(log).getAllByRole("listitem")).toHaveLength(2);
+
+    await userEvent.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("log")).toBeNull();
+  });
+
+  it("ends with the account of what changed, shown as plain text only", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "live", spec: SPEC, previewUrl: "http://localhost:8100" }),
+        latestBuild: aBuild({ status: "passed", finishedAt: new Date() }),
+        summaries: [
+          aSummary(1, "Adding the invoices screen."),
+          aSummary(2, 'Done. <img src="x" onerror="alert(1)"> [open](https://evil.example)', true),
+        ],
+      })
+    );
+
+    expect(
+      await screen.findByText('Done. <img src="x" onerror="alert(1)"> [open](https://evil.example)')
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.queryByRole("link", { name: "open" })).toBeNull();
+  });
+
+  it("says when a finished build has no summary", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed" }),
+        latestBuild: aBuild({ status: "failed", error: "boom", finishedAt: new Date(0) }),
+      })
+    );
+    expect(await screen.findByText(copy.project.summaryNone)).toBeInTheDocument();
   });
 
   it("shows the app in a frame, its link and usage once the app is live", async () => {
