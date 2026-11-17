@@ -4,6 +4,7 @@ import type { z } from "zod";
 import {
   acceptInviteSchema,
   answerQuestionSchema,
+  auditQuerySchema,
   buildIdSchema,
   changeRequestSchema,
   editChangeSchema,
@@ -20,6 +21,7 @@ import {
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
+import { auditFilters, listAdminActions, withAudit } from "./services/audit.ts";
 import { currentPerson, type Auth, type Person, type Provider } from "./services/auth.ts";
 import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
@@ -128,6 +130,20 @@ const admin = procedure.use(async ({ ctx, path, next }) => {
   return next({ ctx: { ...ctx, person } });
 });
 
+// The only way to declare an admin write: `adminMutation("business.suspend").input(...)
+// .mutation(({ ctx }) => ...)`. The handler writes through `ctx.db`, a transaction that also
+// stores the audit row, and names whom it acted on with `ctx.audit({ targetUserId, ... })`. When
+// it throws, neither is stored. audit.test.ts fails for an admin mutation built any other way.
+export const adminMutation = (action: string) =>
+  admin.use(({ ctx, next }) =>
+    withAudit(ctx.db, { id: ctx.person.id, label: ctx.person.email }, action, async (tx, audit) => {
+      const result = await next({ ctx: { ...ctx, db: tx, audit } });
+      // tRPC hands a failed handler back as a result; throwing it rolls the transaction back.
+      if (!result.ok) throw result.error;
+      return result;
+    })
+  );
+
 // A procedure about one project (`id`) or one build (`buildId`). Either in another business
 // answers NOT_FOUND, exactly as one that does not exist.
 const onProject = <Schema extends z.ZodType<{ readonly id: number }>>(schema: Schema) =>
@@ -160,6 +176,12 @@ export const appRouter = t.router({
   // Every procedure here is built on `admin`; admin.test.ts walks them all as a customer.
   admin: t.router({
     whoami: admin.query(({ ctx }) => ({ name: ctx.person.name, email: ctx.person.email })),
+    audit: t.router({
+      list: admin
+        .input(auditQuerySchema)
+        .query(({ ctx, input }) => listAdminActions(ctx.db, input)),
+      filters: admin.query(({ ctx }) => auditFilters(ctx.db)),
+    }),
   }),
   // One-time links that let an approved person set a password; see services/access.ts.
   invites: t.router({

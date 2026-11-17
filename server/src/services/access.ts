@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { ADMIN_ROLE, approvedEmails, emailSchema, invites, sessions, users } from "../db/schema.ts";
+import { COMMAND_LINE, withAudit } from "./audit.ts";
 import type { Auth } from "./auth.ts";
 import { joinBusiness } from "./businesses.ts";
 import { NotFoundError } from "./errors.ts";
@@ -84,24 +85,28 @@ export const listApproved = (
       }))
     );
 
-// Gives an approved person who has an account the platform admin role. Throws with what to run
-// next when the address is not approved or has no account yet.
+// Gives an approved person who has an account the platform admin role, recorded in the audit log
+// as done from the command line. Throws with what to run next when the address is not approved
+// or has no account yet.
 export const grantAdmin = async (db: Db, rawEmail: string): Promise<{ readonly email: string }> => {
   const email = emailSchema.parse(rawEmail);
   if (!(await isApproved(db, email)))
     throw new Error(
       `${email} is not approved. Run \`make access/approve EMAIL=${email}\` first, then this again once they have signed in.`
     );
-  const granted = await db
-    .update(users)
-    .set({ role: ADMIN_ROLE })
-    .where(eq(users.email, email))
-    .returning({ id: users.id });
-  if (granted.length === 0)
-    throw new Error(
-      `${email} has not signed in yet. Send them the link \`make access/approve EMAIL=${email}\` prints, then run this again once they have signed in.`
-    );
-  return { email };
+  return withAudit(db, COMMAND_LINE, "admin.grant", async (tx, audit) => {
+    const [granted] = await tx
+      .update(users)
+      .set({ role: ADMIN_ROLE })
+      .where(eq(users.email, email))
+      .returning({ id: users.id });
+    if (!granted)
+      throw new Error(
+        `${email} has not signed in yet. Send them the link \`make access/approve EMAIL=${email}\` prints, then run this again once they have signed in.`
+      );
+    audit({ targetUserId: granted.id, detail: email });
+    return { email };
+  });
 };
 
 const liveInvite = async (db: Db, token: string, now: Date) => {

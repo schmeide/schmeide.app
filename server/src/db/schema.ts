@@ -457,6 +457,38 @@ export const memberships = pgTable(
   (table) => [primaryKey({ columns: [table.userId, table.tenantId] })]
 );
 
+// What admins did, written only by `withAudit` (services/audit.ts) in the same transaction as the
+// action. The app never updates or deletes a row; deleting a person or business keeps their rows.
+export const adminActions = pgTable(
+  "admin_actions",
+  {
+    id: serial("id").primaryKey(),
+    // Null when done from the command line. The label (an email, or "command line") keeps the
+    // row readable once the person is gone.
+    adminId: text("admin_id").references(() => users.id, { onDelete: "set null" }),
+    adminLabel: text("admin_label").notNull(),
+    action: text("action").notNull(),
+    targetUserId: text("target_user_id").references(() => users.id, { onDelete: "set null" }),
+    targetTenantId: integer("target_tenant_id").references(() => tenants.id, {
+      onDelete: "set null",
+    }),
+    detail: text("detail").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("admin_actions_admin_label_idx").on(table.adminLabel),
+    index("admin_actions_target_tenant_id_idx").on(table.targetTenantId),
+  ]
+);
+
+export const auditQuerySchema = z.object({
+  admin: z.string().max(254).optional(),
+  tenantId: z.number().int().positive().optional(),
+  // The id of the last entry already shown; older entries follow.
+  cursor: z.number().int().positive().nullish(),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+
 // Prelaunch: only these addresses (lowercase) may have an account or a session. Delete the table
 // and its checks (services/access.ts) to open sign-up to everyone.
 export const approvedEmails = pgTable("approved_emails", {

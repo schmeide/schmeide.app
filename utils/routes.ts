@@ -20,6 +20,7 @@ const table = {
   account: { path: "/account", access: "signedIn" },
   welcome: { path: "/welcome", access: "signedIn" },
   admin: { path: "/admin", access: "admin" },
+  adminAudit: { path: "/admin/audit", access: "admin" },
   help: { path: "/help", access: "public" },
   signIn: { path: "/sign-in", access: "public" },
   setPassword: { path: "/set-password", access: "public" },
