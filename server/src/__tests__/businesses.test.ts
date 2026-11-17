@@ -16,11 +16,15 @@ afterAll(() => db.$client.end());
 
 const start = vi.fn(async () => ({}) as never);
 const interviewer = vi.fn();
+const siteFetcher = vi.fn();
+const websiteReader = vi.fn();
 const deps: AppContext = {
   db,
   workflows: { start, getHandle: vi.fn() as never },
   taskQueue: "test",
   interviewer,
+  siteFetcher,
+  websiteReader,
   auth: testAuth(db),
   providers: [],
 };
@@ -56,6 +60,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "interview.addItem": { id, section: "does", text: "Take over" },
   "interview.updateItem": { id, itemId: 1, text: "Take over" },
   "interview.removeItem": { id, itemId: 1 },
+  "website.read": { id, address: "https://bakery.example/", whose: "mine" },
   "builds.events": { buildId },
   "builds.editQueued": { buildId, request: "Take over" },
   "builds.removeQueued": { buildId },
@@ -92,6 +97,8 @@ describe("every procedure", () => {
         expect((await callApi(app, path, calls[path])).code).not.toBe("UNAUTHORIZED");
       expect(start).not.toHaveBeenCalled();
       expect(interviewer).not.toHaveBeenCalled();
+      expect(siteFetcher).not.toHaveBeenCalled();
+      expect(websiteReader).not.toHaveBeenCalled();
     } finally {
       await finishBuild(db, build.id);
     }
@@ -118,6 +125,8 @@ describe("every procedure", () => {
       expect(after).toEqual(before);
       expect(start).not.toHaveBeenCalled();
       expect(interviewer).not.toHaveBeenCalled();
+      expect(siteFetcher).not.toHaveBeenCalled();
+      expect(websiteReader).not.toHaveBeenCalled();
     } finally {
       await finishBuild(db, build.id);
     }

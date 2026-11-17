@@ -18,6 +18,8 @@ const deps: AppContext = {
   workflows: { start: vi.fn(async () => ({}) as never), getHandle: vi.fn() as never },
   taskQueue: "test",
   interviewer,
+  siteFetcher: vi.fn(),
+  websiteReader: vi.fn(),
   auth: testAuth(db),
   providers: [],
 };

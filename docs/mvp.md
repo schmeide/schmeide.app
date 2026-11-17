@@ -256,6 +256,39 @@ Each item is for `day_one` or `later`, and is marked `you` or `schmeide` by who 
 - Changing the plan of a `spec_ready` project returns it to `draft` and clears the spec, as
   `projects.setFeatures` does. The plan cannot change once the project is being built.
 
+## Reading a website
+
+`website.read({ id, address, whose })` reads a website a person names and returns proposals for the
+plan. It writes nothing into the plan; the screen (#70) shows the proposals and adds what the person
+keeps ticked.
+
+- `whose` is `mine` or `someone_else`. Left out, the call answers `{ status: "ask_whose" }` without
+  fetching anything, unless the address is on the domain of the caller's sign-in email (public
+  mailbox domains such as `gmail.com` never count), in which case it is read as theirs.
+- A read answers `{ status: "read", address, ownedBy, proposals }`. `ownedBy` is `domain`, `claim`
+  (the person said so), or `null` for someone else's site. For `mine` the proposals are the business
+  name, a logo address, colors, what the business offers, and features by plan section. For
+  `someone_else` they are features only: nothing else is asked of the model, and no page text is
+  stored.
+- A read that does not work answers `{ status: "failed", reason }`, as data: `unreachable`,
+  `needs_sign_in`, `blocks_readers`, `nothing_found`, or `refused_address`.
+- Only `http` and `https` on ports 80 and 443, with no name and password in the address. Private,
+  loopback, link-local, carrier NAT, multicast, reserved, and cloud metadata addresses are refused
+  (`services/webAddress.ts`). The check runs on the address each connection is made to, and again on
+  every redirect.
+- One read takes at most 20 seconds, 1 MB per page, 5 redirects per page, and 4 pages: the page given
+  and up to three it links to on the same site. Only `text/html` is read, as plain HTML; no scripts
+  run.
+- `robots.txt` is fetched under the same rules and followed for `SchmeideBot` and `*`. The reader's
+  `User-Agent` is `SchmeideBot/1.0 (+https://schmeide.app)`.
+- An account may start 20 reads an hour and a business 60 (`website_reads`); over that the call
+  answers `CONFLICT`. A read that failed counts.
+- The pages are cut down to text and given to one model call with no tools and a fixed answer shape,
+  checked before anything is returned. When the answer cannot be used the call answers
+  `SERVICE_UNAVAILABLE`.
+- The fetch runs in the server process. `createSiteFetcher` in `services/siteFetcher.ts` is the one
+  function to move when it gets a network of its own.
+
 ## Environment
 
 | Variable                   | Default                                    | Meaning                              |
@@ -267,6 +300,7 @@ Each item is for `day_one` or `later`, and is marked `you` or `schmeide` by who 
 | `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
 | `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run   |
 | `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for interview questions        |
+| `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website          |
 | `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
 | `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
@@ -289,7 +323,8 @@ decides, and the run kind is its only input.
   `Agent started (...)`, which shows the model the SDK resolved it to.
 - Every `usage` row carries `run_kind`, so cost per kind is one query:
   `select run_kind, model, sum(cost_usd) from usage group by 1, 2`. An interview question is a fourth kind there,
-  `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table.
+  `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table. Reading a website is a fifth, `website`, on
+  `SCHMEIDE_WEBSITE_MODEL`.
 - The request size, the tenant's plan, and the remaining allowance do not change the model.
 - Nothing escalates. A fix-up run after failed checks resumes the same session on the same model, and a build that
   still fails after its fix-up rounds fails as before.

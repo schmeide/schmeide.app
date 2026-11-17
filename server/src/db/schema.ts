@@ -105,9 +105,15 @@ export const buildEvents = pgTable("build_events", {
   message: text("message").notNull(),
 });
 
-// What a model run is for. It labels the run's usage, and for every kind but `interview` it
-// decides the run's model (agentModel.ts).
-export const agentRunKind = pgEnum("agent_run_kind", ["spec", "initial", "change", "interview"]);
+// What a model run is for. It labels the run's usage, and for every kind but `interview` and
+// `website` it decides the run's model (agentModel.ts).
+export const agentRunKind = pgEnum("agent_run_kind", [
+  "spec",
+  "initial",
+  "change",
+  "interview",
+  "website",
+]);
 
 // One row per model per agent run. buildId is null for spec generation and interview questions. model is what the run
 // used, as the SDK reports it; runKind is what the run was, so cost can be compared per kind.
@@ -395,6 +401,32 @@ export const invites = pgTable("invites", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   usedAt: timestamp("used_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const websiteReads = pgTable(
+  "website_reads",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("website_reads_user_at_idx").on(table.userId, table.at),
+    index("website_reads_tenant_at_idx").on(table.tenantId, table.at),
+  ]
+);
+
+export const WEBSITE_OWNERS = ["mine", "someone_else"] as const;
+
+export const readWebsiteSchema = z.object({
+  id: projectId,
+  address: z.string().trim().min(1).max(2000),
+  whose: z.enum(WEBSITE_OWNERS).optional(),
 });
 
 export const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
