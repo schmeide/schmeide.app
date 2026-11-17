@@ -28,7 +28,9 @@ import {
   usage,
   type FileRow,
 } from "../../db/schema.ts";
-import { listEvents } from "../../services/builds.ts";
+import { getBuild, listEvents } from "../../services/builds.ts";
+import { createSummaries, listSummaries } from "../../services/summaries.ts";
+import type { Summarizer } from "../../services/summarizer.ts";
 import { JPEG, PNG, WEBP } from "../../services/__tests__/fileFixtures.ts";
 import { createLocalFileStore } from "../../services/fileStore.ts";
 import { createProject, transition } from "../../services/projects.ts";
@@ -651,6 +653,35 @@ describe("a suspended business", () => {
     expect(calls).toEqual([]);
     const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
     expect(after.status).toBe("draft");
+  });
+});
+
+describe("the build summary", () => {
+  it("hears of every event and of the end, and a summarizer that throws changes nothing", async () => {
+    const { config } = setup();
+    const { build } = await newBuild();
+    await db.update(builds).set({ status: "running" }).where(eq(builds.id, build.id));
+    const log = vi.fn();
+    const summarize = vi.fn<Summarizer>(async () => {
+      throw new Error("model unavailable");
+    });
+    const summaries = createSummaries(db, summarize, { log, batch: 1 });
+    const activities = createActivities(deps, config, fakeQuery([]), undefined, summaries);
+    const env = new MockActivityEnvironment();
+
+    await env.run(activities.prepareWorkspace, build.id);
+    await env.run(activities.runAgent, { buildId: build.id });
+    await env.run(activities.finishBuild, build.id);
+    await summaries.settled();
+
+    expect(await getBuild(db, build.id)).toMatchObject({ status: "passed", error: null });
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining(["Workspace ready", "Agent started (claude-test)", "Build passed"])
+    );
+    expect(summarize).toHaveBeenCalled();
+    expect(summarize.mock.calls.at(-1)?.[0].outcome).toEqual({ status: "passed", error: null });
+    expect(log).toHaveBeenCalled();
+    expect(await listSummaries(db, build.id)).toEqual([]);
   });
 });
 

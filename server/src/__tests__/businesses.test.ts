@@ -87,6 +87,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   // Always the caller's own business, so nothing to aim at another's.
   "usage.time": undefined,
   "builds.events": { buildId },
+  "builds.summaries": { buildId },
   "builds.editQueued": { buildId, request: "Take over" },
   "builds.removeQueued": { buildId },
 });

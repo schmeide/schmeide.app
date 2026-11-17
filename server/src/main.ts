@@ -17,6 +17,8 @@ import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createResourceReader } from "./services/resources.ts";
 import { createSiteFetcher } from "./services/siteFetcher.ts";
+import { createSummaries } from "./services/summaries.ts";
+import { createSummarizer } from "./services/summarizer.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
@@ -85,6 +87,8 @@ const config = {
   agentModels: routingFromEnv(env),
   interviewModel: env.SCHMEIDE_INTERVIEW_MODEL ?? "sonnet",
   websiteModel: env.SCHMEIDE_WEBSITE_MODEL ?? "sonnet",
+  // Writes the running summary of each build: small and fast, since it runs beside every build.
+  summaryModel: env.SCHMEIDE_SUMMARY_MODEL ?? "haiku",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
 } as const;
@@ -115,7 +119,13 @@ const worker = await Worker.create({
   connection: await NativeConnection.connect({ address: temporalAddress }),
   taskQueue,
   workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
-  activities: createActivities(deps, config),
+  activities: createActivities(
+    deps,
+    config,
+    undefined,
+    undefined,
+    createSummaries(db, createSummarizer({ ...config, model: config.summaryModel }))
+  ),
 });
 
 await failOrphanedBuilds(deps);
@@ -156,7 +166,7 @@ console.log(
     : "Builds are on: apps build with GNU make and Docker on this host."
 );
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}`
 );
 // Loopback unless told otherwise: a hosted server sits behind a proxy that ends https.
 await app.listen({ host: env.SCHMEIDE_HOST ?? "127.0.0.1", port });

@@ -53,6 +53,7 @@ import {
 } from "../services/projects.ts";
 import { composeProjectOf, workspaceOf as workspaceDir } from "../services/resources.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
+import type { Summaries } from "../services/summaries.ts";
 
 export type { Query };
 
@@ -274,7 +275,10 @@ export const createActivities = (
   deps: Deps,
   config: Config,
   query: Query = sdkQuery,
-  store: FileStore = createLocalFileStore(config.dataDir)
+  store: FileStore = createLocalFileStore(config.dataDir),
+  // The running summary of each build (services/summaries.ts). Told of each event and of the end;
+  // it never holds the build up. None in tests that do not ask for it.
+  summaries?: Summaries
 ) => {
   const db: Db = deps.db;
   const workspaceOf = (project: Project) => workspaceDir(config.dataDir, project.slug);
@@ -356,6 +360,7 @@ export const createActivities = (
   const event = async (buildId: number, kind: BuildEventKind, message: string) => {
     await appendEvent(db, buildId, kind, truncate(message, 2000));
     await log(buildId, `[${kind}] ${message}`);
+    summaries?.noticed(buildId);
   };
 
   const projectOfBuild = async (buildId: number) => {
@@ -832,6 +837,8 @@ export const createActivities = (
         if (next)
           await event(buildId, "step", `Starting the next queued change (build ${next.id})`);
       }
+      // Not awaited: the last summary is written after the build has ended.
+      summaries?.finished(buildId);
     },
 
     async stopDeployment(projectId: number): Promise<void> {

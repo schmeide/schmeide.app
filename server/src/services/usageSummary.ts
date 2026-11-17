@@ -16,7 +16,7 @@ import {
   type periodSchema,
   type usageQuerySchema,
 } from "../db/schema.ts";
-import { builderTime, buildingTime, finishedBuild } from "./builds.ts";
+import { builderRun, builderTime, buildingTime, finishedBuild } from "./builds.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -111,7 +111,9 @@ export const timeSummary = async (
       .from(agentRuns)
       .innerJoin(projects, eq(projects.id, agentRuns.projectId))
       .innerJoin(tenants, eq(tenants.id, projects.tenantId))
-      .where(and(start && gte(agentRuns.at, start), end && lt(agentRuns.at, end), tenant))
+      .where(
+        and(builderRun, start && gte(agentRuns.at, start), end && lt(agentRuns.at, end), tenant)
+      )
       .groupBy(tenants.id),
   ]);
   const byId = new Map<number, BusinessTime & { readonly id: number; readonly name: string }>();

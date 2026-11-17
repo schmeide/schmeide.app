@@ -4,6 +4,7 @@
 # `interview` prints one turn that adds a plan item and asks nothing further;
 # `website mine|someone_else` prints one reading of a website.
 # `read` prints one reading of an uploaded picture, with one proposed plan item.
+# `summary` prints one line of a build's running summary.
 set -euo pipefail
 
 case "${1:-}" in
@@ -32,8 +33,11 @@ case "${1:-}" in
   read)
     printf '%s\n' '{"outcome":"read","items":[{"section":"keeps","text":"Fake item read from the picture"}]}'
     ;;
+  summary)
+    echo "Fake summary for the end-to-end fixture."
+    ;;
   *)
-    echo "usage: $0 spec|build|interview|website|read (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview|website|read|summary (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac

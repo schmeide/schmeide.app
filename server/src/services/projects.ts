@@ -7,6 +7,7 @@ import {
   buildEvents,
   buildFiles,
   builds,
+  buildSummaries,
   files,
   interviewQuestions,
   interviews,
@@ -26,8 +27,10 @@ import type {
 } from "../temporal/workflows.ts";
 import {
   appendEvent,
+  builderRun,
   builderTime,
   buildingTime,
+  customerUsage,
   finishBuild,
   finishedBuild,
   getBuild,
@@ -249,12 +252,15 @@ export const getProject = async (
       costUsd: total(usage.costUsd),
     })
     .from(usage)
-    .where(eq(usage.projectId, id));
+    .where(and(eq(usage.projectId, id), customerUsage));
   const [building] = await db
     .select(buildingTime)
     .from(builds)
     .where(and(eq(builds.projectId, id), finishedBuild));
-  const [builder] = await db.select(builderTime).from(agentRuns).where(eq(agentRuns.projectId, id));
+  const [builder] = await db
+    .select(builderTime)
+    .from(agentRuns)
+    .where(and(eq(agentRuns.projectId, id), builderRun));
   const [unrecorded] = await db
     .select({ id: usage.id })
     .from(usage)
@@ -611,6 +617,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
     await tx.delete(interviews).where(eq(interviews.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
+    await tx.delete(buildSummaries).where(inArray(buildSummaries.buildId, ids));
     await tx.delete(buildFiles).where(inArray(buildFiles.buildId, ids));
     await tx.delete(files).where(eq(files.projectId, id));
     await tx.delete(builds).where(eq(builds.projectId, id));

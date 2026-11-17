@@ -116,7 +116,9 @@ export const buildEvents = pgTable("build_events", {
 });
 
 // What a model run is for. It labels the run's usage, and for every kind but `interview`,
-// `website` and `read` it decides the run's model (agentModel.ts).
+// `website`, `read` and `summary` it decides the run's model (agentModel.ts). `summary` is
+// Schmeide's own running account of a build (services/summaries.ts): it is not counted against the
+// customer.
 export const agentRunKind = pgEnum("agent_run_kind", [
   "spec",
   "initial",
@@ -124,7 +126,26 @@ export const agentRunKind = pgEnum("agent_run_kind", [
   "interview",
   "website",
   "read",
+  "summary",
 ]);
+
+// A plain-language account of a build, written as it runs from its events (services/summaries.ts).
+// Each covers the events up to and including throughEventId; the `final` one is written once the
+// build has ended. Stored as plain text and shown only as text.
+export const buildSummaries = pgTable(
+  "build_summaries",
+  {
+    id: serial("id").primaryKey(),
+    buildId: integer("build_id")
+      .notNull()
+      .references(() => builds.id),
+    throughEventId: integer("through_event_id").notNull(),
+    final: boolean("final").notNull().default(false),
+    text: text("text").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index("build_summaries_build_id_idx").on(table.buildId)]
+);
 
 // One row per agent run: how long the model ran, as the SDK's result reports it. A run's tokens and
 // cost are its `usage` rows, one per model, so the time is kept once here rather than on each.
@@ -352,6 +373,7 @@ export type Project = typeof projects.$inferSelect;
 export type Build = typeof builds.$inferSelect;
 export type BuildEvent = typeof buildEvents.$inferSelect;
 export type BuildEventKind = BuildEvent["kind"];
+export type BuildSummary = typeof buildSummaries.$inferSelect;
 export type RunKind = (typeof agentRunKind.enumValues)[number];
 export type NewUsage = typeof usage.$inferInsert;
 export type NewAgentRun = typeof agentRuns.$inferInsert;

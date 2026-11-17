@@ -342,6 +342,7 @@ What the server does with a file:
 | `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run   |
 | `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for questions and for reading  |
 | `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website          |
+| `SCHMEIDE_SUMMARY_MODEL`   | `haiku`                                    | Model for a build's running summary  |
 | `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
 | `ANTHROPIC_API_KEY`        | unset (uses the CLI login)                 | Model credential in a container      |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
@@ -367,7 +368,9 @@ decides, and the run kind is its only input.
 - Every `usage` row carries `run_kind`, so cost per kind is one query:
   `select run_kind, model, sum(cost_usd) from usage group by 1, 2`. An interview question is a fourth kind there,
   `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table. Reading a website is a fifth, `website`, on
-  `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`.
+  `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`. A build's
+  running summary is a seventh, `summary`, on `SCHMEIDE_SUMMARY_MODEL`; it is Schmeide's cost, left out of what a
+  project or business is shown or counted against, and shown in the admin area's usage by kind of run.
 - Every run that reaches the model also gets one `agent_runs` row with how long it ran (`duration_ms` from the SDK's
   result), and its `usage` rows name it in `run_id`. The time is kept once per run, not per model, so summing it never
   counts a run twice. Rows from before runs were recorded have no `run_id`, and their time is not known.
@@ -409,8 +412,8 @@ environment. The server refuses to start when `claude auth status` reports neith
 - An allow-listed environment (`server/src/services/claudeEnv.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
   `TMPDIR`, `TERM`, `TZ`, locale (`LANG`, `LC_*`), proxies and `NODE_EXTRA_CA_CERTS`, `ANTHROPIC_*`, `CLAUDE_CODE_*`,
   `CLAUDE_CONFIG_DIR`, and `DOCKER_HOST`/`DOCKER_CONTEXT`/`DOCKER_CONFIG`. Nothing else of the server's, so
-  `DATABASE_URL`, `SCHMEIDE_*` and the OAuth secrets never reach it. The interview and the file and website readers get
-  the same list. macOS keeps the CLI login in the keychain, found by `USER`.
+  `DATABASE_URL`, `SCHMEIDE_*` and the OAuth secrets never reach it. The interview, the file and website readers, and
+  a build's running summary get the same list. macOS keeps the CLI login in the keychain, found by `USER`.
 - The project environment on top: `COMPOSE_PROJECT_NAME`, `WEB_PORT`, `TEST_DB_PORT`, GNU make first on `PATH`.
 
 ## Dev-mode substitutions
