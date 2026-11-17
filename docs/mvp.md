@@ -119,9 +119,11 @@ stepper (Describe, Spec, Build, Live) above it, and one main button per step:
 2. **Spec**: the page updates by itself while it is written (under a minute). Read it, then "Approve and build", or
    "Change the requests", which goes back to step 1 and warns that saving new requests throws the spec away.
 3. **Build**: the status, elapsed time, and a live log of each step (Progress, Builder, Checking, Publishing,
-   Problem) with the server's own message. "Cancel the build" is below it. A failed or canceled first build stays on
+   Problem) with the server's own message. "Cancel the build" is below it. A failed first build stays on
    this step: it shows what went wrong and a "Try again" box, where you describe what to fix or just write "try
-   again".
+   again". A canceled first build stays on this step too, but there is no app to go back to and nothing went
+   wrong: it says "Canceled", with no "What went wrong" box, and "You canceled this build. Request a change to
+   build again."
 
 "Delete project" is at the bottom of every setup step except while the spec is written or a build runs. It asks
 first and removes both copies of the app, their data, the code, the spec, and the build history.
@@ -174,15 +176,16 @@ refresh and Back work. Different projects build at the same time; one project ru
 builds share its workspace. If the server is not running, the page says to start it with `make serve`. The production
 build (GitHub Pages) has no API and shows the "Coming soon" page instead, with no shell.
 
-| Status shown         | Server status     | Meaning                                                 |
-| -------------------- | ----------------- | ------------------------------------------------------- |
-| Describing           | `draft`           | Requests being written; no spec yet                     |
-| Writing the spec     | `spec_generating` | The spec is being written                               |
-| Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec)  |
-| Building             | `building`        | A build, a change build, a promote, or a discard runs   |
-| Live                 | `live`            | The app is running at its links                         |
-| Build failed         | `failed`          | The last build failed or was canceled; request a change |
-| Offline              | `stopped`         | Taken offline; putting a version live brings it back    |
+| Status shown         | Server status     | Meaning                                                |
+| -------------------- | ----------------- | ------------------------------------------------------ |
+| Describing           | `draft`           | Requests being written; no spec yet                    |
+| Writing the spec     | `spec_generating` | The spec is being written                              |
+| Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec) |
+| Building             | `building`        | A build, a change build, a promote, or a discard runs  |
+| Live                 | `live`            | The app is running at its links                        |
+| Build failed         | `failed`          | The last build failed; request a change                |
+| Canceled             | `failed`          | Last build is `canceled`. A first one has no app yet   |
+| Offline              | `stopped`         | Taken offline; putting a version live brings it back   |
 
 ## End-to-end runs
 
@@ -284,7 +287,7 @@ Print an invoice as a clean page I can save as a PDF
    there is nothing to do, and (discard) when production's commit was never recorded; a suspended
    business can do neither. Each counts toward building time like any build. No model runs for
    either: its summary is one fixed sentence, written when it ends (`RELEASE_SUMMARIES`).
-8. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
+8. `projects.stop({ id })` cancels a running build (it ends `canceled`, with no error; the project is `failed`), or
    runs `make down` for both copies (status `stopped`, volumes kept).
 9. `projects.delete({ id })` removes both copies and their volumes, the workspace, the app's checkout, and every
    row.

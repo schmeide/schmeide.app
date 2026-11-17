@@ -80,19 +80,27 @@ export function ProjectPage({ id, view = "overview" }: Props) {
   const { project, latestBuild, latestBuildBy, queued, unreleased, changes, hasIcon, usage, time } =
     query.data;
   const onStop = () => setStoppingAt(project.updatedAt.getTime());
-  const hint =
-    inApp && project.status === "building"
+  // The project stays `failed` so a retry still starts, but a cancel is not a failure.
+  const canceled = latestBuild?.status === "canceled";
+  const hint = canceled
+    ? copy.project.canceledHint
+    : inApp && project.status === "building"
       ? copy.project.appBuildingHint
       : inApp && project.status === "failed"
         ? copy.project.appFailedHint
         : copy.status[project.status].hint;
+  const label = canceled ? copy.project.buildStatus.canceled : copy.status[project.status].label;
   return (
     <article className={inApp ? styles.wide : undefined}>
       {back}
       <h1 className={styles.title}>{project.name}</h1>
-      <p role="status" className={styles.status} data-status={project.status}>
+      <p
+        role="status"
+        className={styles.status}
+        data-status={canceled ? "canceled" : project.status}
+      >
         <strong>
-          {copy.project.statusPrefix} {copy.status[project.status].label}.
+          {copy.project.statusPrefix} {label}.
         </strong>{" "}
         {hint}
       </p>

@@ -37,12 +37,14 @@ type Props = {
   readonly onStop: () => void;
 };
 
-const frameNote = (project: Project): string | null =>
+const frameNote = (project: Project, build: Build | null): string | null =>
   project.status === "building"
     ? copy.project.designer.building
-    : project.status === "failed"
-      ? copy.project.designer.failed
-      : null;
+    : project.status === "failed" && build?.status === "canceled"
+      ? copy.project.designer.canceled
+      : project.status === "failed"
+        ? copy.project.designer.failed
+        : null;
 
 export function Designer({
   view,
@@ -58,7 +60,7 @@ export function Designer({
   onRequestChange,
   onStop,
 }: Props) {
-  const note = frameNote(project);
+  const note = frameNote(project, latestBuild);
   const noChanges =
     changes.length === 0 && queued.length === 0 && (!latestBuild || latestBuild.kind === "initial");
 

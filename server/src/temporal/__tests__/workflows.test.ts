@@ -225,10 +225,11 @@ describe("buildWorkflow check and fix loop", () => {
     );
   }, 120_000);
 
-  it("records a cancel only after the running step has stopped", async () => {
-    const { outcome, build, prompts, events } = await runBuild({
+  it("records a cancel only after the running step has stopped, and leaves the queue waiting", async () => {
+    const { outcome, build, prompts, events, queued } = await runBuild({
       fixOnRun: 1,
       cancelDuringPrepare: true,
+      queued: ["add due dates"],
     });
 
     expect(outcome).toBe("failed");
@@ -238,7 +239,11 @@ describe("buildWorkflow check and fix loop", () => {
       "Workspace ready",
       "Build canceled",
     ]);
-    expect(build.error).toBe("Build canceled");
+    expect(build.status).toBe("canceled");
+    expect(build.error).toBeNull();
+    expect(queued.map((row) => row.status)).toEqual(["queued"]);
+    const [project] = await db.select().from(projects).where(eq(projects.id, build.projectId));
+    expect(project.status).toBe("failed");
     expect(build.finishedAt!.getTime() - build.startedAt.getTime()).toBeGreaterThanOrEqual(2000);
   }, 120_000);
 

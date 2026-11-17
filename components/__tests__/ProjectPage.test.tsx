@@ -584,6 +584,33 @@ describe("ProjectPage setup", () => {
     expect(calls).toContainEqual({ path: "projects.stop", input: { id: 7 } });
   });
 
+  it("keeps a canceled first build in setup, with no app to go back to", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed", spec: SPEC }),
+        latestBuild: aBuild({
+          kind: "initial",
+          status: "canceled",
+          error: null,
+          finishedAt: new Date(),
+        }),
+        hasBeenLive: false,
+      })
+    );
+
+    expect(await screen.findByText(copy.project.canceledHint)).toBeInTheDocument();
+    expect(screen.getByText(copy.project.buildStatus.canceled)).toBeInTheDocument();
+    expect(screen.queryByText(copy.status.failed.label)).toBeNull();
+    expect(screen.queryByText(copy.project.failureTitle)).toBeNull();
+    expect(screen.queryByRole("navigation", { name: copy.project.views.label })).toBeNull();
+    expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).toBeNull();
+    expect(screen.queryByRole("link", { name: new RegExp(copy.project.openLive) })).toBeNull();
+    expect(currentStep()).toBe("Build");
+    expect(screen.getByRole("heading", { name: copy.project.buildTitle })).toBeVisible();
+    expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
+  });
+
   it("keeps a project whose first build failed in setup, where it can be retried or deleted", async () => {
     const calls = renderWithApi(<ProjectPage id={7} />, {
       ...projectServer({
@@ -946,6 +973,36 @@ describe("ProjectPage designer", () => {
     expect(screen.getByText("boom")).toBeVisible();
     expect(screen.getByText(copy.project.changeRetryIntro)).toBeVisible();
     expect(primaryButtons()).toHaveLength(1);
+  });
+
+  it("stays in the designer when a later change is canceled, still showing the app from before it", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed", spec: SPEC, previewUrl: "http://localhost:8100" }),
+        latestBuild: aBuild({
+          kind: "change",
+          request: "Add a logo",
+          status: "canceled",
+          error: null,
+          finishedAt: new Date(),
+        }),
+        hasBeenLive: true,
+        queued: [aBuild({ id: 9, status: "queued", request: "Add a due date" })],
+      })
+    );
+
+    expect(await screen.findByText(copy.project.canceledHint)).toBeInTheDocument();
+    expect(screen.queryByText(copy.project.appFailedHint)).toBeNull();
+    expect(screen.queryByText(copy.status.failed.label)).toBeNull();
+    expect(screen.getByText(copy.project.buildStatus.canceled)).toBeInTheDocument();
+    expect(screen.queryByText(copy.project.failureTitle)).toBeNull();
+    const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByText(copy.project.designer.canceled)).toBeVisible();
+    expect(within(app).queryByText(copy.project.designer.failed)).toBeNull();
+    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
+    expect(screen.getByText(copy.project.changeRetryIntro)).toBeVisible();
+    expect(screen.getByText("Add a due date")).toBeVisible();
   });
 
   it("shows no frame for an offline app, saying why and how to bring it back", async () => {

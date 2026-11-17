@@ -119,7 +119,7 @@ While a business is suspended:
   in that one by default.
 - An admin viewing the app as a member sees the same: the view gets no way around it.
 - Nothing in it builds or runs a model. A queued change does not start when a build passes, and a spec run that was
-  waiting does not run. A build already running finishes the step it is in and stops there as failed, like a cancel;
+  waiting does not run. A build already running finishes the step it is in and stops there as failed;
   restoring does not resume it, a new change does.
 - Its live apps keep running: nothing is stopped or taken down.
 

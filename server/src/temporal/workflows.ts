@@ -25,7 +25,7 @@ const { finishBuild, applySite, stopDeployment, removeProject } = proxyActivitie
 });
 // The SDK throttles heartbeats to 80% of heartbeatTimeout, and cancellation only arrives with a
 // heartbeat, so a short timeout keeps cancellation prompt. Waiting for the cancellation to complete
-// means a canceled build is only marked failed once its agent or make process has stopped.
+// means a canceled build is only marked canceled once its agent or make process has stopped.
 // One retry lets a build survive a server restart: the dying worker fails the activity (or its
 // heartbeat times out) and the restarted worker runs it again. Agent failures are non-retryable.
 const longRunning: ActivityOptions = {
@@ -119,14 +119,19 @@ export async function buildWorkflow(
     }
     await finishBuild(buildId);
   } catch (error) {
-    const message = isCancellation(error)
-      ? "Build canceled"
-      : error instanceof Error
-        ? error.cause instanceof Error
-          ? error.cause.message
-          : error.message
-        : String(error);
-    await CancellationScope.nonCancellable(() => finishBuild(buildId, message));
+    // patched: a build already running when a cancel became its own status replays the old call.
+    if (isCancellation(error) && patched("canceled-build-status")) {
+      await CancellationScope.nonCancellable(() => finishBuild(buildId, undefined, "canceled"));
+    } else {
+      const message = isCancellation(error)
+        ? "Build canceled"
+        : error instanceof Error
+          ? error.cause instanceof Error
+            ? error.cause.message
+            : error.message
+          : String(error);
+      await CancellationScope.nonCancellable(() => finishBuild(buildId, message));
+    }
     throw error;
   }
 }

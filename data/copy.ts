@@ -517,6 +517,7 @@ export const copy = {
         "Your app is being built. It appears here when the build finishes; this page updates by itself.",
       failed:
         "The last change did not finish, so this is the version being worked on from before it. See what went wrong under “Latest change”.",
+      canceled: "You canceled this build, so this is the version being worked on from before it.",
       offline:
         "Your app is offline, so there is nothing to show here. To bring it back, put a version live: this one, when it is offered below, or a change you request.",
       buildsToStaging:
@@ -553,6 +554,7 @@ export const copy = {
     },
     appFailedHint:
       "The last change did not finish. See what went wrong under “Latest change”, then request a change to try again.",
+    canceledHint: "You canceled this build. Request a change to build again.",
     retryTitle: "Try again",
     firstBuildTitle: "First build",
     manageBusy: "You can delete the project once the build has finished.",
@@ -619,6 +621,7 @@ export const copy = {
       running: "Building now",
       passed: "Finished",
       failed: "Failed",
+      canceled: "Canceled",
     },
     elapsed: "Time:",
     failureTitle: "What went wrong",

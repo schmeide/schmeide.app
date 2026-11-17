@@ -32,4 +32,25 @@ describe("ProjectList", () => {
     expect(screen.getByText(copy.status.live.label)).toBeInTheDocument();
     expect(screen.getByText(copy.status.spec_ready.label)).toBeInTheDocument();
   });
+
+  it("shows a canceled build apart from one that failed", async () => {
+    renderWithApi(<ProjectList />, {
+      "projects.list": () => [
+        {
+          ...aProject({ id: 2, name: "Recipes", status: "failed" }),
+          latestBuildStatus: "canceled",
+        },
+        {
+          ...aProject({ id: 1, name: "Invoices", status: "failed" }),
+          latestBuildStatus: "failed",
+        },
+      ],
+    });
+
+    expect(await screen.findByText(copy.project.buildStatus.canceled)).toBeInTheDocument();
+    expect(screen.getByText(copy.status.failed.label)).toBeInTheDocument();
+    expect(
+      screen.getByText(copy.project.buildStatus.canceled).closest("[data-status]")
+    ).toHaveAttribute("data-status", "canceled");
+  });
 });

@@ -44,6 +44,15 @@ describe("build events", () => {
     expect(finished).toMatchObject({ status: "failed", error: "make test failed" });
     expect(finished.finishedAt).toBeInstanceOf(Date);
   });
+
+  it("finishes a canceled build as canceled, with no error", async () => {
+    const build = await newBuild();
+
+    const finished = await finishBuild(db, build.id, undefined, "canceled");
+
+    expect(finished).toMatchObject({ status: "canceled", error: null });
+    expect(finished.finishedAt).toBeInstanceOf(Date);
+  });
 });
 
 const USED = {

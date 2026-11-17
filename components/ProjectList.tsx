@@ -26,16 +26,23 @@ export function ProjectList() {
       {list.isPending && <p>{copy.loading}</p>}
       {list.data && (
         <ul className={styles.projects}>
-          {list.data.map((project) => (
-            <li key={project.id} className={styles.project}>
-              <Link to={pathTo("project", { id: project.id })} className={styles.name}>
-                {project.name}
-              </Link>
-              <span className={styles.status} data-status={project.status}>
-                {copy.status[project.status].label}
-              </span>
-            </li>
-          ))}
+          {list.data.map((project) => {
+            const canceled =
+              project.status === "failed" && project.latestBuildStatus === "canceled";
+            return (
+              <li key={project.id} className={styles.project}>
+                <Link to={pathTo("project", { id: project.id })} className={styles.name}>
+                  {project.name}
+                </Link>
+                <span
+                  className={styles.status}
+                  data-status={canceled ? "canceled" : project.status}
+                >
+                  {canceled ? copy.project.buildStatus.canceled : copy.status[project.status].label}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </>

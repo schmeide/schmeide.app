@@ -92,6 +92,14 @@ describe("summaryPrompt", () => {
     );
     expect(prompt.indexOf("make test failed (exit 2)")).toBeLessThan(prompt.indexOf("END LOG m"));
   });
+
+  it("asks a canceled build to say the person canceled it, not that it failed", () => {
+    const prompt = summaryPrompt(input({ outcome: { status: "canceled", error: null } }), "m");
+
+    expect(prompt).toContain("The person canceled this build.");
+    expect(prompt).not.toContain("The build failed.");
+    expect(prompt).not.toContain("what went wrong");
+  });
 });
 
 describe("plainText", () => {
