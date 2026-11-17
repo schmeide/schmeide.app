@@ -1,0 +1,75 @@
+.intro {
+  max-width: var(--lead-width);
+  font-size: var(--text-lead);
+  color: var(--color-muted);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-m);
+  margin: var(--space-l) 0 var(--space-m);
+}
+
+.filters label {
+  display: grid;
+  gap: var(--space-xs);
+  flex: 1 1 12rem;
+  min-width: 0;
+  font-weight: 600;
+}
+
+/* The table scrolls inside this box, never the page. */
+.scroll {
+  overflow-x: auto;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-small);
+}
+
+.caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.table th,
+.table td {
+  padding: var(--space-s) var(--space-m);
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.table th {
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.table td:first-child {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.target {
+  display: block;
+}
+
+.more {
+  margin-top: var(--space-m);
+}

@@ -34,6 +34,7 @@ export const copy = {
     account: "Account",
     welcome: "Your business",
     admin: "Admin",
+    adminAudit: "Audit log",
     help: "Help",
     signIn: "Sign in",
     setPassword: "Set your password",
@@ -43,6 +44,21 @@ export const copy = {
     report: "Report an app",
   },
   placeholder: "This page is not built yet.",
+  admin: {
+    intro: "For the people who run Schmeide.",
+    sectionsNav: "Admin sections",
+  },
+  audit: {
+    intro: "What admins did, newest first. Nothing here is ever edited or removed.",
+    adminLabel: "Admin",
+    businessLabel: "Business",
+    anyAdmin: "All admins",
+    anyBusiness: "All businesses",
+    caption: "Admin actions",
+    columns: ["When", "Admin", "Action", "Done to", "Detail"],
+    empty: "Nothing has been recorded yet.",
+    more: "Show older",
+  },
   signInPage: {
     intro:
       "Schmeide is open by invitation for now. Sign in with the email address you were invited with.",

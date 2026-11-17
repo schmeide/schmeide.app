@@ -37,6 +37,8 @@ procedure that does not exist.
 
 - `access/admin` works only for an approved address whose person has already set a password or signed in; it says
   what to run first otherwise. The role takes effect on their next request.
+- Every admin write, `access/admin` included, is recorded in the audit log (`admin_actions`), shown at `/admin/audit`.
+  The command line is recorded as `command line`.
 - An admin is not given a business of their own, and lands on `/admin`. Approving them with `TENANT=...` puts them in
   one.
 - `access/remove` takes an admin's access away like anyone else's: the role is kept but does nothing while the address
