@@ -111,6 +111,14 @@ serve/server: node_modules ## Run only the platform server (API + Temporal worke
 serve/prod: build ## Serve the built static site locally
 	$(JS_EXEC) run preview
 
+##@ Image
+
+IMAGE ?= schmeide-app:local
+
+.PHONY: image
+image: docker/check ## Build the server's container image (IMAGE=schmeide-app:local); cd-image.yml pushes it from main
+	docker build --build-arg NODE_VERSION=$(NODE_VERSION) -t $(IMAGE) .
+
 ##@ Infrastructure
 
 .PHONY: infra/up
