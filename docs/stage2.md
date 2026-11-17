@@ -11,7 +11,8 @@ Everything here is a recommendation for the owner to accept or change. Rejected 
 
 ## In short
 
-1. Each project's code lives in a repository on the in-cluster Forgejo, one organization per business. Nothing
+1. Each project's code lives in a repository on the in-cluster Forgejo, one organization per business, with a
+   `staging` branch the builder works on and a protected `main` that only moves forward on a promote. Nothing
    persistent sits on a disk next to the server any more.
 2. Each agent run is a Kubernetes Job in one `schmeide-builds` namespace: the server's own image, restricted pod
    security, no service account token, a per-run deploy key for its one repository, and a model key that only
@@ -20,11 +21,12 @@ Everything here is a recommendation for the owner to accept or change. Rejected 
    `make build` against a Postgres sidecar. `make test` in the template learns to use a database it is given.
 4. Images are built by ACR Tasks from Dockerfiles the platform owns, so agent-written code never runs with Docker
    or privileges inside the cluster.
-5. Each business gets a `tenant-<id>` namespace with a quota and default-deny network policy; each app is one
-   Deployment (nginx and Node in one pod), one Service, one Ingress, and one database on the shared Postgres.
-6. Apps are served under `apps.schmeide.com` for now, never under `schmeide.app`, at an unguessable host name, with a
-   wildcard certificate from DNS-01 on an Azure DNS zone. A dedicated domain on the Public Suffix List replaces it
-   before customers build.
+5. Each business gets a `tenant-<id>` namespace with a quota and default-deny network policy; each app has two
+   copies, production and staging (#155), each one Deployment (nginx and Node in one pod), one Service, one Ingress,
+   and one database on the shared Postgres.
+6. Apps are served under `apps.schmeide.com` for now, never under `schmeide.app`, at an unguessable host name (staging
+   at the same name plus `--staging`), with a wildcard certificate from DNS-01 on an Azure DNS zone. A dedicated
+   domain on the Public Suffix List replaces it before customers build.
 7. The API and the Temporal worker become two Deployments of the same image. Only the worker gets Kubernetes
    rights, scoped by RBAC and a ValidatingAdmissionPolicy.
 8. Per-tenant task queues are dropped in favor of a per-business concurrency limit; the builds namespace quota caps
@@ -37,7 +39,8 @@ Everything here is a recommendation for the owner to accept or change. Rejected 
 ### Goals
 
 - An approved spec becomes a running app at an `https://` address on the apps domain, with the same flow,
-  statuses, events and fix-up rounds as `docs/mvp.md` describes for dev mode.
+  statuses, events, fix-up rounds, and staging copy with promote and discard as `docs/mvp.md` describes for dev
+  mode.
 - Agent-written code never runs where it can reach the platform's secrets, database, Kubernetes API, or another
   business's code or app.
 - A build cannot starve sign-in, and a canceled or orphaned build leaves nothing running.
@@ -45,16 +48,17 @@ Everything here is a recommendation for the owner to accept or change. Rejected 
 
 ### Non-goals for Stage 2
 
-- Sign-in for built apps ([#84](https://github.com/schmeide/schmeide.app/issues/84)); custom domains (#87); staging
-  copies (#155) beyond leaving room for them in the URL scheme; redeploying old builds (#86); database import and
-  export (#85).
+- Sign-in for built apps ([#84](https://github.com/schmeide/schmeide.app/issues/84)); custom domains (#87);
+  redeploying old builds (#86); database import and export (#85), including copying production's data to staging.
 - Frontends in Blob Storage behind a CDN (see [Static frontends](#static-frontends)).
 - High availability for Forgejo or Temporal, and a second cluster.
 
 **Done, for a customer**: they press "Approve and build", watch the log, and within the times in `docs/mvp.md`
-plus about two minutes (image build, first certificate) the project says Live. "Open your app" and the Designer
-frame show it over https; a change request rebuilds and redeploys it; "Take the app offline" stops it and keeps its
-data; "Delete project" removes its code, images, database, and everything it ran.
+plus about two minutes (image build, first certificate) the project says Live. "Open the version being worked on",
+"Open your live app" and the Designer frame (staging) show it over https; a change request rebuilds staging and
+leaves production alone; "Put this version live" and "Throw these changes away" promote and discard; "Take the app
+offline" stops both copies and keeps their data; "Delete project" removes its code, images, databases, and
+everything it ran.
 
 ## The shape
 
@@ -69,7 +73,7 @@ flowchart LR
     CJ[checks Job]
   end
   subgraph tenant[tenant-ID namespace]
-    APP[app pod: nginx + node]
+    APP[app pods: production, staging]
   end
   T[(Temporal)] --> W
   W -- creates, follows logs --> AJ
@@ -80,7 +84,7 @@ flowchart LR
   W -- context upload, run --> ACR[ACR Tasks]
   ACR -- push images --> R[(ACR apps/*)]
   W -- apply manifests --> APP
-  APP --> PG[(Postgres: one database per app)]
+  APP --> PG[(Postgres: one database per copy)]
   TR[Traefik *.apps.schmeide.com] --> APP
 ```
 
@@ -93,19 +97,30 @@ provisioner. It runs no agent-written code. Build pods and app pods hold one nar
 workspace.** Forgejo is already running (`gitops/schmeide/forgejo/values.yaml`, chart 17.3.2) with
 `DISABLE_REGISTRATION` and "one organization per tenant" written into its values.
 
-- Layout: organization `t<tenant id>`, repository `<project slug>`, branch `main`. Slugs are already unique across
-  all projects (`uniqueSlug` in `server/src/services/projects.ts`).
+- Layout: organization `t<tenant id>`, repository `<project slug>`, branches `staging` and `main`. Slugs are already
+  unique across all projects (`uniqueSlug` in `server/src/services/projects.ts`).
 - `prepareWorkspace` becomes: if the repository is missing, create it with the Forgejo API, clone the template
   into a scratch directory under the worker's `/tmp`, make the one commit it makes today, and push. The local
   `.git` check becomes "does the repository exist".
 - `applySite` and `removeReferenceCopies` stay in the worker and work on a scratch clone, then push. They only
   read and write files; they never run the project's code.
-- The agent Job clones `main`, commits, and pushes `main`. The checks Job clones the exact commit the agent pushed.
-  Deploy builds the commit that passed the checks and records it on the project (`deployed_sha`), so a failed later
-  build never changes what is live.
+- The agent Job clones `staging`, commits, and pushes `staging`. The checks Job clones the exact commit the agent
+  pushed. Deploy builds the commit that passed the checks and puts it on staging only, recording it as dev mode
+  does: `builds.commit` and `projects.stagingCommit`. No build changes what is live, passed or failed, except an
+  app's first.
+- **Branches, not a local checkout, hold the two copies.** Dev mode keeps production in its own checkout
+  (`$SCHMEIDE_DATA_DIR/production/<slug>`) and discards with `git checkout -B main <commit>` in the workspace; on
+  Forgejo that would be a force-push to `main`. Instead `main` is production's history: a branch protection rule
+  lets only the `schmeide-platform` user push it (deploy keys may not) and forbids force-pushes. A promote
+  fast-forwards `main` to `projects.stagingCommit`, which always descends from `projects.productionCommit` because
+  builds only add commits to `staging`; a discard force-pushes `staging` back to `projects.productionCommit`, the
+  one branch a rewrite is allowed on. `projects.productionCommit` stays what production runs; `main` is its record
+  in the repository, so "download your code" (#89) gives what customers see. Rejected: tags per release (they
+  would still need a moving branch for the agent, and add nothing `builds.commit` does not record).
 - Credentials: the worker uses a token for a `schmeide-platform` Forgejo user that may create organizations
   (created once by hand, kept in Key Vault, projected by External Secrets). Build pods get a fresh SSH **deploy
-  key** per run, added to that one repository and deleted in `finishBuild`, so a pod can reach exactly one repo.
+  key** per run, added to that one repository and deleted in `finishBuild`, so a pod can reach exactly one repo
+  and push only `staging`.
 - Forgejo stays without a public ingress in Stage 2. Pods reach it on its cluster Service. A public hostname comes
   with "download your code" (#89), not before.
 - The template is cloned from `SCHMEIDE_TEMPLATE` (GitHub) as today. A Forgejo pull mirror of it is a later
@@ -191,7 +206,9 @@ check in slice 1 that its entrypoint starts as uid 1000 under the restricted lev
 
 **Model credential.** One Anthropic API key used only by build pods, in its own Anthropic Console workspace with a
 monthly spend limit, stored in Key Vault and projected as `anthropic-builds` into `schmeide-builds` only. The API's
-interview and reader calls use a different key. A prompt-injected agent can read its own key; the egress
+interview and reader calls use a different key, and so do build summaries (`summary` runs on
+`SCHMEIDE_SUMMARY_MODEL`, default `haiku`), which the worker writes beside the build from its events alone and
+which Schmeide pays for, not the business. A prompt-injected agent can read its own key; the egress
 allow-list means it can only spend it, and the workspace limit caps that. Per-tenant Foundry is an
 [open decision](#open-decisions). Each run also gets the SDK's `maxBudgetUsd` from the build's remaining
 allowance once #83 lands, which stops a runaway run cleanly.
@@ -258,7 +275,8 @@ Kubernetes mode.
 platform owns (`frontend/Dockerfile`, `backend/Dockerfile`, `frontend/nginx.conf`, `.dockerignore`) to the
 template's versions in its scratch clone, as `applySite` does for the title and icon, uploads that tree as the
 build context, and schedules one ACR run that builds and pushes two images: `apps/t<tenant>/<slug>/web` and
-`.../api`, tagged with the commit. The frontend's `vite build` and `npm ci` run on Azure's build hosts, not in the
+`.../api`, tagged with the commit. A promote builds nothing: production runs the images staging was built with.
+The frontend's `vite build` and `npm ci` run on Azure's build hosts, not in the
 cluster. The worker's workload identity gets a custom role with `scheduleRun`, `listBuildSourceUploadUrl` and
 `runs/read` on the registry. In ABAC repository mode a run gets no push rights of its own: give it a user-assigned
 identity holding Container Registry Repository Writer limited to `apps/*`.
@@ -274,35 +292,51 @@ settles it before slice 1 starts.
 
 - labels `schmeide.app/tenant=<id>` and `pod-security.kubernetes.io/enforce=restricted`;
 - a ResourceQuota (to start: `requests.cpu: 1`, `requests.memory: 2Gi`, `limits.memory: 4Gi`, `pods: 20`, no
-  LoadBalancer or NodePort Services) and a LimitRange with defaults;
+  LoadBalancer or NodePort Services), which fits about eight apps at two copies each, and a LimitRange with
+  defaults;
 - NetworkPolicy: deny all; allow ingress from the `traefik` namespace on port 8080; allow egress to kube-dns and to
   the Postgres subnet on 5432. **No internet egress for apps** in Stage 2 (#74 decides integrations).
 
 Rejected: a namespace per project (more objects, quotas that cannot be shared across a business's apps). A cluster
 per business (a control plane and nodes each).
 
-**Per app**, all labeled `schmeide.app/project=<id>`:
+**Per copy**, two per app (production and staging), all labeled `schmeide.app/project=<id>` and
+`schmeide.app/copy=production|staging`, named `app-<id>` and `app-<id>-staging`:
 
 - One Deployment, one replica, `automountServiceAccountToken: false`. Containers `web` (nginx, port 8080) and
   `api` (`node src/server.ts`, port 3000); nginx proxies `/api/` to `127.0.0.1:3000`. An init container runs
   `node src/migrate.ts` from the api image, which is the Compose `migrate` service. Readiness probes on `/` and
   `/api/healthz`. Requests `60m` CPU and `160Mi` in total, limits `500m` and `512Mi`.
-- A Service and an Ingress (`ingressClassName: traefik`) for the app's host.
-- A Secret with `DATABASE_URL`.
+- A Service and an Ingress (`ingressClassName: traefik`) for the copy's host.
+- A Secret with the copy's own `DATABASE_URL`.
 
-The worker writes them with server-side apply, waits for the rollout, then fetches `https://<host>/` and
-`/api/healthz` as `deploy` does today, with five minutes instead of three on a first deploy (certificate).
-`stopDeployment` scales to zero. `removeProject` deletes the labeled objects, the database and its role, the
-Forgejo repository, and the two ACR repositories.
+**The flow follows dev mode** (`deploy` and `release` in `server/src/temporal/activities.ts`):
+
+- `deploy` applies the staging Deployment at the build's commit, waits for the rollout, then fetches
+  staging's `/` and `/api/healthz` over https as it does today, with five minutes instead of three on a first
+  deploy (certificate). It records `builds.commit`, `projects.stagingCommit` and `projects.stagingUrl`. Only an
+  app's first build, with nothing live to protect, then promotes at once.
+- A `promote` build applies the production Deployment at `projects.stagingCommit` (its init container migrates
+  production's database forward), waits and fetches the same way, fast-forwards `main`, and records
+  `projects.productionCommit` and `projects.previewUrl`.
+- A `discard` build force-pushes `staging` to `projects.productionCommit` and records it as `stagingCommit`, scales
+  staging to zero, drops and recreates staging's database, and applies staging at that commit, whose migrations
+  build the empty database up.
+
+`stopDeployment` scales both copies to zero. `removeProject` deletes the labeled objects, both databases and their
+roles, the Forgejo repository, and the two ACR repositories.
 
 Rejected: Argo CD applying tenant apps from a Forgejo repository (a deploy becomes a commit plus a sync to wait on;
 revisit when drift or an audit trail matters).
 
-**Databases: one per app on the shared server.** The worker connects as a `schmeide_provisioner` role (`CREATEDB`,
-`CREATEROLE`, nothing else), creates role `app_<project id>` with a random password and a database it owns, and
-revokes `CONNECT` from `PUBLIC`. The URL carries `sslmode=require`. The provisioner password is the worker's alone.
+**Databases: one per copy on the shared server**, `app_<project id>` for production and `app_<project id>_staging`
+for staging, each with a role of the same name, so staging can never read or write production's data (as in dev
+mode, where each copy has its own volume). The worker connects as a `schmeide_provisioner` role (`CREATEDB`,
+`CREATEROLE`, nothing else), creates each role with a random password and a database it owns, grants the role to
+itself so it can drop that database on a discard (`DROP DATABASE ... WITH (FORCE)`), and revokes `CONNECT` from
+`PUBLIC`. The URL carries `sslmode=require`. The provisioner password is the worker's alone.
 Turn on the flexible server's built-in PgBouncer and keep app pools small (5): `B_Standard_B2s` allows a few hundred
-connections, and Temporal and Forgejo already use some.
+connections, Temporal and Forgejo already use some, and every app now holds two pools.
 
 ### Static frontends
 
@@ -315,8 +349,8 @@ pays off with real traffic; leave the account as is until then.
 
 **Never a subdomain of `schmeide.app`.** Built apps have no sign-in yet (#84) and run code the platform did not
 write; a subdomain would share the site with `schmeide.app`, receive any cookie scoped to it, and count as
-same-site. Apps on another registrable domain never see the platform's cookies, and "Open your app" cannot be used
-to attack the API's session.
+same-site. Apps on another registrable domain never see the platform's cookies, and "Open your live app" cannot be
+used to attack the API's session.
 
 **Decided: `apps.schmeide.com` for now.** The owner already holds `schmeide.com`; its DNS stays at Porkbun, where
 the apex points at GitHub Pages (the marketing site, schmeide/schmeide.com) and MX and SPF forward mail for
@@ -337,18 +371,20 @@ the apex points at GitHub Pages (the marketing site, schmeide/schmeide.com) and 
   per-app HTTP-01 certificates would publish every host name in Certificate Transparency logs, which defeats the
   random host names below, and would spend Let's Encrypt's per-domain limit that `schmeide.com` shares with the
   marketing site.
-- **Host names**: `<slug>-<6 random characters>.apps.schmeide.com`, chosen once per project and stored in a new
-  `projects.host` column. Until #84 the address is the only lock, so it must not be guessable. #155's staging copy
-  becomes `<same>--staging.apps.schmeide.com`, still one label, so one wildcard covers it. `X-Robots-Tag: noindex` on
-  every response.
+- **Host names**: production at `<slug>-<6 random characters>.apps.schmeide.com`, chosen once per project, its first
+  label stored in a new `projects.host` column; staging at `<same>--staging.apps.schmeide.com`. `--staging` is part
+  of the same label, never a subdomain, because the wildcard certificate covers one label only. A label is at most 63
+  characters, so the slug part is cut to 47. Until #84 the address is the only lock, so it must not be guessable,
+  and staging's is no more guessable than production's. `X-Robots-Tag: noindex` on every response.
 - **Framing (#91)**: the platform-owned `nginx.conf` sends a `Content-Security-Policy` of
   `frame-ancestors https://schmeide.app` (and `http://localhost:5173` in dev). `components/AppFrame.tsx` keeps
   `sandbox="allow-scripts allow-same-origin allow-forms"`; `allow-same-origin` is safe because the app's origin is
   another site. A Pages site cannot send headers, so "schmeide.app refuses to be framed" needs the site behind a
   host that can, or a script that refuses to run in a frame meanwhile. When #84 adds sign-in, the app's cookie is a
   third-party cookie inside the frame; mark it `Partitioned` and test, per #91.
-- `projects.webPort`, `FIRST_WEB_PORT`, `FIRST_TEST_DB_PORT` and `testDbPort` stay for host mode only.
-  `previewUrl` becomes `https://<host>`.
+- `projects.webPort`, `FIRST_WEB_PORT`, `FIRST_TEST_DB_PORT`, `STAGING_PORT_OFFSET` and `testDbPort` stay for host
+  mode only. `previewUrl` becomes `https://<host>.apps.schmeide.com` and `stagingUrl`
+  `https://<host>--staging.apps.schmeide.com`.
 
 ## The API, the worker, and queues
 
@@ -388,13 +424,13 @@ repository's `size`. The API gets a service account with only `get`/`list` on `p
 
 ### Who holds what
 
-| Component  | Holds                                                              | Never holds                 |
-| ---------- | ------------------------------------------------------------------ | --------------------------- |
-| API        | platform DB login, OAuth secrets, its own model key                | Kubernetes token, build key |
-| Worker     | Kubernetes RBAC, Forgejo token, ACR run role, Postgres provisioner | runs no agent-written code  |
-| Agent pod  | builds model key, one repo's deploy key                            | anything of the server's    |
-| Checks pod | one repo's read-only deploy key                                    | a model key                 |
-| App pod    | its own `DATABASE_URL`                                             | internet egress, a token    |
+| Component  | Holds                                                                | Never holds                 |
+| ---------- | -------------------------------------------------------------------- | --------------------------- |
+| API        | platform DB login, OAuth secrets, its model key                      | Kubernetes token, build key |
+| Worker     | RBAC, Forgejo token, ACR run role, DB provisioner, summary model key | runs no agent-written code  |
+| Agent pod  | builds model key, one repo's deploy key                              | anything of the server's    |
+| Checks pod | one repo's read-only deploy key                                      | a model key                 |
+| App pod    | its own `DATABASE_URL`                                               | internet egress, a token    |
 
 ### Worker RBAC without cluster-wide power
 
@@ -450,7 +486,7 @@ allocatable, of which the platform requests `680m` and 1.2 GiB today, the API in
 | Workload                    | Requests          | Per user node, after the platform |
 | --------------------------- | ----------------- | --------------------------------- |
 | One build (agent or checks) | 1.1 CPU, 2.25 GiB | 2 on the first node, 3 on another |
-| One idle app                | 60m CPU, 160 MiB  | about 60 on a node                |
+| One idle app, both copies   | 120m CPU, 320 MiB | about 30 on a node                |
 
 - The agent and checks of one build run one after the other, so a build holds one pod's worth at a time.
 - Set the `schmeide-builds` quota to `requests.cpu: 3.5` (three builds). With two user nodes that leaves room for
@@ -461,6 +497,9 @@ allocatable, of which the platform requests `680m` and 1.2 GiB today, the API in
 - **Add the dedicated pool** when customers may build (isolation, above), or earlier if builds wait more than five
   minutes for the quota, or the autoscaler sits at two nodes. Taint it `schmeide.app/untrusted=true:NoSchedule`;
   build Jobs and tenant Deployments tolerate and select it. Minimum one node, because live apps run there.
+- Size the builds quota and the pool from measured time, not guesses: `agent_runs.duration_ms` per run kind
+  (`initial`, `change`) is how long each agent pod holds its requests, and the build's own start and finish give
+  the checks' share. The same rows, with `usage`, give #83 its model cost per build.
 - Rough list prices (check the Azure calculator): a D4as_v6 node is about $140 a month; an ACR Task run is billed
   per second, about a cent for a two-minute image build; the Postgres server is shared. An idle small app costs a
   few dollars a month of node share, which is #83's "hosting cost per app".
@@ -494,9 +533,11 @@ flowchart LR
   2. `server/src/kube/` (API calls, Job and app manifests), `server/src/sandbox/agent.ts`, `SCHMEIDE_RUNNER`;
      Forgejo workspaces in `prepareWorkspace`, `applySite`, and the agent Job; checks Job. Issue: "run the agent
      and the checks as kubernetes jobs on forgejo repositories".
-  3. ACR run, tenant namespace, database provisioning, Deployment and Ingress, `projects.host` and `deployed_sha`
-     migration, `openssh-client` in `Dockerfile`, production section in `docs/mvp.md`. Issue: "deploy built apps to
-     a tenant namespace on the apps domain".
+  3. ACR run, tenant namespace, database provisioning for both copies, production and staging Deployments and
+     Ingresses, promote and discard on the `main` and `staging` branches, the `projects.host` migration (the
+     commits are already recorded: `builds.commit`, `projects.productionCommit`, `projects.stagingCommit`),
+     `openssh-client` in `Dockerfile`, production section in `docs/mvp.md`. Issue: #194, "deploy built apps to a
+     tenant namespace on the apps domain".
   4. Attachments are refused in Kubernetes mode with a clear message until slice 2 (there is no screen for them
      yet, #70).
 - **schmeide/iac**: worker Deployment, service account, RBAC, ValidatingAdmissionPolicy; `schmeide-builds`
@@ -511,8 +552,9 @@ flowchart LR
   multi-stage on `nginx-unprivileged` (port 8080, runs as non-root); `nginx.conf` takes the backend address and
   frame ancestors from the environment; `AGENTS.md` lists the platform-owned files. Issue: "run make test without
   docker and serve the frontend as non-root".
-- **Done when** an admin approves a spec in production and opens the app over https; cancel leaves no Job behind;
-  delete leaves no namespace object, database, repository or image.
+- **Done when** an admin approves a spec in production and opens both copies over https, requests a change and
+  sees it on staging only, then promotes it and discards another; cancel leaves no Job behind; delete leaves no
+  namespace object, database, repository or image.
 
 ### Slice 2: files, logs and sessions in Blob Storage
 
@@ -568,3 +610,5 @@ Each with the recommendation.
 10. **Frontends in Blob Storage behind a CDN.** Not in Stage 2; nginx in the app pod.
 11. **App addresses before #84.** A random suffix and `noindex`, so nothing is guessable while apps have no sign-in.
 12. **Who builds during the rollout.** `SCHMEIDE_BUILDS=admins` until slice 6.
+13. **How the repository holds staging and production.** A `staging` branch the builder pushes and a discard
+    rewrites, and a protected `main` that a promote fast-forwards; never a force-push to `main`.
