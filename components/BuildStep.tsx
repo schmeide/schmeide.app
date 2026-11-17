@@ -17,6 +17,8 @@ import stepStyles from "./Step.module.css";
 import styles from "./BuildStep.module.css";
 
 const EVENTS_PAGE = 500;
+// How far from the bottom the log still counts as scrolled to the bottom (fractional scroll offsets).
+const BOTTOM_SLACK_PX = 4;
 
 // Pages the build's events forward with afterId, every POLL_MS while the build runs and once more
 // when it ends. Mount it with key={build.id} so a new build starts a fresh log.
@@ -100,10 +102,25 @@ export function BuildStep({ build, title, by = null }: Props) {
   // Kept here, so it stays as the person left it while polling re-renders the step.
   const [showLog, setShowLog] = useState(false);
 
-  // Keep the newest event in view inside the log, without scrolling the page.
-  useEffect(() => {
+  // How many lines the log held when the reader scrolled up from the bottom; null while following.
+  const [pinnedAt, setPinnedAt] = useState<number | null>(null);
+  const behind = pinnedAt !== null && events.length > pinnedAt;
+
+  const scrollToNewest = () => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [events, showLog]);
+  };
+
+  const onScroll = () => {
+    const el = log.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_SLACK_PX;
+    setPinnedAt((pinned) => (atBottom ? null : (pinned ?? events.length)));
+  };
+
+  // Follow the newest event inside the log, without scrolling the page, only while at the bottom.
+  useEffect(() => {
+    if (pinnedAt === null) scrollToNewest();
+  }, [events, showLog, pinnedAt]);
 
   const end = build.finishedAt?.getTime() ?? now;
   return (
@@ -166,6 +183,7 @@ export function BuildStep({ build, title, by = null }: Props) {
           aria-live="off"
           tabIndex={0}
           ref={log}
+          onScroll={onScroll}
           className={styles.log}
         >
           {events.length === 0 ? (
@@ -182,6 +200,18 @@ export function BuildStep({ build, title, by = null }: Props) {
                 </li>
               ))}
             </ol>
+          )}
+          {behind && (
+            <button
+              type="button"
+              className={styles.jump}
+              onClick={() => {
+                setPinnedAt(null);
+                scrollToNewest();
+              }}
+            >
+              {copy.project.jumpToNewest}
+            </button>
           )}
         </div>
       </div>

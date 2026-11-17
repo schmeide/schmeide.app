@@ -109,3 +109,11 @@
 .logPanel h3 {
   margin-top: 0;
 }
+
+.jump {
+  position: sticky;
+  bottom: 0;
+  display: block;
+  max-width: 100%;
+  margin: var(--space-s) auto 0;
+}
