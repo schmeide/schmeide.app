@@ -51,7 +51,8 @@ try {
       removed ? `${email} is removed and signed out.` : `${email} was not on the approved list.`
     );
   } else if (command === "admin") {
-    const granted = await grantAdmin(db, needEmail());
+    // Works with no admin at all, to make the first one or to rescue a deployment that lost its last.
+    const granted = await grantAdmin(db, needEmail(), COMMAND_LINE);
     console.log(
       `${granted.email} is an admin. They see the admin area at /admin from their next page load.`
     );

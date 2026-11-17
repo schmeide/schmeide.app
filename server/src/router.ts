@@ -38,7 +38,10 @@ import {
   approveAccess,
   createBusiness,
   getInvite,
+  grantAdminRole,
+  listAdmins,
   removeAccess,
+  revokeAdmin,
 } from "./services/access.ts";
 import { auditFilters, listAdminActions, withAudit, type Actor } from "./services/audit.ts";
 import {
@@ -67,6 +70,7 @@ import {
   BUSINESS_SUSPENDED,
   BusinessSuspendedError,
   ConflictError,
+  ForbiddenError,
   InterviewUnavailableError,
   NotFoundError,
   ReaderUnavailableError,
@@ -133,6 +137,8 @@ const procedure = t.procedure.use(async ({ next }) => {
       throw new TRPCError({ code: "NOT_FOUND", message: cause.message });
     if (cause instanceof ConflictError)
       throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
+    if (cause instanceof ForbiddenError)
+      throw new TRPCError({ code: "FORBIDDEN", message: cause.message, cause });
     if (cause instanceof BusinessSuspendedError) throw suspended();
     // The UI falls back to typed requests, or offers to try again.
     if (cause instanceof InterviewUnavailableError || cause instanceof ReaderUnavailableError)
@@ -341,6 +347,23 @@ export const appRouter = t.router({
             });
           return removeAccess(ctx.db, ctx.audit, input.email, input.reason);
         }),
+    }),
+    // Who has the platform role, and making and unmaking admins; see services/access.ts.
+    admins: t.router({
+      list: admin.query(({ ctx }) => listAdmins(ctx.db)),
+      // Someone with no account yet is approved, their link answered here once, and they are an
+      // admin from their first sign-in.
+      grant: adminMutation("admin.grant")
+        .input(accessChangeSchema)
+        .mutation(({ ctx, input }) =>
+          grantAdminRole(ctx.db, ctx.audit, input.email, { reason: input.reason, invite: true })
+        ),
+      // Not your own role, and not the last admin's. Ends their sessions and views.
+      revoke: adminMutation("admin.revoke")
+        .input(accessChangeSchema)
+        .mutation(({ ctx, input }) =>
+          revokeAdmin(ctx.db, ctx.audit, { ...input, byId: ctx.person.id })
+        ),
     }),
     // The list answers from the database alone; what each project takes up is a second call, so
     // a slow or missing container runtime never holds the list back.

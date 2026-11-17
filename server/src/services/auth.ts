@@ -17,7 +17,7 @@ import {
   users,
   verifications,
 } from "../db/schema.ts";
-import { isApproved } from "./access.ts";
+import { claimPendingAdmin, isApproved } from "./access.ts";
 
 export const PROVIDERS = ["google", "microsoft", "apple"] as const;
 export type Provider = (typeof PROVIDERS)[number];
@@ -134,6 +134,17 @@ export const createAuth = (db: Db, config: AuthConfig) =>
       validateUserInfo: ({ user, source }) => admit(db, user, source.method),
     },
     databaseHooks: {
+      user: {
+        create: {
+          // A first provider sign-in makes the account here. It has the admin role only when an
+          // admin made the address an admin before it had one; whatever else asks for the role,
+          // the admin plugin's default included, is dropped. An invite link makes its account in
+          // `acceptInvite` (services/access.ts), which asks the same.
+          before: async (user) => ({
+            data: { ...user, role: (await claimPendingAdmin(db, user.email)) ? ADMIN_ROLE : null },
+          }),
+        },
+      },
       session: {
         create: {
           // A password sign-in is not re-validated above, so a removed address is stopped here.

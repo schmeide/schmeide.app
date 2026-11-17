@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { ADMIN_ROLE, users } from "../db/schema.ts";
 import { acceptInvite, approveEmail, grantAdmin } from "./access.ts";
+import { COMMAND_LINE } from "./audit.ts";
 import { isLocal, type Auth } from "./auth.ts";
 import { findTenantBySlug, joinBusiness } from "./businesses.ts";
 
@@ -50,7 +51,7 @@ export const seedDevLogins = async (
 ): Promise<void> => {
   refuseUnlessLocal(publicUrl);
   const admin = await ensureLogin(deps, DEV_LOGINS.admin);
-  if (admin.role !== ADMIN_ROLE) await grantAdmin(deps.db, DEV_LOGINS.admin.email);
+  if (admin.role !== ADMIN_ROLE) await grantAdmin(deps.db, DEV_LOGINS.admin.email, COMMAND_LINE);
   const demo = await findTenantBySlug(deps.db, "demo");
   const owner = await ensureLogin(deps, DEV_LOGINS.owner, demo);
   await joinBusiness(deps.db, owner.id, demo, "owner");

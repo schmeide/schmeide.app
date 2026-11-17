@@ -37,6 +37,7 @@ export const copy = {
     adminBusinesses: "Businesses",
     adminBusiness: "Business",
     adminPeople: "People",
+    adminAdmins: "Admins",
     adminProjects: "Hosted apps",
     adminUsage: "Tokens and cost",
     adminAudit: "Audit log",
@@ -148,6 +149,23 @@ export const copy = {
     approveHint:
       "They can sign in with Google, Microsoft, or Apple, or set a password with the link shown. They get a business of their own on first sign-in.",
     approveAction: "Approve",
+  },
+  // Who has the platform admin role.
+  admins: {
+    intro:
+      "The people who run Schmeide and can see every business. The last admin cannot lose the role, and nobody can take away their own.",
+    caption: "Admins",
+    columns: ["Name", "Email", "State", "Actions"],
+    active: "Admin",
+    pending: "Admin from their first sign-in",
+    grant: "Make someone an admin",
+    grantHint:
+      "Someone with an account and access is an admin at once. Someone with no account yet is approved, and is an admin from their first sign-in.",
+    grantAction: "Make admin",
+    revoke: (name: string) => `Take the role from ${name}`,
+    revokeHint:
+      "They are signed out everywhere, and any view as a customer they have open ends. Their access and businesses stay.",
+    revokeAction: "Take the role away",
   },
   // Every hosted project, in the admin area.
   hosting: {

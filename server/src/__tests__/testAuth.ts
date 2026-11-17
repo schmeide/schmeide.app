@@ -3,6 +3,7 @@ import type { buildApp } from "../app.ts";
 import type { Db } from "../db/client.ts";
 import { appRouter } from "../router.ts";
 import { acceptInvite, approveEmail, grantAdmin } from "../services/access.ts";
+import { COMMAND_LINE } from "../services/audit.ts";
 import { createAuth, type Auth, type AuthConfig } from "../services/auth.ts";
 
 type App = ReturnType<typeof buildApp>;
@@ -98,7 +99,7 @@ export const aSignedInPerson = async (
 export const aSignedInAdmin = async (app: App, deps: { readonly auth: Auth; readonly db: Db }) => {
   const { email, token } = await approveEmail(deps.db, anEmail());
   await acceptInvite(deps, { token, name: "Grace Admin", password: PASSWORD });
-  await grantAdmin(deps.db, email);
+  await grantAdmin(deps.db, email, COMMAND_LINE);
   const { cookie } = await signIn(app, email);
   return { email, cookie };
 };

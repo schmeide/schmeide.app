@@ -9,6 +9,7 @@ import {
   listApproved,
   removeApproval,
 } from "../services/access.ts";
+import { COMMAND_LINE } from "../services/audit.ts";
 import { ADMIN_PLUGIN_PATHS } from "../services/auth.ts";
 import {
   adminPaths,
@@ -154,18 +155,20 @@ describe("Better Auth's admin endpoints", () => {
 describe("granting the admin role", () => {
   it("refuses an address that is not approved, saying what to run", async () => {
     const email = anEmail();
-    await expect(grantAdmin(db, email)).rejects.toThrow(`make access/approve EMAIL=${email}`);
+    await expect(grantAdmin(db, email, COMMAND_LINE)).rejects.toThrow(
+      `make access/approve EMAIL=${email}`
+    );
   });
 
   it("refuses an approved address with no account yet, saying what to do", async () => {
     const { email } = await approveEmail(db, anEmail());
-    await expect(grantAdmin(db, email)).rejects.toThrow("has not signed in yet");
+    await expect(grantAdmin(db, email, COMMAND_LINE)).rejects.toThrow("has not signed in yet");
   });
 
   it("gives an approved person the role, which the approved list shows", async () => {
     const { email, token } = await approveEmail(db, anEmail());
     await acceptInvite(deps, { token, name: "Ada", password: PASSWORD });
-    expect(await grantAdmin(db, email.toUpperCase())).toEqual({ email });
+    expect(await grantAdmin(db, email.toUpperCase(), COMMAND_LINE)).toEqual({ email });
     const { cookie } = await signIn(app, email);
     expect(await callApi(app, "admin.whoami", undefined, cookie)).toMatchObject({ status: 200 });
     const listed = (await listApproved(db)).find((entry) => entry.email === email);

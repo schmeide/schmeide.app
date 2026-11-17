@@ -1,0 +1,1 @@
+ALTER TABLE "approved_emails" ADD COLUMN "admin" boolean DEFAULT false NOT NULL;

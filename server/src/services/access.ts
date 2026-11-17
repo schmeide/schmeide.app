@@ -1,6 +1,6 @@
 // The prelaunch approved list and the one-time links that let an approved person set a password.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, exists, gt, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   ADMIN_ROLE,
@@ -12,10 +12,10 @@ import {
   tenants,
   users,
 } from "../db/schema.ts";
-import { COMMAND_LINE, withAudit, type AuditTarget } from "./audit.ts";
+import { withAudit, type Actor, type AuditTarget } from "./audit.ts";
 import type { Auth } from "./auth.ts";
 import { joinBusiness } from "./businesses.ts";
-import { ConflictError, NotFoundError } from "./errors.ts";
+import { ConflictError, ForbiddenError, NotFoundError } from "./errors.ts";
 import { slugify } from "./projects.ts";
 
 export const INVITE_DAYS = 7;
@@ -108,28 +108,140 @@ export const listApproved = (
       }))
     );
 
-// Gives an approved person who has an account the platform admin role, recorded in the audit log
-// as done from the command line. Throws with what to run next when the address is not approved
-// or has no account yet.
-export const grantAdmin = async (db: Db, rawEmail: string): Promise<{ readonly email: string }> => {
-  const email = emailSchema.parse(rawEmail);
-  if (!(await isApproved(db, email)))
-    throw new Error(
-      `${email} is not approved. Run \`make access/approve EMAIL=${email}\` first, then this again once they have signed in.`
-    );
-  return withAudit(db, COMMAND_LINE, "admin.grant", async (tx, audit) => {
-    const [granted] = await tx
-      .update(users)
-      .set({ role: ADMIN_ROLE })
-      .where(eq(users.email, email))
-      .returning({ id: users.id });
-    if (!granted)
-      throw new Error(
-        `${email} has not signed in yet. Send them the link \`make access/approve EMAIL=${email}\` prints, then run this again once they have signed in.`
-      );
-    audit({ targetUserId: granted.id, detail: email });
+// Gives the platform admin role, recorded against `actor`: `make access/admin` passes the command
+// line. Only to an approved person who already has an account; it throws with what to run next
+// otherwise. Needs no admin to exist, so it makes the first one, or rescues a deployment that has
+// none left. The admin area grants through `grantAdminRole` inside its own audited transaction.
+export const grantAdmin = (
+  db: Db,
+  rawEmail: string,
+  actor: Actor
+): Promise<{ readonly email: string }> =>
+  withAudit(db, actor, "admin.grant", async (tx, audit) => {
+    const { email } = await grantAdminRole(tx, audit, rawEmail);
     return { email };
   });
+
+// Gives the role to an approved person with an account now. With `invite`, as the admin area asks,
+// someone with no account yet is approved instead, with the role waiting on their approval
+// (`approved_emails.admin`) until their account is made, and their link's token is answered.
+// Nothing the invitee sends or holds carries the role: only that row, which only this sets.
+export const grantAdminRole = async (
+  db: Db,
+  audit: Audit,
+  rawEmail: string,
+  { reason, invite = false }: { readonly reason?: string; readonly invite?: boolean } = {}
+): Promise<{
+  readonly email: string;
+  readonly pending: boolean;
+  readonly token: string | null;
+}> => {
+  const email = emailSchema.parse(rawEmail);
+  const approved = await isApproved(db, email);
+  const userId = await userIdOf(db, email);
+  if (userId === undefined && invite) {
+    const { token } = await approveEmail(db, email);
+    await db.update(approvedEmails).set({ admin: true }).where(eq(approvedEmails.email, email));
+    audit({ detail: detailOf(email, reason) });
+    return { email, pending: true, token };
+  }
+  if (!approved)
+    throw invite
+      ? new ConflictError(
+          `${email} has no access. Give them access first, then make them an admin.`
+        )
+      : new Error(
+          `${email} is not approved. Run \`make access/approve EMAIL=${email}\` first, then this again once they have signed in.`
+        );
+  if (userId === undefined)
+    throw new Error(
+      `${email} has not signed in yet. Send them the link \`make access/approve EMAIL=${email}\` prints, then run this again once they have signed in.`
+    );
+  await db.update(users).set({ role: ADMIN_ROLE }).where(eq(users.id, userId));
+  // An admin cannot be viewed as: a view of them that is open ends.
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.userId, userId), isNotNull(sessions.impersonatedBy)));
+  audit({ targetUserId: userId, detail: detailOf(email, reason) });
+  return { email, pending: false, token: null };
+};
+
+// Takes the role away, in the caller's transaction: ends every session of the person and every
+// view as someone they have open, so the admin area is gone on their very next call. A grant still
+// waiting for a first sign-in is withdrawn. Refused for the caller (`byId`, null from the command
+// line) themselves, for a caller who is no longer an admin, and for the last admin. Every admin is
+// locked first, so two admins taking each other's role at once take turns, and the second sees
+// that it would leave none.
+export const revokeAdmin = async (
+  db: Db,
+  audit: Audit,
+  {
+    email,
+    reason,
+    byId,
+  }: { readonly email: string; readonly reason?: string; readonly byId: string | null }
+): Promise<{ readonly email: string }> => {
+  const admins = await db
+    .select({ id: users.id, email: users.email })
+    .from(users)
+    .where(eq(users.role, ADMIN_ROLE))
+    .orderBy(asc(users.id))
+    .for("update");
+  const target = admins.find((admin) => admin.email === email);
+  if (!target) {
+    const withdrawn = await db
+      .update(approvedEmails)
+      .set({ admin: false })
+      .where(and(eq(approvedEmails.email, email), eq(approvedEmails.admin, true)))
+      .returning();
+    if (withdrawn.length === 0) throw new NotFoundError(`${email} is not an admin`);
+    audit({ detail: detailOf(email, reason) });
+    return { email };
+  }
+  if (target.id === byId) throw new ForbiddenError("You cannot take away your own admin role");
+  if (byId !== null && !admins.some(({ id }) => id === byId))
+    throw new ForbiddenError("You are no longer an admin");
+  if (admins.length <= 1) throw new ConflictError("The last admin cannot lose the role");
+  await db.update(users).set({ role: null }).where(eq(users.id, target.id));
+  await db.delete(sessions).where(eq(sessions.userId, target.id));
+  await endImpersonationsBy(db, target.id);
+  audit({ targetUserId: target.id, detail: detailOf(email, reason) });
+  return { email };
+};
+
+// Whether the address was made an admin before it had an account, claimed once: the flag is
+// cleared as it is read, so the role is given to the account made now and never again. Called as
+// an account is made, by an invite link (`acceptInvite`) or a first provider sign-in (auth.ts).
+// When making the account then fails, the role is lost, not left lying around.
+export const claimPendingAdmin = async (db: Db, email: string): Promise<boolean> =>
+  (
+    await db
+      .update(approvedEmails)
+      .set({ admin: false })
+      .where(and(eq(approvedEmails.email, email.toLowerCase()), eq(approvedEmails.admin, true)))
+      .returning()
+  ).length > 0;
+
+// The admins, and the people made admins who have not signed in yet (`pending`), by email.
+export const listAdmins = async (db: Db) => {
+  const active = await db
+    .select({
+      name: users.name,
+      email: users.email,
+      approved: sql<boolean>`${approvedEmails.email} is not null`,
+    })
+    .from(users)
+    .leftJoin(approvedEmails, eq(approvedEmails.email, users.email))
+    .where(eq(users.role, ADMIN_ROLE));
+  const pending = await db
+    .select({ email: approvedEmails.email })
+    .from(approvedEmails)
+    .leftJoin(users, eq(users.email, approvedEmails.email))
+    .where(and(eq(approvedEmails.admin, true), isNull(users.id)));
+  return [
+    ...active.map((admin) => ({ ...admin, pending: false })),
+    ...pending.map(({ email }) => ({ name: null, email, pending: true, approved: true })),
+  ].sort((a, b) => a.email.localeCompare(b.email));
 };
 
 type Audit = (target: AuditTarget) => void;
@@ -294,9 +406,17 @@ export const acceptInvite = async (
     // Inserted here, not through Better Auth: its own create runs only inside one of its
     // endpoints, and public sign-up is off. The live link is the proof that this address is
     // approved, and that the person reads mail sent to it.
+    // The role only when an admin made this address an admin before it had an account.
+    const admin = await claimPendingAdmin(db, email);
     const [user] = await db
       .insert(users)
-      .values({ id: randomUUID(), email, name: input.name ?? email, emailVerified: true })
+      .values({
+        id: randomUUID(),
+        email,
+        name: input.name ?? email,
+        emailVerified: true,
+        role: admin ? ADMIN_ROLE : null,
+      })
       .returning();
     await internalAdapter.linkAccount({
       userId: user.id,
