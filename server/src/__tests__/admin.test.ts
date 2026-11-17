@@ -104,7 +104,7 @@ describe("the session", () => {
     expect((await callApi(app, "projects.list", undefined, admin.cookie)).code).toBe("FORBIDDEN");
     const upload = await app.inject({
       method: "POST",
-      url: "/api/projects/1/files?owner=mine",
+      url: "/projects/1/files?owner=mine",
       headers: { cookie: admin.cookie, "content-type": "text/plain" },
       payload: "a note",
     });
@@ -124,7 +124,7 @@ describe("the session", () => {
     const owner = await aSignedInPerson(app, deps);
     await app.inject({
       method: "POST",
-      url: "/api/auth/update-user",
+      url: "/auth/update-user",
       headers: { cookie: owner.cookie, origin: TEST_ORIGIN },
       payload: { role: "admin" },
     });
@@ -143,7 +143,7 @@ describe("Better Auth's admin endpoints", () => {
     for (const path of ADMIN_PLUGIN_PATHS) {
       const response = await app.inject({
         method: "POST",
-        url: `/api/auth${path}`,
+        url: `/auth${path}`,
         headers: { cookie: admin.cookie, origin: TEST_ORIGIN },
         payload: {},
       });

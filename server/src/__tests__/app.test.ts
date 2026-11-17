@@ -28,6 +28,17 @@ const deps: AppContext = {
 };
 
 describe("the API", () => {
+  it("answers at its own root, with no /api in front", async () => {
+    const app = buildApp(deps);
+    try {
+      expect((await app.inject({ method: "GET", url: "/healthz" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/auth/ok" })).statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: "/api/healthz" })).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("answers CONFLICT when a running build is edited as if it were queued", async () => {
     const app = buildApp(deps);
     const { cookie, tenantId } = await aSignedInPerson(app, deps);
@@ -37,7 +48,7 @@ describe("the API", () => {
     try {
       const response = await app.inject({
         method: "POST",
-        url: "/api/trpc/builds.editQueued",
+        url: "/trpc/builds.editQueued",
         headers: { cookie },
         payload: { json: { buildId: build.id, request: "something else" } },
       });
@@ -57,7 +68,7 @@ describe("the API", () => {
     const call = (path: string, json: unknown) =>
       app.inject({
         method: "POST",
-        url: `/api/trpc/${path}`,
+        url: `/trpc/${path}`,
         headers: { cookie },
         payload: { json },
       });
@@ -108,7 +119,7 @@ describe("the API", () => {
     try {
       const response = await app.inject({
         method: "POST",
-        url: "/api/trpc/interview.start",
+        url: "/trpc/interview.start",
         headers: { cookie },
         payload: { json: { id: project.id } },
       });

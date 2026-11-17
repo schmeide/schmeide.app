@@ -76,7 +76,7 @@ const applyCookies = (cookie: string, set: readonly SetCookie[]) => {
 const mutate = async (path: string, input: unknown, cookie: string) => {
   const response = await app.inject({
     method: "POST",
-    url: `/api/trpc/${path}`,
+    url: `/trpc/${path}`,
     headers: { cookie, origin: TEST_ORIGIN },
     payload: { json: input },
   });
@@ -107,7 +107,7 @@ const upload = async (cookie: string, projectId: number) =>
   (
     await app.inject({
       method: "POST",
-      url: `/api/projects/${projectId}/files?owner=mine&name=prices.csv`,
+      url: `/projects/${projectId}/files?owner=mine&name=prices.csv`,
       headers: { cookie, "content-type": "text/csv" },
       payload: "item,price\nbread,3\n",
     })
@@ -333,7 +333,7 @@ describe("the time limit", () => {
       .where(eq(sessions.impersonatedBy, await idOf(admin.email)));
     const read = await app.inject({
       method: "GET",
-      url: "/api/auth/get-session",
+      url: "/auth/get-session",
       headers: { cookie, origin: TEST_ORIGIN },
     });
     expect(read.json()).toBeNull();
@@ -380,7 +380,7 @@ describe("while viewing as a person", () => {
     expect(AUTH_PATHS_WHILE_IMPERSONATING).toEqual(["/get-session"]);
     const served: string[] = [];
     for (const path of paths.filter((path) => !AUTH_PATHS_WHILE_IMPERSONATING.includes(path))) {
-      const url = `/api/auth${path.replace(/:\w+/g, "x")}`;
+      const url = `/auth${path.replace(/:\w+/g, "x")}`;
       for (const method of ["GET", "POST"] as const) {
         const response = await app.inject({
           method,
@@ -396,7 +396,7 @@ describe("while viewing as a person", () => {
 
     const read = await app.inject({
       method: "GET",
-      url: "/api/auth/get-session",
+      url: "/auth/get-session",
       headers: { cookie, origin: TEST_ORIGIN },
     });
     expect(read.statusCode).toBe(200);
@@ -419,7 +419,7 @@ describe("while viewing as a person", () => {
     const owner = await aSignedInPerson(app, deps);
     await app.inject({
       method: "POST",
-      url: "/api/auth/update-session",
+      url: "/auth/update-session",
       headers: { cookie: owner.cookie, origin: TEST_ORIGIN },
       payload: { impersonatedBy: await idOf(admin.email) },
     });
@@ -432,7 +432,7 @@ describe("while viewing as a person", () => {
     const owner = await aSignedInPerson(app, deps);
     const response = await app.inject({
       method: "GET",
-      url: "/api/auth/list-accounts",
+      url: "/auth/list-accounts",
       headers: { cookie: owner.cookie, origin: TEST_ORIGIN },
     });
     expect(response.statusCode).toBe(200);

@@ -21,7 +21,8 @@ export const testAuth = (db: Db, overrides: Partial<AuthConfig> = {}) =>
   createAuth(db, {
     secret: "test-secret-test-secret-test-secret-test",
     publicUrl: TEST_ORIGIN,
-    apiUrl: TEST_ORIGIN,
+    // As in `make serve`: the browser reaches the API at /api on the site, which Vite strips.
+    apiUrl: `${TEST_ORIGIN}/api`,
     providers: {},
     rateLimit: false,
     ...overrides,
@@ -55,7 +56,7 @@ export const callApi = async (
   const query = `?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
   const response = await app.inject({
     method: isQuery ? "GET" : "POST",
-    url: `/api/trpc/${path}${isQuery ? query : ""}`,
+    url: `/trpc/${path}${isQuery ? query : ""}`,
     headers: { cookie, ...headers },
     ...(isQuery ? {} : { payload: { json: input } }),
   });
@@ -72,7 +73,7 @@ export const callApi = async (
 export const signIn = async (app: App, email: string, password = PASSWORD) => {
   const response = await app.inject({
     method: "POST",
-    url: "/api/auth/sign-in/email",
+    url: "/auth/sign-in/email",
     headers: { origin: TEST_ORIGIN },
     payload: { email, password },
   });

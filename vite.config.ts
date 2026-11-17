@@ -18,8 +18,13 @@ const spaFallback = (): Plugin => ({
 export default defineConfig({
   base: "/",
   plugins: [react(), spaFallback()],
-  // `make serve` runs the platform server on :3100 (see server/src/main.ts).
-  server: { proxy: { "/api": "http://localhost:3100" } },
+  // `make serve` runs the platform server on :3100 (see server/src/main.ts). The browser calls
+  // /api on this origin, so the session cookie is first-party; the server itself has no /api.
+  server: {
+    proxy: {
+      "/api": { target: "http://localhost:3100", rewrite: (path) => path.replace(/^\/api/, "") },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

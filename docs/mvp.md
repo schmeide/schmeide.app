@@ -76,8 +76,8 @@ make serve    # Postgres + Temporal, migrations, the server on :3100, and Vite o
 `make` must be GNU make 4 or newer (`brew install make`, then use `gmake` or alias it). Apple's
 `/usr/bin/make` 3.81 ignores `.SHELLFLAGS` and fails every target here and in the template.
 
-- App (frontend): <http://localhost:5173> (Vite proxies `/api` to the server)
-- API: <http://localhost:3100/api/trpc>, health at <http://localhost:3100/api/healthz>
+- App (frontend): <http://localhost:5173> (Vite proxies `/api` to the server, without the `/api`)
+- API: <http://localhost:3100/trpc>, health at <http://localhost:3100/healthz>
 - Temporal UI: <http://localhost:8233>
 
 `make serve/server` runs only the server. `make infra/down` stops Postgres and Temporal; the
@@ -302,7 +302,7 @@ keeps ticked.
 Pictures, PDFs, and spreadsheets a person sends to show what they mean. There is no screen for them yet (#70); the API
 is:
 
-- `POST /api/projects/<id>/files?owner=mine|someone_else&purpose=reference|in_app&name=<file name>` with the file as
+- `POST /projects/<id>/files?owner=mine|someone_else&purpose=reference|in_app&name=<file name>` with the file as
   the request body and its type in `Content-Type` (`application/octet-stream` when unknown). It is not a tRPC call. It
   needs the session cookie, and takes the business header as tRPC does. It answers `201 { file }`, or
   `{ error: { code, message } }` with a message written for the person: `401 unauthorized`, `404 not_found` (also for

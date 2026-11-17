@@ -82,7 +82,7 @@ procedure that does not exist.
 - `/admin/usage` sums tokens and cost from `usage` per business, app, model, and kind of run, for a period of whole
   days in UTC (the current month unless chosen). A business's page shows its totals over all time. Deleting an app
   deletes its usage rows with it, so the sums leave deleted apps out.
-- The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
+- The role comes from Better Auth's admin plugin. Its own `/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
 
 ## Changing access
@@ -139,7 +139,7 @@ projects, and the same guards. From a person's row at `/admin/people`, or a memb
 - The audit log records the start (with the reason), the stop, and, against the admin, every change made in
   between (`impersonation.write`, naming the person, the business, and the procedure, or `files.upload` for an
   upload), so the history never says the customer did it.
-- Refused while viewing: every `/api/auth` route but reading the session, so the person's password, email,
+- Refused while viewing: every `/auth` route but reading the session, so the person's password, email,
   providers, account, and other sessions cannot be changed, and nothing about them is shown. Accepting a
   set-password link is refused too, and so will be anything that charges money.
 - Not another admin, not yourself, and not a second view from inside one: while viewing, the admin is not an
@@ -156,8 +156,8 @@ the site build.
 
 - `SCHMEIDE_PUBLIC_URL`: the address people open. Provider sign-ins return here, and only this origin may call
   the API from a browser. Default `http://localhost:5173`.
-- `SCHMEIDE_API_URL`: the address the browser reaches `/api` at, when it differs from the public address. Default:
-  the public address.
+- `SCHMEIDE_API_URL`: the address the browser reaches the API at (it answers `/trpc`, `/auth/*` and `/healthz` there).
+  Default: the public address with `/api` added, which Vite strips before the server in `make serve`.
 - `SCHMEIDE_AUTH_SECRET`: signs session cookies. At least 32 random characters (`openssl rand -base64 32`). On
   localhost a fixed value is used when it is unset.
 - `SCHMEIDE_HOST`: the address the server listens on. Default `127.0.0.1`.
@@ -177,13 +177,13 @@ Notes:
 
 Each provider needs the address it sends people back to. With `SCHMEIDE_API_URL` as `<api>`:
 
-| Provider  | Return address                      |
-| --------- | ----------------------------------- |
-| Google    | `<api>/api/auth/callback/google`    |
-| Microsoft | `<api>/api/auth/callback/microsoft` |
-| Apple     | `<api>/api/auth/callback/apple`     |
+| Provider  | Return address                  |
+| --------- | ------------------------------- |
+| Google    | `<api>/auth/callback/google`    |
+| Microsoft | `<api>/auth/callback/microsoft` |
+| Apple     | `<api>/auth/callback/apple`     |
 
-For local work, `<api>` is `http://localhost:5173`. Google and Microsoft accept that address; Apple does not.
+For local work, `<api>` is `http://localhost:5173/api`. Google and Microsoft accept that address; Apple does not.
 
 None of the three has been tried against the real provider yet: that needs the credentials below. Sign in once with
 each after setting it up, with an approved and an unapproved address.
@@ -257,9 +257,9 @@ its secrets. In short:
 1. At Porkbun, add an `A` record for `api` pointing at `74.249.191.146`. The `schmeide.app` apex stays on GitHub
    Pages.
 2. Register these return addresses with each provider ([Register with each provider](#register-with-each-provider)):
-   - Google: `https://api.schmeide.app/api/auth/callback/google`
-   - Microsoft: `https://api.schmeide.app/api/auth/callback/microsoft`
-   - Apple: `https://api.schmeide.app/api/auth/callback/apple`, with `api.schmeide.app` as the domain
+   - Google: `https://api.schmeide.app/auth/callback/google`
+   - Microsoft: `https://api.schmeide.app/auth/callback/microsoft`
+   - Apple: `https://api.schmeide.app/auth/callback/apple`, with `api.schmeide.app` as the domain
 3. Put the provider values and the Anthropic key in Key Vault, reading each from standard input so it stays out of the
    shell history:
 
@@ -271,7 +271,8 @@ its secrets. In short:
 
 4. Force External Secrets to sync the Secret and restart `schmeide-app-api` so it reads the new values (the gitops
    README has the commands).
-5. Set the image tag in schmeide/iac to a `main` commit and let Argo CD sync.
+5. Set the image tag in schmeide/iac to a `main` commit and let Argo CD sync. The Deployment's probes ask
+   `/healthz`.
 6. Approve yourself and make yourself admin, from inside the pod:
 
    ```sh
@@ -281,8 +282,8 @@ its secrets. In short:
    Sign in once, then run the same command with `admin you@example.com`.
 
 7. Check from outside the cluster:
-   - `https://api.schmeide.app/api/healthz` answers with a valid certificate.
-   - Signed out, `https://api.schmeide.app/api/trpc/projects.list` answers 401.
+   - `https://api.schmeide.app/healthz` answers with a valid certificate.
+   - Signed out, `https://api.schmeide.app/trpc/projects.list` answers 401.
    - An unapproved address cannot sign in, by a provider or by password.
 8. In the GitHub repository, set the Actions variable `VITE_API_URL` to `https://api.schmeide.app`, and run the
    Continuous Deployment workflow.

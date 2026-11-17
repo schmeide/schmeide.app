@@ -108,7 +108,7 @@ const upload = async (
   });
   const response = await app.inject({
     method: "POST",
-    url: `/api/projects/${projectId}/files?${query}`,
+    url: `/projects/${projectId}/files?${query}`,
     headers: { cookie, "content-type": type, ...headers },
     payload,
   });
