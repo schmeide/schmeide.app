@@ -14,13 +14,19 @@ import {
   newProjectSchema,
   planItemIdSchema,
   projectIdSchema,
+  readWebsiteSchema,
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
 import { currentPerson, type Auth, type Provider } from "./services/auth.ts";
 import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
-import { ConflictError, InterviewUnavailableError, NotFoundError } from "./services/errors.ts";
+import {
+  ConflictError,
+  InterviewUnavailableError,
+  NotFoundError,
+  ReaderUnavailableError,
+} from "./services/errors.ts";
 import {
   addPlanItem,
   answerQuestion,
@@ -31,6 +37,7 @@ import {
   type Interviewer,
 } from "./services/interview.ts";
 import { siteSchema } from "./services/site.ts";
+import { readWebsite, type WebsiteDeps } from "./services/website.ts";
 import {
   approveSpec,
   createProject,
@@ -48,12 +55,13 @@ import {
 } from "./services/projects.ts";
 
 // What the process holds for every request.
-export type AppContext = Deps & {
-  readonly interviewer: Interviewer;
-  readonly auth: Auth;
-  // The sign-in providers that have credentials, for the sign-in page.
-  readonly providers: readonly Provider[];
-};
+export type AppContext = Deps &
+  Omit<WebsiteDeps, "db"> & {
+    readonly interviewer: Interviewer;
+    readonly auth: Auth;
+    // The sign-in providers that have credentials, for the sign-in page.
+    readonly providers: readonly Provider[];
+  };
 
 export type Context = AppContext & { readonly headers: Headers };
 
@@ -68,7 +76,7 @@ const procedure = t.procedure.use(async ({ next }) => {
     if (cause instanceof ConflictError)
       throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
     // The UI falls back to typed requests, or offers to try again.
-    if (cause instanceof InterviewUnavailableError)
+    if (cause instanceof InterviewUnavailableError || cause instanceof ReaderUnavailableError)
       throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: cause.message, cause });
   }
   return result;
@@ -156,6 +164,11 @@ export const appRouter = t.router({
     ),
     removeItem: onProject(planItemIdSchema).mutation(({ ctx, input }) =>
       removePlanItem(ctx.db, input)
+    ),
+  }),
+  website: t.router({
+    read: onProject(readWebsiteSchema).mutation(({ ctx, input }) =>
+      readWebsite(ctx, input, { person: ctx.person, tenantId: ctx.tenantId })
     ),
   }),
   builds: t.router({

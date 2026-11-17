@@ -12,6 +12,8 @@ import { createDb } from "./db/client.ts";
 import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
 import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
+import { createSiteFetcher } from "./services/siteFetcher.ts";
+import { createWebsiteReader } from "./services/websiteReader.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
@@ -56,6 +58,7 @@ const config = {
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
   agentModels: routingFromEnv(env),
   interviewModel: env.SCHMEIDE_INTERVIEW_MODEL ?? "sonnet",
+  websiteModel: env.SCHMEIDE_WEBSITE_MODEL ?? "sonnet",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
 } as const;
@@ -91,9 +94,18 @@ const worker = await Worker.create({
 
 await failOrphanedBuilds(deps);
 const interviewer = createInterviewer({ ...config, model: config.interviewModel });
+const websiteReader = createWebsiteReader({ ...config, model: config.websiteModel });
+const siteFetcher = createSiteFetcher();
 const providers = enabledProviders(authConfig);
 const app = buildApp(
-  { ...deps, interviewer, auth: createAuth(db, authConfig), providers },
+  {
+    ...deps,
+    interviewer,
+    siteFetcher,
+    websiteReader,
+    auth: createAuth(db, authConfig),
+    providers,
+  },
   { logger: true, allowOrigin: authConfig.publicUrl }
 );
 
@@ -108,7 +120,7 @@ console.log(
   `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
 );
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}`
 );
 // Loopback unless told otherwise: a hosted server sits behind a proxy that ends https.
 await app.listen({ host: env.SCHMEIDE_HOST ?? "127.0.0.1", port });

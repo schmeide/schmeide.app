@@ -14,6 +14,8 @@ const app = buildApp(
     workflows: { start: vi.fn(), getHandle: vi.fn() as never },
     taskQueue: "test",
     interviewer: vi.fn(),
+    siteFetcher: vi.fn(),
+    websiteReader: vi.fn(),
     auth: testAuth(db, { publicUrl: SITE, apiUrl: "https://api.schmeide.app" }),
     providers: [],
   },
