@@ -8,11 +8,36 @@ import { promisify } from "node:util";
 
 const run = promisify(execFile);
 
-// The Docker Compose project a project's containers run under (temporal/activities.ts).
-export const composeProjectOf = (slug: string) => `schmeide-${slug}`;
-// The builder's git repository. The app runs from its own checkout of it, at one commit.
-export const workspaceOf = (dataDir: string, slug: string) => join(dataDir, "projects", slug);
-export const productionDirOf = (dataDir: string, slug: string) => join(dataDir, "production", slug);
+// Every app runs as two copies. Production is the one its own customers use; staging is the one
+// every build deploys to and the designer shows. Each has its own address, Compose project, and
+// database volume (Compose names it `<Compose project>_db-data`).
+export const COPIES = ["staging", "production"] as const;
+export type Copy = (typeof COPIES)[number];
+
+// A slug as slugify makes it. Never `_`, which only staging's Compose name holds, and never a path.
+const SLUG = /^[a-z0-9][a-z0-9-]*$/;
+
+// Every name a copy goes by, from this one place. Production keeps the names every app had before
+// staging existed, so an app already live keeps its containers and its database. Staging runs from
+// the builder's workspace, the project's git repository; production from its own checkout of it,
+// at one commit. A staging name ends in `_staging`, which no production name can, so nothing done
+// to staging can name production's Compose project, volume, or folder.
+export const copyOf = (
+  dataDir: string,
+  slug: string,
+  copy: Copy
+): { readonly composeProject: string; readonly dir: string } => {
+  if (!SLUG.test(slug)) throw new Error(`Not a project slug: ${JSON.stringify(slug)}`);
+  return copy === "production"
+    ? { composeProject: `schmeide-${slug}`, dir: join(dataDir, "production", slug) }
+    : { composeProject: `schmeide-${slug}_staging`, dir: join(dataDir, "projects", slug) };
+};
+
+// Staging's web port is production's plus this. The projects table keeps every web port below
+// FIRST_WEB_PORT + STAGING_PORT_OFFSET (18100), so the two ranges never meet.
+export const STAGING_PORT_OFFSET = 10_000;
+export const webPortOf = (project: { readonly webPort: number }, copy: Copy): number =>
+  copy === "production" ? project.webPort : project.webPort + STAGING_PORT_OFFSET;
 
 export type RuntimeFigures = {
   readonly containers: number;
@@ -66,7 +91,16 @@ export const readResources = async (
     ),
   ]);
   return projects.map(({ id, slug }, index) => {
-    const figures = runtime && (runtime.get(composeProjectOf(slug)) ?? NOT_RUNNING);
+    // Both copies, counted together.
+    const figures =
+      runtime &&
+      COPIES.map(
+        (copy) => runtime.get(copyOf("", slug, copy).composeProject) ?? NOT_RUNNING
+      ).reduce((sum, one) => ({
+        containers: sum.containers + one.containers,
+        memoryBytes: sum.memoryBytes + one.memoryBytes,
+        cpuPercent: sum.cpuPercent + one.cpuPercent,
+      }));
     return {
       id,
       containers: figures?.containers ?? null,
@@ -161,10 +195,10 @@ export const createResourceReader = (dataDir: string, docker = "docker"): Resour
     );
     return figuresByProject(ps.stdout, stats.stdout);
   },
-  // The workspace and the app's checkout together.
+  // Both copies' folders together: the workspace and the app's checkout.
   workspaceBytes: async (slug, signal) => {
     const sizes = await Promise.all(
-      [workspaceOf(dataDir, slug), productionDirOf(dataDir, slug)].map(async (dir) => {
+      COPIES.map((copy) => copyOf(dataDir, slug, copy).dir).map(async (dir) => {
         // A project that has never been built has neither yet.
         if (!(await stat(dir).catch(() => undefined))) return 0;
         const { stdout } = await run("du", ["-sk", dir], { signal });

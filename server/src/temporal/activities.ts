@@ -46,17 +46,14 @@ import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
   builtChanges,
   deleteProjectRows,
+  markReleased,
   findProject,
   startNextChange,
   testDbPort,
   transition,
   type Deps,
 } from "../services/projects.ts";
-import {
-  composeProjectOf,
-  productionDirOf,
-  workspaceOf as workspaceDir,
-} from "../services/resources.ts";
+import { copyOf, webPortOf, type Copy } from "../services/resources.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
 
@@ -78,6 +75,12 @@ export type Config = {
 
 // A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
 export const isCommit = (text: string): boolean => /^[0-9a-f]{40}$/.test(text);
+
+// How build events name each copy.
+const COPY_NAMES: Readonly<Record<Copy, string>> = {
+  staging: "the version being worked on",
+  production: "your live app",
+};
 
 // Written by main.ts under the data dir: bin/make points at GNU make, gitconfig is a neutral identity.
 export const shimDir = (dataDir: string) => join(dataDir, "bin");
@@ -234,6 +237,8 @@ const truncate = (text: string, max = MAX_EVENT): string => {
 // A project's make and agent get the claude allow list plus the project's own values, so nothing
 // meant for this server (its secrets, MAKEFLAGS when it runs under make) reaches them. The owner's
 // global git config (signing, hooks templates) is replaced so project commits never need their keys.
+// The Compose name and port are staging's, the copy the builder works on, so nothing the builder or
+// its checks run can name production; a production step names its own on make's command line.
 export const projectEnv = (project: Project, dataDir: string): Record<string, string> => {
   const env = claudeEnv();
   return {
@@ -241,8 +246,8 @@ export const projectEnv = (project: Project, dataDir: string): Record<string, st
     PATH: `${shimDir(dataDir)}:${env.PATH ?? ""}`,
     GIT_CONFIG_GLOBAL: gitConfigFile(dataDir),
     GIT_CONFIG_NOSYSTEM: "1",
-    COMPOSE_PROJECT_NAME: composeProjectOf(project.slug),
-    WEB_PORT: String(project.webPort),
+    COMPOSE_PROJECT_NAME: copyOf(dataDir, project.slug, "staging").composeProject,
+    WEB_PORT: String(webPortOf(project, "staging")),
     TEST_DB_PORT: String(testDbPort(project)),
   };
 };
@@ -300,7 +305,9 @@ export const createActivities = (
   summaries?: Summaries
 ) => {
   const db: Db = deps.db;
-  const workspaceOf = (project: Project) => workspaceDir(config.dataDir, project.slug);
+  const dirOf = (project: Project, copy: Copy) => copyOf(config.dataDir, project.slug, copy).dir;
+  // The builder's git repository, which staging runs from.
+  const workspaceOf = (project: Project) => dirOf(project, "staging");
   const attachmentsDir = (buildId: number) =>
     join(config.dataDir, "attachments", `build-${buildId}`);
 
@@ -559,48 +566,82 @@ export const createActivities = (
     return commit;
   };
 
-  const productionDir = (project: Project) => productionDirOf(config.dataDir, project.slug);
   const exists = async (path: string) => Boolean(await stat(path).catch(() => undefined));
 
-  // Where Compose finds the app's compose.yaml to stop or remove it: its checkout, or for an app
-  // deployed before it had one, the workspace. Undefined for a project never built.
-  const composeDir = async (project: Project): Promise<string | undefined> => {
-    for (const dir of [productionDir(project), workspaceOf(project)])
+  // Where Compose finds a copy's compose.yaml to stop or remove it: its own folder, or for the
+  // production of an app deployed before it had a checkout, the workspace. Undefined for a copy
+  // with neither. The Compose name is always the copy's own, whichever folder this answers.
+  const composeDir = async (project: Project, copy: Copy): Promise<string | undefined> => {
+    for (const dir of [dirOf(project, copy), workspaceOf(project)])
       if (await exists(join(dir, ".git"))) return dir;
     return undefined;
   };
 
-  // Moves the app's own checkout to `commit`, fetched from the workspace, with nothing else in
+  const assertCommit = (commit: string | null): string => {
+    if (commit === null || !isCommit(commit))
+      throw ApplicationFailure.nonRetryable(`Not a commit: ${commit}`);
+    return commit;
+  };
+
+  // Moves production's own checkout to `commit`, fetched from the workspace, with nothing else in
   // it: untracked and ignored files go too, so `make up` installs and builds that commit afresh.
-  const checkOut = async (project: Project, commit: string, buildId: number): Promise<string> => {
-    if (!isCommit(commit)) throw ApplicationFailure.nonRetryable(`Not a commit: ${commit}`);
-    const dir = productionDir(project);
+  const checkOutProduction = async (project: Project, commit: string, buildId: number) => {
+    const dir = dirOf(project, "production");
     await mkdir(dir, { recursive: true });
     const env = appEnv(project, config.dataDir);
     if (!(await exists(join(dir, ".git"))))
       await mustRun(project, "git", ["init", "-q"], dir, buildId, env);
-    await event(buildId, "deploy", `Checking out ${commit.slice(0, 12)} for the app`);
+    await event(buildId, "deploy", `Checking out ${commit.slice(0, 12)} for your live app`);
     for (const args of [
       ["fetch", "-q", "--no-tags", workspaceOf(project), commit],
       ["checkout", "-q", "--force", "--detach", commit],
       ["clean", "-q", "-ffdx"],
     ])
       await mustRun(project, "git", args, dir, buildId, env);
-    return dir;
   };
 
-  // `make up` in `dir` under the project's Compose name and port, given on make's command line so
-  // nothing in the app's own files can change them. Answers the address once it answers 200.
+  // Moves the workspace, and so staging, back to `commit`, dropping every commit and edit since.
+  const resetStaging = async (project: Project, commit: string, buildId: number) => {
+    const dir = workspaceOf(project);
+    await event(
+      buildId,
+      "deploy",
+      `Returning the version being worked on to ${commit.slice(0, 12)}`
+    );
+    for (const args of [
+      ["checkout", "-q", "--force", "-B", "main", commit],
+      ["clean", "-q", "-ffdx"],
+    ])
+      await mustRun(project, "git", args, dir, buildId, appEnv(project, config.dataDir));
+  };
+
+  // Deletes staging's containers and its database volume, so staging starts from an empty
+  // database that its own migrations build up. It takes no copy: only staging's name is possible.
+  const dropStagingData = async (project: Project, buildId: number) => {
+    const { composeProject, dir } = copyOf(config.dataDir, project.slug, "staging");
+    await event(buildId, "deploy", "Emptying the database of the version being worked on");
+    const result = await run(
+      "docker",
+      ["compose", "-p", composeProject, "--profile", "*", "down", "--volumes", "--remove-orphans"],
+      { cwd: dir, env: appEnv(project, config.dataDir), buildId }
+    );
+    if (result.code !== 0)
+      throw new Error(
+        `docker compose down failed (exit ${result.code}): ${result.output.slice(-2000)}`
+      );
+  };
+
+  // `make up` for one copy in its folder, under its Compose name and port, given on make's command
+  // line so nothing in the app's own files can change them. `make up` runs the app's migrations
+  // forward against that copy's database. Answers the address once it answers 200.
   // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
-  const up = async (project: Project, dir: string, buildId: number): Promise<string> => {
-    await event(buildId, "deploy", "Starting the app (make up)");
+  const up = async (project: Project, copy: Copy, buildId: number): Promise<string> => {
+    const { composeProject, dir } = copyOf(config.dataDir, project.slug, copy);
+    const port = webPortOf(project, copy);
+    await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} (make up)`);
     const result = await run(
       config.makeBin,
-      [
-        "up",
-        `COMPOSE_PROJECT_NAME=${composeProjectOf(project.slug)}`,
-        `WEB_PORT=${project.webPort}`,
-      ],
+      ["up", `COMPOSE_PROJECT_NAME=${composeProject}`, `WEB_PORT=${port}`],
       { cwd: dir, env: appEnv(project, config.dataDir), buildId }
     );
     if (result.code !== 0) {
@@ -608,7 +649,7 @@ export const createActivities = (
         `make up failed (exit ${result.code}):\n${result.output.slice(-4000)}`
       );
     }
-    const url = `http://localhost:${project.webPort}`;
+    const url = `http://localhost:${port}`;
     await event(buildId, "deploy", `Waiting for ${url} to answer`);
     await withHeartbeat(async (signal) => {
       const deadline = Date.now() + 180_000;
@@ -633,6 +674,18 @@ export const createActivities = (
       }
     });
     return url;
+  };
+
+  // Production runs `commit`; every passed build staging held is now live.
+  const promote = async (project: Project, commit: string, buildId: number) => {
+    await checkOutProduction(project, commit, buildId);
+    const url = await up(project, "production", buildId);
+    await db
+      .update(projects)
+      .set({ previewUrl: url, productionCommit: commit })
+      .where(eq(projects.id, project.id));
+    await markReleased(db, project.id, "promoted");
+    await event(buildId, "deploy", `Live at ${url}`);
   };
 
   return {
@@ -881,17 +934,42 @@ export const createActivities = (
       await event(buildId, "deploy", "Set the page title and icon");
     },
 
-    // Deploys the build's commit: production runs from its own checkout of the workspace.
+    // Deploys the build's commit to staging, from the workspace. Every passed build is then put
+    // live as well, as before staging existed.
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
       const commit = await commitAll(project, buildId);
-      const url = await up(project, await checkOut(project, commit, buildId), buildId);
+      const url = await up(project, "staging", buildId);
       await db
         .update(projects)
-        .set({ previewUrl: url, productionCommit: commit, status: "live" })
+        .set({ stagingUrl: url, stagingCommit: commit, status: "live" })
         .where(eq(projects.id, project.id));
       await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
-      await event(buildId, "deploy", `Live at ${url}`);
+      await event(buildId, "deploy", `The version being worked on is at ${url}`);
+      await promote(project, commit, buildId);
+    },
+
+    // A `promote` build makes production run its commit; a `discard` build returns staging to its
+    // commit, production's, with an empty database. Neither runs the builder.
+    async release(buildId: number): Promise<void> {
+      const { build, project } = await stepOfBuild(buildId);
+      const commit = assertCommit(build.commit);
+      if (build.kind === "promote") {
+        await promote(project, commit, buildId);
+      } else if (build.kind === "discard") {
+        await resetStaging(project, commit, buildId);
+        // Recorded as soon as the code is back, so a failure below cannot leave a discarded
+        // commit on record as staging's, for a promote to put live.
+        await db.update(projects).set({ stagingCommit: commit }).where(eq(projects.id, project.id));
+        await markReleased(db, project.id, "discarded");
+        await dropStagingData(project, buildId);
+        const url = await up(project, "staging", buildId);
+        await db.update(projects).set({ stagingUrl: url }).where(eq(projects.id, project.id));
+        await event(buildId, "deploy", `The version being worked on is at ${url}`);
+      } else {
+        throw ApplicationFailure.nonRetryable(`A ${build.kind} build is not a release`);
+      }
+      await db.update(projects).set({ status: "live" }).where(eq(projects.id, project.id));
     },
 
     async finishBuild(buildId: number, error?: string): Promise<void> {
@@ -925,13 +1003,16 @@ export const createActivities = (
       summaries?.finished(buildId);
     },
 
+    // Both copies; their volumes are kept.
     async stopDeployment(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
-      const dir = await composeDir(project);
-      if (dir) {
+      for (const copy of ["production", "staging"] as const) {
+        const dir = await composeDir(project, copy);
+        if (!dir) continue;
+        const { composeProject } = copyOf(config.dataDir, project.slug, copy);
         const result = await run(
           config.makeBin,
-          ["down", `COMPOSE_PROJECT_NAME=${composeProjectOf(project.slug)}`],
+          ["down", `COMPOSE_PROJECT_NAME=${composeProject}`],
           { cwd: dir, env: appEnv(project, config.dataDir) }
         );
         if (result.code !== 0)
@@ -939,20 +1020,23 @@ export const createActivities = (
       }
       await db
         .update(projects)
-        .set({ status: "stopped", previewUrl: null })
+        .set({ status: "stopped", previewUrl: null, stagingUrl: null })
         .where(eq(projects.id, projectId));
     },
 
+    // Both copies, with their volumes, and both folders.
     async removeProject(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
-      const dir = await composeDir(project);
-      if (dir) {
+      for (const copy of ["production", "staging"] as const) {
+        const dir = await composeDir(project, copy);
+        if (!dir) continue;
+        const { composeProject } = copyOf(config.dataDir, project.slug, copy);
         const result = await run(
           "docker",
           [
             "compose",
             "-p",
-            composeProjectOf(project.slug),
+            composeProject,
             "--profile",
             "*",
             "down",
@@ -967,8 +1051,8 @@ export const createActivities = (
           );
         }
       }
-      await rm(productionDir(project), { recursive: true, force: true });
-      await rm(workspaceOf(project), { recursive: true, force: true });
+      for (const copy of ["production", "staging"] as const)
+        await rm(dirOf(project, copy), { recursive: true, force: true });
       await store.removeProject({ tenantId: project.tenantId, projectId });
       await deleteProjectRows(db, projectId);
     },

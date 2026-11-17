@@ -1,5 +1,5 @@
 import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
-import { and, asc, desc, eq, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
@@ -15,6 +15,7 @@ import {
   projectIcons,
   projects,
   usage,
+  users,
   type Build,
   type Project,
   type Today,
@@ -199,6 +200,29 @@ export type TimeTotals = {
 
 export type BuiltChange = Pick<Build, "id" | "request" | "finishedAt">;
 
+// What a promote or a discard does to the passed builds staging holds: marks them put live, or
+// thrown away. Builds of what staging holds are exactly the passed ones not yet marked.
+const onStagingOnly = (projectId: number) =>
+  and(
+    eq(builds.projectId, projectId),
+    eq(builds.status, "passed"),
+    isNull(builds.release),
+    inArray(builds.kind, ["initial", "change", "site"])
+  );
+
+export const markReleased = async (
+  db: Db,
+  projectId: number,
+  release: NonNullable<Build["release"]>
+): Promise<void> => {
+  await db.update(builds).set({ release }).where(onStagingOnly(projectId));
+};
+
+// How many changes staging has that production does not.
+const unreleasedCount = async (db: Db, projectId: number): Promise<number> =>
+  (await db.select({ count: count() }).from(builds).where(onStagingOnly(projectId)))[0].count;
+
+// Changes built and not thrown away, oldest first.
 export const builtChanges = (
   db: Db,
   projectId: number,
@@ -212,6 +236,7 @@ export const builtChanges = (
         eq(builds.projectId, projectId),
         eq(builds.kind, "change"),
         eq(builds.status, "passed"),
+        or(isNull(builds.release), eq(builds.release, "promoted")),
         beforeBuildId === undefined ? undefined : lt(builds.id, beforeBuildId)
       )
     )
@@ -223,11 +248,15 @@ export const getProject = async (
 ): Promise<{
   project: Project;
   latestBuild: Build | null;
+  // Who asked for the latest build, when a person did: a promote or a discard.
+  latestBuildBy: string | null;
   queued: readonly Build[];
   changes: readonly BuiltChange[];
   hasIcon: boolean;
   // A build of this project has passed, so the app has been live at least once.
   hasBeenLive: boolean;
+  // Changes on staging that production does not have yet.
+  unreleased: number;
   usage: UsageTotals;
   time: TimeTotals;
 }> => {
@@ -275,13 +304,18 @@ export const getProject = async (
     .from(builds)
     .where(and(eq(builds.projectId, id), eq(builds.status, "passed")))
     .limit(1);
+  const [by] = latestBuild?.byUserId
+    ? await db.select({ name: users.name }).from(users).where(eq(users.id, latestBuild.byUserId))
+    : [];
   return {
     project,
     latestBuild: latestBuild ?? null,
+    latestBuildBy: by?.name ?? null,
     queued,
     changes: await builtChanges(db, id),
     hasIcon: Boolean(icon),
     hasBeenLive: Boolean(passed),
+    unreleased: await unreleasedCount(db, id),
     usage: totals,
     time: { ...building, ...builder, builderUnrecorded: Boolean(unrecorded) },
   };
@@ -391,13 +425,14 @@ const startBuild = async (
   id: number,
   from: readonly Status[],
   kind: Build["kind"],
-  request: (project: Project) => string
+  request: (project: Project) => string,
+  values: Pick<typeof builds.$inferInsert, "commit" | "byUserId"> = {}
 ): Promise<{ project: Project; build: Build }> => {
   // ponytail: builds of different projects run side by side on one worker; a task queue per tenant in production
   const project = await transition(tx, id, from, { status: "building" });
   const [build] = await tx
     .insert(builds)
-    .values({ projectId: id, kind, request: request(project) })
+    .values({ projectId: id, kind, request: request(project), ...values })
     .returning();
   await startWorkflow(deps, tx, project, build);
   return { project, build };
@@ -495,6 +530,69 @@ export const setSite = (
       );
     if (waiting) return project;
     return (await startOrQueue(deps, tx, project, "site", SITE_REQUEST)).project;
+  });
+
+export const PROMOTE_REQUEST = "Put the version being worked on live";
+export const DISCARD_REQUEST = "Throw away the changes your customers do not see yet";
+
+// The checks a promote and a discard share, under the project's lock: never with builds off (each
+// runs make up or docker), never while a build runs, and never for a suspended business.
+const startRelease = (
+  deps: Deps,
+  input: { readonly id: number; readonly byUserId: string },
+  kind: "promote" | "discard",
+  commitOf: (project: Project, unreleased: number) => string
+): Promise<{ project: Project; build: Build }> =>
+  deps.db.transaction(async (raw) => {
+    assertBuildsOn(deps);
+    const tx = raw as unknown as Db;
+    const project = await lockProject(tx, input.id);
+    await assertActive(tx, project.tenantId);
+    if (project.status === "building" || (await hasRunningBuild(tx, project.id)))
+      throw new ConflictError(
+        "A change is being built. Try again once it has finished; this page updates by itself."
+      );
+    const commit = commitOf(project, await unreleasedCount(tx, project.id));
+    return startBuild(
+      deps,
+      tx,
+      project.id,
+      ["live", "failed", "stopped"],
+      kind,
+      () => (kind === "promote" ? PROMOTE_REQUEST : DISCARD_REQUEST),
+      { commit, byUserId: input.byUserId }
+    );
+  });
+
+// Makes production run what staging runs, without the builder. Also brings an offline app back.
+export const promoteStaging = (
+  deps: Deps,
+  input: { readonly id: number; readonly byUserId: string }
+) =>
+  startRelease(deps, input, "promote", (project, unreleased) => {
+    const offline = project.previewUrl === null;
+    if (!project.stagingCommit || (unreleased === 0 && !offline))
+      throw new ConflictError(
+        "Nothing to put live: your customers already see the version being worked on."
+      );
+    return project.stagingCommit;
+  });
+
+// Returns staging to what production runs, with an empty database of its own.
+export const discardStaging = (
+  deps: Deps,
+  input: { readonly id: number; readonly byUserId: string }
+) =>
+  startRelease(deps, input, "discard", (project, unreleased) => {
+    if (unreleased === 0)
+      throw new ConflictError(
+        "Nothing to throw away: the version being worked on is what your customers see."
+      );
+    if (!project.productionCommit)
+      throw new ConflictError(
+        "Your app went live before Schmeide recorded versions, so there is no recorded version to go back to. Put the version being worked on live once, and from then on its changes can be thrown away."
+      );
+    return project.productionCommit;
   });
 
 // When a build passes: starts the project's oldest queued change. Safe to repeat (an activity retry,

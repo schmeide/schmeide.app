@@ -1,6 +1,8 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   doublePrecision,
   index,
   integer,
@@ -48,32 +50,48 @@ export const projectStatus = pgEnum("project_status", [
   "stopped",
 ]);
 
-export const projects = pgTable("projects", {
-  id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id")
-    .notNull()
-    .references(() => tenants.id),
-  slug: varchar("slug", { length: 48 }).notNull().unique(),
-  name: varchar("name", { length: 100 }).notNull(),
-  status: projectStatus("status").notNull().default("draft"),
-  need: text("need").notNull().default(""),
-  features: text("features").notNull().default(""),
-  spec: text("spec"),
-  webPort: integer("web_port").notNull().unique(),
-  // The deployed app's <title>; null means the project name.
-  pageTitle: varchar("page_title", { length: 100 }),
-  previewUrl: text("preview_url"),
-  // The commit the app runs, from its own checkout; null for an app deployed before there was one.
-  productionCommit: varchar("production_commit", { length: 40 }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true })
-    .notNull()
-    .defaultNow()
-    .$onUpdate(() => new Date()),
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .notNull()
+      .references(() => tenants.id),
+    slug: varchar("slug", { length: 48 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull(),
+    status: projectStatus("status").notNull().default("draft"),
+    need: text("need").notNull().default(""),
+    features: text("features").notNull().default(""),
+    spec: text("spec"),
+    webPort: integer("web_port").notNull().unique(),
+    // The deployed app's <title>; null means the project name.
+    pageTitle: varchar("page_title", { length: 100 }),
+    // Production, the copy the app's own customers use: its address while it runs, and the commit
+    // it runs from its own checkout (null for an app deployed before there was one).
+    previewUrl: text("preview_url"),
+    productionCommit: varchar("production_commit", { length: 40 }),
+    // Staging, the copy every build deploys to and the designer shows (services/resources.ts).
+    stagingUrl: text("staging_url"),
+    stagingCommit: varchar("staging_commit", { length: 40 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    // Staging's port is the web port plus STAGING_PORT_OFFSET, so no web port may reach it.
+    check("projects_web_port_below_staging", sql`${table.webPort} < 18100`),
+  ]
+);
 
-// `site`: applies the page title and icon and redeploys, without the agent.
-export const buildKind = pgEnum("build_kind", ["initial", "change", "site"]);
+// `site`: applies the page title and icon and redeploys, without the agent. `promote` makes
+// production run staging's commit and `discard` returns staging to production's; neither runs the
+// builder, and both are asked for by a person (`byUserId`).
+export const buildKind = pgEnum("build_kind", ["initial", "change", "site", "promote", "discard"]);
+// What became of a passed build's work: put live on production, or thrown away from staging.
+// Null while it is on staging only.
+export const buildRelease = pgEnum("build_release", ["promoted", "discarded"]);
 // `queued`: a change waiting for the project's running build; it starts once that one passes.
 export const buildStatus = pgEnum("build_status", ["queued", "running", "passed", "failed"]);
 
@@ -86,8 +104,11 @@ export const builds = pgTable("builds", {
   request: text("request").notNull(),
   status: buildStatus("status").notNull().default("running"),
   error: text("error"),
-  // The full commit of the project's repository this build deployed; null until it has.
+  // The full commit of the project's repository this build deployed; null until it has. For
+  // `promote` and `discard`, the commit it moves its copy to.
   commit: varchar("commit", { length: 40 }),
+  release: buildRelease("release"),
+  byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });

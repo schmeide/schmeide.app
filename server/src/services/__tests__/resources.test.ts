@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { bytesOf, createResourceReader, figuresByProject } from "../resources.ts";
+import {
+  COPIES,
+  bytesOf,
+  copyOf,
+  createResourceReader,
+  figuresByProject,
+  webPortOf,
+} from "../resources.ts";
 
 describe("reading docker's sizes", () => {
   it("knows binary and decimal units", () => {
@@ -61,5 +68,45 @@ describe("a project on disk", () => {
 
     expect(workspaceOnly).toBeGreaterThanOrEqual(64 * 1024);
     expect(await reader.workspaceBytes("books", signal)).toBe(2 * workspaceOnly);
+  });
+});
+
+describe("the two copies of an app", () => {
+  const slugs = ["books", "books-staging", "staging", "a-2", "x", "invoice-tracker-12"];
+
+  it("keeps production on the names every app had before staging existed", () => {
+    expect(copyOf("/data", "books", "production")).toEqual({
+      composeProject: "schmeide-books",
+      dir: "/data/production/books",
+    });
+    expect(copyOf("/data", "books", "staging")).toEqual({
+      composeProject: "schmeide-books_staging",
+      dir: "/data/projects/books",
+    });
+  });
+
+  it("never gives a staging operation a production name, whatever the two slugs", () => {
+    const production = slugs.map((slug) => copyOf("/data", slug, "production"));
+    for (const slug of slugs) {
+      const staging = copyOf("/data", slug, "staging");
+      expect(staging.composeProject).toMatch(/_staging$/);
+      for (const other of production) {
+        expect(staging.composeProject).not.toBe(other.composeProject);
+        // Compose names a volume `<project>_<volume>`, so no staging volume is a production one.
+        expect(`${staging.composeProject}_db-data`).not.toBe(`${other.composeProject}_db-data`);
+        expect(staging.dir).not.toBe(other.dir);
+      }
+    }
+  });
+
+  it("refuses a slug that could reach another copy's names or another folder", () => {
+    for (const slug of ["books_staging", "../books", "books/x", "", "-books", "Books"])
+      for (const copy of COPIES) expect(() => copyOf("/data", slug, copy)).toThrow("slug");
+  });
+
+  it("gives each copy its own web port", () => {
+    const project = { webPort: 8105 };
+    expect(webPortOf(project, "production")).toBe(8105);
+    expect(webPortOf(project, "staging")).toBe(18105);
   });
 });

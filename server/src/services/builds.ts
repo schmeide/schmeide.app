@@ -57,7 +57,8 @@ export const finishBuild = async (db: Db, buildId: number, error?: string): Prom
 
 // Building time is each finished build's start to finish: what a person waited, checks and publishing
 // included. A queued change's start is set when it actually starts (startNextChange), so its wait
-// is not counted. Failed builds, canceled ones among them, are summed apart as well.
+// is not counted. Failed builds, canceled ones among them, are summed apart as well. Every kind
+// counts: a `promote` or `discard` runs no builder, but a person waits for it like any build.
 const buildMs = sql`extract(epoch from ${builds.finishedAt} - ${builds.startedAt}) * 1000`;
 export const buildingTime = {
   buildingMs: sql<number>`coalesce(round(sum(${buildMs})), 0)`.mapWith(Number),

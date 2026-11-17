@@ -17,7 +17,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
 import { builds, projects } from "../../db/schema.ts";
-import { getBuild, listEvents } from "../../services/builds.ts";
+import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
 import { MAX_FIX_ATTEMPTS, buildWorkflow } from "../workflows.ts";
@@ -41,7 +41,7 @@ type Options = {
   readonly cancelDuringPrepare?: boolean;
   // Requests queued behind the build; each starts after the one before it passes.
   readonly queued?: readonly string[];
-  readonly kind?: "initial" | "site";
+  readonly kind?: "initial" | "site" | "promote" | "discard";
 };
 
 const setup = (
@@ -106,7 +106,14 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     const { projectId } = await getBuild(db, buildId);
     await db.update(projects).set({ status: "live" }).where(eq(projects.id, projectId));
   };
-  return { activities: { ...activities, prepareWorkspace, runAgent, deploy }, runPrompts };
+  // Releasing needs Docker too; it only notes that it ran.
+  const release = async (buildId: number) => {
+    await appendEvent(db, buildId, "deploy", "Released");
+  };
+  return {
+    activities: { ...activities, prepareWorkspace, runAgent, deploy, release },
+    runPrompts,
+  };
 };
 
 const runBuild = async (options: Options) => {
@@ -255,5 +262,15 @@ describe("buildWorkflow check and fix loop", () => {
       "No frontend/index.html; the page title and icon were not set",
       "Build passed",
     ]);
+  }, 120_000);
+
+  it("moves a copy without the workspace or the agent for a promote or a discard", async () => {
+    for (const kind of ["promote", "discard"] as const) {
+      const { outcome, prompts, events } = await runBuild({ fixOnRun: 1, kind });
+
+      expect(outcome).toBe("passed");
+      expect(prompts).toHaveLength(0);
+      expect(events).toEqual(["Released", "Build passed"]);
+    }
   }, 120_000);
 });
