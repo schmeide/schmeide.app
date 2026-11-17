@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   appendFile,
@@ -28,6 +28,8 @@ import {
   databaseName,
   databaseSecret,
   objectPath,
+  rolloutProblem,
+  tenantNamespace,
   tenantObjects,
   type AppCopy,
 } from "../kube/apps.ts";
@@ -68,7 +70,7 @@ import { businessSuspended } from "../services/businesses.ts";
 import { claudeEnv } from "../services/claudeEnv.ts";
 import { BUSINESS_SUSPENDED } from "../services/errors.ts";
 import type { Acr } from "../services/acr.ts";
-import { taskYaml } from "../services/acr.ts";
+import { contextTarFlags, taskYaml } from "../services/acr.ts";
 import {
   appDatabaseUrl,
   newPassword,
@@ -147,6 +149,8 @@ export type KubeRunner = {
   readonly knownHosts?: string;
   // How often to look at a pod that has not started; tests make it short.
   readonly pollMs?: number;
+  // How long a copy has to roll out, 5 minutes unless a test makes it short.
+  readonly rolloutMs?: number;
   // Where the app's images are built and its copies run (docs/stage2.md, "Deploy and hosting").
   readonly hosting: Hosting;
 };
@@ -876,11 +880,12 @@ export const createActivities = (
   const promote = async (project: Project, commit: string, buildId: number) => {
     if (!config.runner) await checkOutProduction(project, commit, buildId);
     const url = await up(project, "production", buildId, commit);
-    if (config.runner) await pushCommit(config.runner, project, buildId, commit, "main", false);
+    // Recorded before main moves: production runs `commit` now, whether or not the push works.
     await db
       .update(projects)
       .set({ previewUrl: url, productionCommit: commit })
       .where(eq(projects.id, project.id));
+    if (config.runner) await pushCommit(config.runner, project, buildId, commit, "main", false);
     await markReleased(db, project.id, "promoted");
     await event(buildId, "deploy", `Live at ${url}`);
   };
@@ -1065,6 +1070,9 @@ export const createActivities = (
       )
     );
 
+  // Which tar this machine has decides the context's flags; it is asked once.
+  let tarFlags: readonly string[] | undefined;
+
   // Builds and pushes `commit`'s web and api images on ACR Tasks, from a scratch clone whose
   // platform-owned files are the template's. Nothing of that reset is committed or pushed.
   const buildImages = (runner: KubeRunner, project: Project, buildId: number, commit: string) =>
@@ -1080,8 +1088,9 @@ export const createActivities = (
       ])
         await mustRun(project, "git", args, dir, buildId, env);
       const archive = `${dir}.tar.gz`;
+      tarFlags ??= contextTarFlags(execFileSync("tar", ["--version"], { encoding: "utf8" }));
       try {
-        await mustRun(project, "tar", ["--exclude=.git", "-czf", archive, "-C", dir, "."], dir);
+        await mustRun(project, "tar", [...tarFlags, "-czf", archive, "-C", dir, "."], dir);
         await event(buildId, "deploy", `Building the app's images for ${commit.slice(0, 12)}`);
         await withHeartbeat((signal) =>
           runner.hosting.acr.build(archive, taskYaml(project.tenantId, project.slug, commit), {
@@ -1124,7 +1133,7 @@ export const createActivities = (
   // Waits until every replica of the Deployment at `path` runs its newest spec.
   const rolledOut = (cluster: Cluster, path: string, name: string) =>
     withHeartbeat(async (signal) => {
-      const deadline = Date.now() + 300_000;
+      const deadline = Date.now() + (config.runner?.rolloutMs ?? 300_000);
       for (;;) {
         const deployment = await cluster.get<DeploymentStatus>(path);
         const want = deployment?.spec?.replicas ?? 1;
@@ -1138,10 +1147,14 @@ export const createActivities = (
         )
           return;
         if (signal.aborted) throw new Error("deploy canceled");
-        if (Date.now() > deadline)
+        if (Date.now() > deadline) {
+          const problem = rolloutProblem(deployment);
           throw ApplicationFailure.nonRetryable(
-            `${name} did not roll out within 5 minutes; see its pods in ${path.split("/")[5]}`
+            problem
+              ? `${name} did not roll out within 5 minutes: ${problem}`
+              : `${name} did not roll out within 5 minutes; see its pods in ${path.split("/")[5]}`
           );
+        }
         await new Promise((resolve) => setTimeout(resolve, config.runner?.pollMs ?? 2000));
       }
     });
@@ -1168,6 +1181,11 @@ export const createActivities = (
     };
     await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} at ${commit.slice(0, 12)}`);
     await applyAll(cluster, tenantObjects(project.tenantId));
+    // Migration for namespaces made before the four policies: their one `tenant` policy allowed
+    // Postgres on any private range, and policies add up, so applying the four alone leaves it.
+    await cluster.remove(
+      `/apis/networking.k8s.io/v1/namespaces/${tenantNamespace(project.tenantId)}/networkpolicies/tenant`
+    );
     const secret = await cluster.get<{ data?: { DATABASE_URL?: string } }>(
       copyPaths(project, copy).secret
     );
@@ -1180,7 +1198,16 @@ export const createActivities = (
       databaseSecret(app, appDatabaseUrl(runner.hosting.databaseHost, database, password)),
       ...appObjects(app),
     ]);
-    await rolledOut(cluster, copyPaths(project, copy).deployment, appName(project.id, copy));
+    const { deployment } = copyPaths(project, copy);
+    // A staging copy that did not roll out stops, so its crash-looping surge pod does not hold
+    // the tenant's quota. Production keeps running what it ran.
+    await rolledOut(cluster, deployment, appName(project.id, copy)).catch(
+      async (error: unknown) => {
+        if (copy === "staging" && error instanceof ApplicationFailure)
+          await cluster.scale(deployment, 0);
+        throw error;
+      }
+    );
     const url = copyUrl(app);
     await event(buildId, "deploy", `Waiting for ${url} to answer`);
     await answers(url, 5);

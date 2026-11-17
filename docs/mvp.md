@@ -498,7 +498,7 @@ With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `
   ACR, and runs one ACR quick run that builds the frontend and pushes `apps/t<tenant>/<slug>/web` and `.../api`
   tagged with the commit. A failed run's event carries the end of its log and a link to all of it.
 - **Namespace**: `tenant-<tenant id>`, applied on every deploy (server-side apply, so it is idempotent) with the
-  worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and a NetworkPolicy that lets
+  worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and NetworkPolicies that let
   in only Traefik on 8080 and out only DNS and Postgres on 5432.
 - **Each copy** (`app-<id>` for production, `app-<id>-staging`): a Deployment (nginx `web` on 8080 and Node `api` on
   3000, a `migrate` init container, restricted pod security with a read-only root and an `emptyDir` `/tmp`), a
@@ -506,9 +506,11 @@ With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `
   `app_<id>_staging`), made through `SCHMEIDE_PROVISIONER_URL`.
 - **Addresses**: `https://<slug>-<6 random>.apps.schmeide.com` for production and `...--staging` for staging; the
   first label is `projects.host`, chosen on the first deploy. The wildcard certificate serves both.
-- **Deploy** waits for the rollout and for `/` and `/api/healthz` to answer 200 over https (five minutes). A promote
-  runs staging's images on production and then fast-forwards `main`; a discard force-pushes `staging` back,
-  scales staging to zero, drops and recreates its database, and starts it again.
+- **Deploy** waits for the rollout and for `/` and `/api/healthz` to answer 200 over https (five minutes). A rollout
+  that times out fails with the Deployment's own reason (an exceeded quota, say); a staging copy that did is scaled
+  to zero, production is left as it is. A promote runs staging's images on production, records its commit, and then
+  fast-forwards `main`; a discard force-pushes `staging` back, scales staging to zero, drops and recreates its
+  database, and starts it again.
 - **Stop** scales both copies to zero. **Delete** removes both copies' objects, databases and roles, the Forgejo
   repository, and both ACR repositories; the namespace stays for the business's other apps.
 

@@ -4,6 +4,7 @@
 // to apply, never how.
 import { randomInt } from "node:crypto";
 import type { Copy } from "../services/resources.ts";
+import type { DeploymentStatus } from "./client.ts";
 import { LABELS, restricted } from "./jobs.ts";
 
 export const COPY_LABEL = "schmeide.app/copy";
@@ -61,10 +62,25 @@ const appLabels = (app: AppCopy) => ({
   [COPY_LABEL]: app.copy,
 });
 
-// In this order: the namespace, then the binding that lets the worker apply the rest.
+// The shared Postgres server's delegated subnet (schmeide/iac), the one place app pods may call.
+export const POSTGRES_CIDR = "10.16.16.0/24";
+
+// In this order: the namespace, then the binding that lets the worker apply the rest. The worker
+// may not delete RoleBindings; only deleting the namespace takes it.
 export const tenantObjects = (tenantId: number): readonly object[] => {
   const namespace = tenantNamespace(tenantId);
   const metadata = (name: string) => ({ name, namespace, labels: tenantLabels(tenantId) });
+  const policy = (name: string, rules: { ingress?: object[]; egress?: object[] }) => ({
+    apiVersion: "networking.k8s.io/v1",
+    kind: "NetworkPolicy",
+    metadata: metadata(name),
+    spec: {
+      podSelector: {},
+      // A policy with no rules of a type denies that type: default-deny names both.
+      policyTypes: rules.ingress ? ["Ingress"] : rules.egress ? ["Egress"] : ["Ingress", "Egress"],
+      ...rules,
+    },
+  });
   return [
     {
       apiVersion: "v1",
@@ -88,12 +104,13 @@ export const tenantObjects = (tenantId: number): readonly object[] => {
       apiVersion: "v1",
       kind: "ResourceQuota",
       metadata: metadata("tenant"),
-      // About eight apps at two copies each.
+      // About eight apps at two copies each, plus the surge pod of a rolling update. A pod asks
+      // for 60m and 160Mi and may use 512Mi.
       spec: {
         hard: {
-          "requests.cpu": "1",
-          "requests.memory": "2Gi",
-          "limits.memory": "4Gi",
+          "requests.cpu": "1100m",
+          "requests.memory": "3Gi",
+          "limits.memory": "9Gi",
           pods: "20",
           "services.loadbalancers": "0",
           "services.nodeports": "0",
@@ -114,47 +131,42 @@ export const tenantObjects = (tenantId: number): readonly object[] => {
         ],
       },
     },
-    {
-      apiVersion: "networking.k8s.io/v1",
-      kind: "NetworkPolicy",
-      metadata: metadata("tenant"),
-      // Everything else is denied: no internet, no other namespace, no other app's port.
-      spec: {
-        podSelector: {},
-        policyTypes: ["Ingress", "Egress"],
-        ingress: [
-          {
-            from: [
-              { namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "traefik" } } },
-            ],
-            ports: [{ protocol: "TCP", port: WEB_PORT }],
-          },
-        ],
-        egress: [
-          {
-            to: [
-              {
-                namespaceSelector: {
-                  matchLabels: { "kubernetes.io/metadata.name": "kube-system" },
-                },
-                podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
-              },
-            ],
-            ports: [
-              { protocol: "UDP", port: 53 },
-              { protocol: "TCP", port: 53 },
-            ],
-          },
-          {
-            // ponytail: Postgres on any private address; the server's subnet CIDR if one is set.
-            to: ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"].map((cidr) => ({
-              ipBlock: { cidr },
-            })),
-            ports: [{ protocol: "TCP", port: 5432 }],
-          },
-        ],
-      },
-    },
+    // Everything is denied but what the policies after it allow: no internet, no other namespace.
+    policy("default-deny", {}),
+    policy("allow-traefik", {
+      ingress: [
+        {
+          from: [
+            {
+              namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "traefik" } },
+              podSelector: { matchLabels: { "app.kubernetes.io/name": "traefik" } },
+            },
+          ],
+          ports: [{ protocol: "TCP", port: WEB_PORT }],
+        },
+      ],
+    }),
+    policy("allow-dns", {
+      egress: [
+        {
+          to: [
+            {
+              namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": "kube-system" } },
+              podSelector: { matchLabels: { "k8s-app": "kube-dns" } },
+            },
+          ],
+          ports: [
+            { protocol: "UDP", port: 53 },
+            { protocol: "TCP", port: 53 },
+          ],
+        },
+      ],
+    }),
+    policy("allow-postgres", {
+      egress: [
+        { to: [{ ipBlock: { cidr: POSTGRES_CIDR } }], ports: [{ protocol: "TCP", port: 5432 }] },
+      ],
+    }),
   ];
 };
 
@@ -319,3 +331,15 @@ export const objectPath = (object: object): string => {
     encodeURIComponent(metadata.name),
   ].join("/");
 };
+
+// Why a Deployment's rollout is stuck, from its own conditions: the ReplicaSet could not make a
+// pod (an exceeded quota, say), or the rollout passed its progress deadline. Undefined if neither.
+export const rolloutProblem = (deployment: DeploymentStatus | undefined): string | undefined =>
+  (deployment?.status?.conditions ?? [])
+    .filter(
+      ({ type, status }) =>
+        (type === "ReplicaFailure" && status === "True") ||
+        (type === "Progressing" && status === "False")
+    )
+    .map(({ message, reason }) => message ?? reason)
+    .join("; ") || undefined;
