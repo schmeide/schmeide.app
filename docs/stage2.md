@@ -22,8 +22,9 @@ Everything here is a recommendation for the owner to accept or change. Rejected 
    or privileges inside the cluster.
 5. Each business gets a `tenant-<id>` namespace with a quota and default-deny network policy; each app is one
    Deployment (nginx and Node in one pod), one Service, one Ingress, and one database on the shared Postgres.
-6. Apps are served on a new registrable domain, never under `schmeide.app`, at an unguessable host name, with a
-   wildcard certificate from DNS-01 on an Azure DNS zone. The domain goes on the Public Suffix List.
+6. Apps are served under `apps.schmeide.com` for now, never under `schmeide.app`, at an unguessable host name, with a
+   wildcard certificate from DNS-01 on an Azure DNS zone. A dedicated domain on the Public Suffix List replaces it
+   before customers build.
 7. The API and the Temporal worker become two Deployments of the same image. Only the worker gets Kubernetes
    rights, scoped by RBAC and a ValidatingAdmissionPolicy.
 8. Per-tenant task queues are dropped in favor of a per-business concurrency limit; the builds namespace quota caps
@@ -80,7 +81,7 @@ flowchart LR
   ACR -- push images --> R[(ACR apps/*)]
   W -- apply manifests --> APP
   APP --> PG[(Postgres: one database per app)]
-  TR[Traefik *.apps domain] --> APP
+  TR[Traefik *.apps.schmeide.com] --> APP
 ```
 
 The worker is the only component that talks to the Kubernetes API, Forgejo's admin API, ACR, and Postgres as a
@@ -312,23 +313,33 @@ pays off with real traffic; leave the account as is until then.
 
 ## Previews and domains
 
-**A new registrable domain**, never a subdomain of `schmeide.app`. Built apps have no sign-in yet (#84) and run
-code the platform did not write; a subdomain would share the site with `schmeide.app`, receive any cookie scoped
-to it, and count as same-site. Apps on their own domain never see the platform's cookies, and "Open your app"
-cannot be used to attack the API's session.
+**Never a subdomain of `schmeide.app`.** Built apps have no sign-in yet (#84) and run code the platform did not
+write; a subdomain would share the site with `schmeide.app`, receive any cookie scoped to it, and count as
+same-site. Apps on another registrable domain never see the platform's cookies, and "Open your app" cannot be used
+to attack the API's session.
 
-- **Public Suffix List**: submit the apps domain, as `github.io` is. Otherwise all apps share one site: one app can
-  set cookies for the parent domain that another app reads. Inclusion takes weeks; submit when the domain is bought.
-- **DNS in Azure DNS**: a new zone in Terraform, `*.<apps domain>` A record to Traefik's `74.249.191.146`. Only the
-  new domain moves; `schmeide.app` stays at Porkbun. Rejected: a Porkbun webhook for cert-manager (third-party
-  code holding registrar credentials).
-- **Certificates**: slice 1 uses the existing `letsencrypt` ClusterIssuer over HTTP-01, one certificate per app
-  (the Ingress names a Secret in the tenant namespace). Slice 4 adds a DNS-01 `azureDNS` solver with workload
-  identity, one wildcard Certificate in the `traefik` namespace, and a Traefik default `TLSStore`, so apps need no
-  certificate of their own and Let's Encrypt rate limits stop mattering.
-- **Host names**: `<slug>-<6 random characters>.<apps domain>`, chosen once per project and stored in a new
+**Decided: `apps.schmeide.com` for now.** The owner already holds `schmeide.com`; its DNS stays at Porkbun, where
+the apex points at GitHub Pages (the marketing site, schmeide/schmeide.com) and MX and SPF forward mail for
+`admin@schmeide.com`. Only the `apps` subdomain is delegated to Azure; the rest of `schmeide.com` is untouched.
+
+- **The tradeoff**: built apps share a registrable domain with the company's marketing site and email. They count
+  as same-site with `schmeide.com`, can set and read cookies scoped to `.schmeide.com`, and one app can set cookies
+  that another reads, because `apps.schmeide.com` is not on the Public Suffix List. A phishing app on it borrows
+  the company's name, and a blocklisting or takedown of it can hit the marketing site and mail. Acceptable while
+  only admins build; a dedicated domain, submitted to the Public Suffix List as `github.io` is, must replace it
+  before customers build ([slice 6](#slice-6-customers-build)). That move is its own issue.
+- **DNS in Azure DNS**: a zone `apps.schmeide.com` in Terraform, `*.apps.schmeide.com` A record to Traefik's
+  `74.249.191.146`, and its name servers as an output. The owner adds `NS` records for `apps` at Porkbun by hand.
+  Rejected: a Porkbun webhook for cert-manager (third-party code holding registrar credentials).
+- **Certificates**: a DNS-01 `azureDNS` ClusterIssuer with workload identity on that zone, one wildcard Certificate
+  `*.apps.schmeide.com` in the `traefik` namespace, and a Traefik default `TLSStore`, so apps need no certificate
+  of their own. With the zone chosen and created in slice 1 anyway, this lands in slice 1 rather than slice 4:
+  per-app HTTP-01 certificates would publish every host name in Certificate Transparency logs, which defeats the
+  random host names below, and would spend Let's Encrypt's per-domain limit that `schmeide.com` shares with the
+  marketing site.
+- **Host names**: `<slug>-<6 random characters>.apps.schmeide.com`, chosen once per project and stored in a new
   `projects.host` column. Until #84 the address is the only lock, so it must not be guessable. #155's staging copy
-  becomes `<same>--staging.<apps domain>`, still one label, so one wildcard covers it. `X-Robots-Tag: noindex` on
+  becomes `<same>--staging.apps.schmeide.com`, still one label, so one wildcard covers it. `X-Robots-Tag: noindex` on
   every response.
 - **Framing (#91)**: the platform-owned `nginx.conf` sends a `Content-Security-Policy` of
   `frame-ancestors https://schmeide.app` (and `http://localhost:5173` in dev). `components/AppFrame.tsx` keeps
@@ -424,8 +435,9 @@ the estimate (#81). A suspended business already stops at the next step (`refuse
 ### Abuse
 
 - Mining or busy-looping in a build: CPU limit, `activeDeadlineSeconds`, and the per-business build limit.
-- Phishing or malware on the apps domain: no open sign-up yet; random host names; PSL listing; admin "take
-  offline" and the report form (#68); the domain is separate so a takedown never touches `schmeide.app`.
+- Phishing or malware on the apps domain: no open sign-up yet; random host names; admin "take offline" and the
+  report form (#68); a takedown never touches `schmeide.app`. While apps live under `schmeide.com` it can touch the
+  marketing site and mail, which is why the dedicated domain, with its PSL listing, comes before customers build.
 - Apps attacking the cluster or the internet: no egress, no token, restricted pod security, quota.
 - Prompt injection through attachments or websites: the agent can only reach its repository, the model, and npm.
 
@@ -464,7 +476,7 @@ the last flips it to `admins`.
 flowchart LR
   S1[1 admin builds end to end] --> S2[2 blob storage, API x2]
   S1 --> S3[3 egress allow-list]
-  S1 --> S4[4 wildcard domain, framing]
+  S1 --> S4[4 framing]
   S3 --> S5[5 untrusted pool, Kata]
   S2 --> S6[6 customers build]
   S4 --> S6
@@ -473,8 +485,9 @@ flowchart LR
 
 ### Slice 1: one admin builds one app end to end
 
-- **Before it**: buy the apps domain; confirm ACR Tasks with one manual run; create the Forgejo
-  `schmeide-platform` user and token; create the builds Anthropic workspace and key. Put both in Key Vault.
+- **Before it**: add the `NS` records for `apps.schmeide.com` at Porkbun; confirm ACR Tasks with one manual run;
+  create the Forgejo `schmeide-platform` user and token; create the builds Anthropic workspace and key. Put both in
+  Key Vault.
 - **schmeide.app**, in this order:
   1. Split API and worker (`SCHMEIDE_ROLE`) and add `SCHMEIDE_BUILDS=admins`. Issue: "run the api and the temporal
      worker as separate deployments".
@@ -489,7 +502,8 @@ flowchart LR
 - **schmeide/iac**: worker Deployment, service account, RBAC, ValidatingAdmissionPolicy; `schmeide-builds`
   namespace with pod security label, quota, NetworkPolicy, ExternalSecrets (`anthropic-builds`, Forgejo token,
   provisioner password); worker identity with federated credential and the ACR run role; ACR Task identity with
-  Repository Writer on `apps/*`; Azure DNS zone and wildcard record; `az acr import` of `postgres:18-alpine`; the
+  Repository Writer on `apps/*`; the `apps.schmeide.com` zone, wildcard record, DNS-01 ClusterIssuer and wildcard
+  Certificate; `az acr import` of `postgres:18-alpine`; the
   `schmeide_provisioner` role, created once by hand from inside the cluster (Terraform cannot reach the private
   server). Issue: "give the worker the
   rights and namespaces to build apps".
@@ -514,12 +528,11 @@ Enable ACNS; CiliumNetworkPolicy with `toFQDNs` for build pods; `CLAUDE_CODE_DIS
 `maxBudgetUsd` per run. Mostly iac; the server only sets the variable and option. Issue: "limit build egress to
 anthropic, npm, forgejo, and blob storage".
 
-### Slice 4: wildcard domain and framing
+### Slice 4: framing
 
-cert-manager DNS-01 with workload identity on the Azure DNS zone, wildcard Certificate, Traefik default
-`TLSStore`; Ingresses lose their per-app TLS Secret; `frame-ancestors` and `noindex` checked by the server's
-post-deploy fetch; PSL submission. Issue: "serve built apps under one wildcard certificate and let only
-schmeide.app frame them" (with #91).
+The wildcard certificate moved to slice 1 (see [Previews and domains](#previews-and-domains)), and the PSL
+submission to the dedicated domain. What remains: `frame-ancestors` and `noindex` checked by the server's
+post-deploy fetch. Issue: #91.
 
 ### Slice 5: the untrusted node pool
 
@@ -529,9 +542,9 @@ Deployments. Issue: "run builds and built apps on an isolated, tainted node pool
 
 ### Slice 6: customers build
 
-`SCHMEIDE_BUILDS=on`; per-business build limit; #83's allowance and limits enforced; the Kubernetes resource
-reader; ACR retention (keep the last five tags per app) as a scheduled `acr purge` task; alerts on Job failures and
-quota waits. Issue: "open building to customers on aks".
+The dedicated apps domain is in place; `SCHMEIDE_BUILDS=on`; per-business build limit; #83's allowance and limits
+enforced; the Kubernetes resource reader; ACR retention (keep the last five tags per app) as a scheduled `acr purge`
+task; alerts on Job failures and quota waits. Issue: "open building to customers on aks".
 
 Later, each when it is needed: per-tenant Foundry resources; frontends behind a CDN; Argo CD for tenant apps; a
 Forgejo ingress for code downloads.
@@ -540,8 +553,8 @@ Forgejo ingress for code downloads.
 
 Each with the recommendation.
 
-1. **The apps domain name.** A short new domain with no tie to `schmeide.app`; zone in Azure DNS; submit it to the
-   Public Suffix List the day it is bought. Slice 1 cannot start without it.
+1. **The apps domain name.** Decided: `apps.schmeide.com` for now, zone in Azure DNS; a dedicated domain on the
+   Public Suffix List before slice 6 (see [Previews and domains](#previews-and-domains)).
 2. **Forgejo or GitHub for app code.** Forgejo: already running, on the private network, no per-repository cost,
    customer code stays with Schmeide.
 3. **One API key or a Foundry resource per tenant.** One key in its own Anthropic workspace with a spend limit for
