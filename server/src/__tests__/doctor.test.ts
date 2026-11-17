@@ -13,8 +13,8 @@ const STUBS: Readonly<Record<string, string>> = {
   info) exit 0 ;;
   "compose ps"*) ;;
   "ps --format"*) echo "other-web-1 0.0.0.0:8101->80/tcp" ; echo "schmeide-kept-web-1 0.0.0.0:8100->80/tcp" ;;
-  "ps -a"*) printf 'schmeide-gone\\nschmeide-kept\\nschmeideapp\\n' ;;
-  "volume ls"*) echo schmeide-gone ;;
+  "ps -a"*) printf 'schmeide-gone\\nschmeide-kept\\nschmeide-kept_staging\\nschmeideapp\\n' ;;
+  "volume ls"*) echo schmeide-gone ; echo schmeide-gone_staging ;;
 esac`,
   lsof: `case "$*" in *:5173*) printf 'COMMAND PID\\nvite 123\\n' ;; *) exit 1 ;; esac`,
   claude: `[ "$1" = --version ] && echo "2.0.0 (Claude Code)" || echo OK`,
@@ -48,11 +48,17 @@ describe("make doctor", () => {
       "FAIL  containers or volumes left over from a deleted project: schmeide-gone\n" +
         "        fix: docker compose -p schmeide-gone down --volumes --remove-orphans"
     );
-    expect(result.stdout).toContain("ok    app kept has containers or volumes");
+    expect(result.stdout).toContain(
+      "FAIL  containers or volumes left over from a deleted project: schmeide-gone_staging"
+    );
+    // A live app's staging copy is its own, not a leftover to remove.
+    expect(result.stdout).toContain("ok    app kept (production) has containers or volumes");
+    expect(result.stdout).toContain("ok    app kept (staging) has containers or volumes");
     expect(result.stdout).toContain(
       "app ports in use by something else: 8101 by container other-web-1"
     );
     expect(result.stdout).toContain("FAIL  port 5173 is in use by vite (pid 123)");
     expect(result.stdout).toContain("ok    port 3100 is free");
-  });
+    // It asks about 60 app ports one at a time, which outlasts the default timeout on a busy machine.
+  }, 30_000);
 });

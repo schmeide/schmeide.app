@@ -84,7 +84,8 @@ const setup = () => {
       "check:\n\t@echo checking on $$WEB_PORT",
       "test:\n\t@echo test db $$TEST_DB_PORT; test ! -f broken",
       "build:\n\t@echo building",
-      `up:\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
+      // `make up` fails while a file named fail-up sits beside the data dir.
+      `up:\n\t@test ! -e ${join(root, "fail-up")}\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
       `down:\n\t@echo down $$COMPOSE_PROJECT_NAME $$(pwd) >> ${calls}`,
       "",
     ].join("\n")
@@ -105,7 +106,8 @@ const setup = () => {
   };
   const ran = () =>
     existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n").filter(Boolean) : [];
-  return { config, dataDir, ran };
+  const failUp = () => writeFileSync(join(root, "fail-up"), "");
+  return { config, dataDir, ran, failUp };
 };
 
 const newBuild = async (kind: "initial" | "change" = "initial") => {
@@ -253,8 +255,9 @@ describe("build activities", () => {
       tools: expect.arrayContaining(["Skill"]),
       allowedTools: AGENT_ALLOWED_TOOLS,
       env: expect.objectContaining({
-        WEB_PORT: String(project.webPort),
-        COMPOSE_PROJECT_NAME: `schmeide-${project.slug}`,
+        // The builder works on staging: nothing it runs can name production.
+        WEB_PORT: String(project.webPort + 10_000),
+        COMPOSE_PROJECT_NAME: `schmeide-${project.slug}_staging`,
       }),
     });
     expect(AGENT_ALLOWED_TOOLS).toContain("Skill");
@@ -744,9 +747,9 @@ describe("removing a project", () => {
   });
 });
 
-describe("production", () => {
-  // A project whose workspace holds one more commit than the template, deployed by `build`.
-  const deployed = async () => {
+describe("the two copies", () => {
+  // A project with its workspace prepared from the template, and `build` running.
+  const prepared = async () => {
     const setUp = setup();
     const { project, build } = await newBuild();
     const activities = createActivities(deps, setUp.config);
@@ -754,82 +757,252 @@ describe("production", () => {
     await env.run(activities.prepareWorkspace, build.id);
     const workspace = join(setUp.dataDir, "projects", project.slug);
     const production = join(setUp.dataDir, "production", project.slug);
-    return { ...setUp, project, build, activities, env, workspace, production };
+    const staging = `schmeide-${project.slug}_staging ${project.webPort + 10_000}`;
+    const live = `schmeide-${project.slug} ${project.webPort}`;
+    // Commits a new file in the workspace, as a build that passed would have.
+    const commitIn = (file: string) => {
+      writeFileSync(join(workspace, file), `export const ${file.replace(/\W/g, "")} = 1;\n`);
+      const asServer = {
+        cwd: workspace,
+        env: { ...process.env, GIT_CONFIG_GLOBAL: gitConfigFile(setUp.dataDir) },
+      };
+      execFileSync("git", ["add", "-A"], asServer);
+      execFileSync("git", ["commit", "-q", "-m", file], asServer);
+      return execFileSync("git", ["rev-parse", "HEAD"], asServer).toString().trim();
+    };
+    const anotherBuild = async (
+      values: Partial<typeof builds.$inferInsert> = {}
+    ): Promise<typeof builds.$inferSelect> =>
+      (
+        await db
+          .insert(builds)
+          .values({
+            projectId: project.id,
+            kind: "change",
+            request: "x",
+            status: "running",
+            ...values,
+          })
+          .returning()
+      )[0];
+    return {
+      ...setUp,
+      project,
+      build,
+      activities,
+      env,
+      workspace,
+      production,
+      staging,
+      live,
+      commitIn,
+      anotherBuild,
+    };
   };
-  const commitOf = async (buildId: number) =>
-    (await db.select().from(builds).where(eq(builds.id, buildId)))[0].commit;
+  const buildRow = async (buildId: number) =>
+    (await db.select().from(builds).where(eq(builds.id, buildId)))[0];
   const projectRow = async (id: number) =>
     (await db.select().from(projects).where(eq(projects.id, id)))[0];
+  const headOf = (dir: string) => git(dir, "rev-parse", "HEAD").trim();
 
-  it("runs a passed build's commit from its own checkout, under the project's Compose name", async () => {
-    const { project, build, activities, env, workspace, production, ran } = await deployed();
+  it("runs a passed build on staging from the workspace, and production from its own checkout", async () => {
+    const {
+      project,
+      build,
+      activities,
+      env,
+      workspace,
+      production,
+      staging,
+      live,
+      ran,
+      anotherBuild,
+    } = await prepared();
     writeFileSync(join(workspace, "first.ts"), "export const first = 1;\n");
 
     await env.run(activities.deploy, build.id);
 
-    const first = await commitOf(build.id);
-    expect(git(production, "rev-parse", "HEAD").trim()).toBe(first);
+    const first = (await buildRow(build.id)).commit;
+    expect(headOf(production)).toBe(first);
     expect(ran()).toEqual([
-      `up schmeide-${project.slug} ${project.webPort} ${first} ${production}`,
+      `up ${staging} ${first} ${workspace}`,
+      `up ${live} ${first} ${production}`,
     ]);
     expect(await projectRow(project.id)).toMatchObject({
+      stagingCommit: first,
+      stagingUrl: `http://localhost:${project.webPort + 10_000}`,
       productionCommit: first,
       previewUrl: `http://localhost:${project.webPort}`,
       status: "live",
     });
+    expect((await buildRow(build.id)).release).toBe("promoted");
 
-    // The next build moves production to its commit, with its own dependencies installed afresh.
+    // The next commit reaches production with its own dependencies installed afresh.
     mkdirSync(join(production, "node_modules"));
     writeFileSync(join(workspace, "second.ts"), "export const second = 2;\n");
-    const [next] = await db
-      .insert(builds)
-      .values({ projectId: project.id, kind: "change", request: "second", status: "running" })
-      .returning();
+    const next = await anotherBuild();
     await env.run(activities.deploy, next.id);
 
-    const second = await commitOf(next.id);
+    const second = (await buildRow(next.id)).commit;
     expect(second).not.toBe(first);
-    expect(git(production, "rev-parse", "HEAD").trim()).toBe(second);
-    expect(existsSync(join(production, "second.ts"))).toBe(true);
+    expect(headOf(production)).toBe(second);
     expect(existsSync(join(production, "node_modules"))).toBe(false);
-    expect((await projectRow(project.id)).productionCommit).toBe(second);
   });
 
-  it("is taken offline from its checkout, and from the workspace for an app deployed before it had one", async () => {
-    const { project, build, activities, env, production, ran } = await deployed();
-    const older = await deployed();
+  it("gives an app that is live with one copy a staging copy on its next build", async () => {
+    const { project, activities, env, workspace, staging, ran, anotherBuild } = await prepared();
+    // As the migration leaves an app that was live before staging: running, its builds promoted.
+    await db
+      .update(projects)
+      .set({ status: "live", previewUrl: `http://localhost:${project.webPort}` })
+      .where(eq(projects.id, project.id));
+    await db.update(builds).set({ release: "promoted" }).where(eq(builds.projectId, project.id));
+
+    const next = await anotherBuild();
+    await env.run(activities.deploy, next.id);
+
+    expect(ran()[0]).toBe(`up ${staging} ${(await buildRow(next.id)).commit} ${workspace}`);
+    expect((await projectRow(project.id)).stagingUrl).toBe(
+      `http://localhost:${project.webPort + 10_000}`
+    );
+  });
+
+  it("promotes: production runs the promoted commit, without the builder", async () => {
+    const { project, build, activities, env, production, live, ran, commitIn, anotherBuild } =
+      await prepared();
+    await env.run(activities.deploy, build.id);
+    const ahead = commitIn("ahead.ts");
+    const change = await anotherBuild({ status: "passed", commit: ahead });
+    await db.update(projects).set({ stagingCommit: ahead }).where(eq(projects.id, project.id));
+    const promote = await anotherBuild({ kind: "promote", commit: ahead });
+    const before = ran().length;
+
+    await env.run(activities.release, promote.id);
+
+    expect(ran().slice(before)).toEqual([`up ${live} ${ahead} ${production}`]);
+    expect(headOf(production)).toBe(ahead);
+    expect((await projectRow(project.id)).productionCommit).toBe(ahead);
+    expect((await buildRow(change.id)).release).toBe("promoted");
+    expect(await messages(promote.id)).toContain(`Live at http://localhost:${project.webPort}`);
+  });
+
+  it("discards: staging goes back to production's commit with a fresh database, and production is not touched", async () => {
+    const {
+      project,
+      build,
+      activities,
+      env,
+      workspace,
+      production,
+      staging,
+      ran,
+      commitIn,
+      anotherBuild,
+    } = await prepared();
+    await env.run(activities.deploy, build.id);
+    const live = (await buildRow(build.id)).commit ?? "";
+    const ahead = commitIn("ahead.ts");
+    writeFileSync(join(workspace, "half-done.ts"), "export const half = 1;\n");
+    const change = await anotherBuild({ status: "passed", commit: ahead });
+    await db.update(projects).set({ stagingCommit: ahead }).where(eq(projects.id, project.id));
+    const discard = await anotherBuild({ kind: "discard", commit: live });
+    const before = ran().length;
+
+    await env.run(activities.release, discard.id);
+
+    expect(headOf(workspace)).toBe(live);
+    expect(git(workspace, "status", "--porcelain")).toBe("");
+    expect(existsSync(join(workspace, "ahead.ts"))).toBe(false);
+    expect(existsSync(join(workspace, "half-done.ts"))).toBe(false);
+    expect(ran().slice(before)).toEqual([
+      `docker compose -p schmeide-${project.slug}_staging --profile * down --volumes --remove-orphans ${workspace}`,
+      `up ${staging} ${live} ${workspace}`,
+    ]);
+    expect(headOf(production)).toBe(live);
+    expect(await projectRow(project.id)).toMatchObject({
+      stagingCommit: live,
+      productionCommit: live,
+    });
+    expect((await buildRow(change.id)).release).toBe("discarded");
+  });
+
+  it("keeps staging's records true to its code when a discard fails after the code went back", async () => {
+    const { project, build, activities, env, workspace, commitIn, anotherBuild, failUp } =
+      await prepared();
+    await env.run(activities.deploy, build.id);
+    const live = (await buildRow(build.id)).commit ?? "";
+    const ahead = commitIn("ahead.ts");
+    const change = await anotherBuild({ status: "passed", commit: ahead });
+    await db.update(projects).set({ stagingCommit: ahead }).where(eq(projects.id, project.id));
+    const discard = await anotherBuild({ kind: "discard", commit: live });
+    failUp();
+
+    await expect(env.run(activities.release, discard.id)).rejects.toThrow("make up failed");
+
+    // A promote now could only put live what production already runs.
+    expect(headOf(workspace)).toBe(live);
+    expect((await projectRow(project.id)).stagingCommit).toBe(live);
+    expect((await buildRow(change.id)).release).toBe("discarded");
+  });
+
+  it("refuses to release anything but a full commit, before running anything", async () => {
+    const { activities, env, ran, anotherBuild } = await prepared();
+    for (const kind of ["promote", "discard"] as const) {
+      const bad = await anotherBuild({ kind, commit: "HEAD" });
+      await expect(env.run(activities.release, bad.id)).rejects.toThrow("Not a commit");
+    }
+    expect(ran()).toEqual([]);
+  });
+
+  it("takes both copies offline, from the workspace too for an app deployed before its checkout", async () => {
+    const { project, build, activities, env, workspace, production, ran } = await prepared();
+    const older = await prepared();
 
     await env.run(activities.deploy, build.id);
+    const before = ran().length;
     await env.run(activities.stopDeployment, project.id);
     await older.env.run(older.activities.stopDeployment, older.project.id);
 
-    expect(ran().at(-1)).toBe(`down schmeide-${project.slug} ${production}`);
-    expect(older.ran()).toEqual([`down schmeide-${older.project.slug} ${older.workspace}`]);
-    expect(await projectRow(project.id)).toMatchObject({ status: "stopped", previewUrl: null });
+    expect(ran().slice(before)).toEqual([
+      `down schmeide-${project.slug} ${production}`,
+      `down schmeide-${project.slug}_staging ${workspace}`,
+    ]);
+    expect(older.ran()).toEqual([
+      `down schmeide-${older.project.slug} ${older.workspace}`,
+      `down schmeide-${older.project.slug}_staging ${older.workspace}`,
+    ]);
+    expect(await projectRow(project.id)).toMatchObject({
+      status: "stopped",
+      previewUrl: null,
+      stagingUrl: null,
+    });
   });
 
-  it("is removed with its volumes, its checkout, and the workspace when the project is deleted", async () => {
-    const { project, build, activities, env, workspace, production, ran } = await deployed();
+  it("removes both copies with their volumes, the checkout, and the workspace when the project is deleted", async () => {
+    const { project, build, activities, env, workspace, production, ran } = await prepared();
     await env.run(activities.deploy, build.id);
+    const before = ran().length;
 
     await env.run(activities.removeProject, project.id);
 
-    expect(ran().at(-1)).toBe(
-      `docker compose -p schmeide-${project.slug} --profile * down --volumes --remove-orphans ${production}`
-    );
+    const down = "--profile * down --volumes --remove-orphans";
+    expect(ran().slice(before)).toEqual([
+      `docker compose -p schmeide-${project.slug} ${down} ${production}`,
+      `docker compose -p schmeide-${project.slug}_staging ${down} ${workspace}`,
+    ]);
     expect(existsSync(production)).toBe(false);
     expect(existsSync(workspace)).toBe(false);
   });
 
-  it("starts and stops the app with neither the server's secrets nor the model's credentials", async () => {
+  it("starts and stops both copies with neither the server's secrets nor the model's credentials", async () => {
     vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
     vi.stubEnv("DATABASE_URL", "postgres://secret");
     vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-secret");
     vi.stubEnv("CLAUDE_CODE_USE_FOUNDRY", "1");
-    const { project, build, env, workspace, config, dataDir } = await deployed();
-    // A make that writes down the environment it was given, per target.
+    const { project, build, env, workspace, config, dataDir } = await prepared();
+    // A make that writes down the environment it was given, per target and Compose name.
     const make = join(dataDir, "env-make");
-    writeFileSync(make, `#!/bin/sh\nenv > "${dataDir}/env-$1"\n`);
+    writeFileSync(make, `#!/bin/sh\nenv > "${dataDir}/env-$1-\${2#COMPOSE_PROJECT_NAME=}"\n`);
     chmodSync(make, 0o755);
     const activities = createActivities(deps, { ...config, makeBin: make });
     writeFileSync(join(workspace, "first.ts"), "export const first = 1;\n");
@@ -837,12 +1010,13 @@ describe("production", () => {
     await env.run(activities.deploy, build.id);
     await env.run(activities.stopDeployment, project.id);
 
-    for (const target of ["up", "down"]) {
-      const given = readFileSync(join(dataDir, `env-${target}`), "utf8");
-      expect(given).toContain(`COMPOSE_PROJECT_NAME=schmeide-${project.slug}`);
-      expect(given).not.toContain("secret");
-      expect(given).not.toMatch(/^(ANTHROPIC|CLAUDE)_/m);
-    }
+    for (const target of ["up", "down"])
+      for (const name of [`schmeide-${project.slug}`, `schmeide-${project.slug}_staging`]) {
+        const given = readFileSync(join(dataDir, `env-${target}-${name}`), "utf8");
+        expect(given).toContain("PATH=");
+        expect(given).not.toContain("secret");
+        expect(given).not.toMatch(/^(ANTHROPIC|CLAUDE)_/m);
+      }
   });
 
   it("takes only a full commit id as one", () => {

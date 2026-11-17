@@ -215,13 +215,28 @@ Print an invoice as a clean page I can save as a PDF
    3. `runChecks`: the server runs the three targets itself. On failure the output goes back to the
       same agent session, up to 3 fix rounds, then the build fails with the last output.
    4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, and
-      records it (`builds.commit`). The app runs from its own checkout of the workspace,
-      `~/.schmeide/production/<slug>`, moved to that commit with `git fetch` and
-      `git checkout --detach`, and cleaned of every untracked and ignored file. Then `make up` there,
-      under the project's Compose name and web port, which runs the app's migrations forward, and a
-      wait for `/` and `/api/healthz` to answer 200. Status `live` with `previewUrl` and
-      `productionCommit`. That checkout's `git`, `make up`, and `make down` get the project environment without the
-      model's credentials (`ANTHROPIC_*`, `CLAUDE_*`).
+      records it (`builds.commit`). Then `make up` in the workspace for **staging** (Compose project
+      `schmeide-<slug>_staging`, web port + 10000) and a wait for `/` and `/api/healthz` to answer
+      200: status `live`, with `stagingUrl` and `stagingCommit`. Then the build is promoted (below).
+
+   Every app runs as two copies, named in one place (`copyOf` in `server/src/services/resources.ts`):
+
+   | Copy       | Who uses it             | Compose project           | Runs from                       | Web port  |
+   | ---------- | ----------------------- | ------------------------- | ------------------------------- | --------- |
+   | production | the app's own customers | `schmeide-<slug>`         | `~/.schmeide/production/<slug>` | n         |
+   | staging    | the person changing it  | `schmeide-<slug>_staging` | `~/.schmeide/projects/<slug>`   | n + 10000 |
+
+   Each has its own database volume (`<Compose project>_db-data`). A slug never holds `_`, so no staging
+   name is ever a production one. The builder's environment and its checks carry staging's Compose
+   name and port only. The `git`, `make up`, `make down`, and `docker compose` that run either copy get
+   that environment without the model's credentials (`ANTHROPIC_*`, `CLAUDE_*`).
+
+   **Promote** moves production's own checkout to a commit (`git fetch` from the workspace,
+   `git checkout --detach`, `git clean -ffdx`), runs `make up` there under production's name and port,
+   which runs the app's migrations forward against production's database, and waits for it to answer.
+   It records `productionCommit` and `previewUrl`, and marks every passed build staging held
+   `release = promoted`. Staging's database is never copied to production.
+
 5. `projects.requestChange({ id, request })` on a `live`, `failed`, or `stopped` project runs the
    same workflow as a change build. On a `building` project it is queued instead (build status
    `queued`). When a build passes, its last step starts the oldest queued change of the project. A
@@ -235,9 +250,20 @@ Print an invoice as a clean page I can save as a PDF
    and checks. Every build, before `deploy`, runs `applySite`: it sets `<title>` (HTML-escaped) in
    `frontend/index.html`, writes `frontend/public/site-icon.png` or `.ico` with its `<link rel="icon">`
    (or removes them), and commits if anything changed, so an agent change cannot drop them.
-7. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
-   runs `make down` (status `stopped`, volumes kept).
-8. `projects.delete({ id })` removes the deployment and its volumes, the workspace, the app's checkout, and every row.
+7. `projects.promote({ id })` starts a `promote` build: production runs `stagingCommit`, without the
+   builder, recorded with who asked (`builds.byUserId`). `projects.discard({ id })` starts a `discard`
+   build: the workspace is reset to `productionCommit` (`git checkout --force -B main`,
+   `git clean -ffdx`), staging's containers and database volume are removed
+   (`docker compose -p schmeide-<slug>_staging down --volumes`), and `make up` starts staging again
+   with an empty database its migrations build up; its passed builds are marked
+   `release = discarded` and no longer count as built. Both answer `CONFLICT` while a build runs, when
+   there is nothing to do, and (discard) when production's commit was never recorded; a suspended
+   business can do neither. Each counts toward building time like any build. No model runs for
+   either: its summary is one fixed sentence, written when it ends (`RELEASE_SUMMARIES`).
+8. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
+   runs `make down` for both copies (status `stopped`, volumes kept).
+9. `projects.delete({ id })` removes both copies and their volumes, the workspace, the app's checkout, and every
+   row.
    Refused while a spec or build is running; returns once everything is gone.
 
 `builds.events({ buildId, afterId })` is the live log: pass the last id seen to page forward.
@@ -388,19 +414,24 @@ decides, and the run kind is its only input.
 
 ## Where things live
 
-- `~/.schmeide/projects/<slug>/`: one git working directory per project, where the builder works.
-- `~/.schmeide/production/<slug>/`: the app's own checkout of that repository, at the commit it runs. An app
-  deployed before this existed runs from images built in the workspace until its next build.
+- `~/.schmeide/projects/<slug>/`: one git working directory per project, where the builder works and staging
+  runs from.
+- `~/.schmeide/production/<slug>/`: production's own checkout of that repository, at the commit it runs. An
+  app deployed before this existed runs from images built in the workspace until its first promote.
 - `~/.schmeide/files/<business id>/<project id>/<file id>`: uploaded files, removed with the file or the project.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
   Kept after a project is deleted. `e2e-fake-server.log` is the `make e2e/fake` server's output.
 - `~/.schmeide/bin/make`: a link to GNU make, first on `PATH` for project runs and the agent.
 - `~/.schmeide/gitconfig`: neutral git identity used instead of your global git config.
-- Each deployed project is a Compose project named `schmeide-<slug>` on `http://localhost:<web port>`;
-  its `make test` database uses port `5600 + n` for web port `8100 + n`.
+- Each deployed project is two Compose projects: `schmeide-<slug>` on `http://localhost:<web port>` and
+  `schmeide-<slug>_staging` on `http://localhost:<web port + 10000>`; its `make test` database uses port
+  `5600 + n` for web port `8100 + n`. Web ports stay below 18100 (a database check), so the ranges never meet.
 
-To bring a stopped app back by hand: `cd ~/.schmeide/production/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug>
-WEB_PORT=<port>` (from `~/.schmeide/projects/<slug>` for an app not built since its checkout existed).
+To bring a stopped app back by hand, production:
+`cd ~/.schmeide/production/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug> WEB_PORT=<port>` (from
+`~/.schmeide/projects/<slug>` for an app not promoted since its checkout existed); staging:
+`cd ~/.schmeide/projects/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug>_staging WEB_PORT=<port + 10000>`.
+Both take their names on make's command line, so the app's own `.env` cannot change them.
 
 ## How the agent runs
 

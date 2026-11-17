@@ -71,6 +71,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "projects.approveSpec": { id },
   "projects.requestChange": { id, request: "Take over" },
   "projects.setSite": { id, title: "Taken over" },
+  "projects.promote": { id },
+  "projects.discard": { id },
   "projects.stop": { id },
   "projects.delete": { id },
   "interview.get": { id },

@@ -72,6 +72,20 @@ describe("with builds off", () => {
     expect(workflows.start).not.toHaveBeenCalled();
   });
 
+  it("refuses to put staging live or throw it away, before anything else is checked", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: "Released", tenantId: owner.tenantId });
+    await transition(db, project.id, ["draft"], { status: "live" });
+
+    for (const procedure of ["projects.promote", "projects.discard"])
+      expect(await callApi(app, procedure, { id: project.id }, owner.cookie)).toMatchObject({
+        code: "CONFLICT",
+        message: BUILDS_OFF,
+      });
+    expect(workflows.start).not.toHaveBeenCalled();
+    expect(await db.select().from(builds).where(eq(builds.projectId, project.id))).toEqual([]);
+  });
+
   it("answers unknown resources without asking the runtime or the disk", async () => {
     const admin = await aSignedInAdmin(app, deps);
     const owner = await aSignedInPerson(app, deps);

@@ -95,7 +95,8 @@ for port in 5440 5441 7233 8233 "${PORT:-3100}" 5173; do
   fi
 done
 
-# Each built app is the Compose project schmeide-<slug>, on web port 8100 + n (test database 5600 + n).
+# Each built app is two Compose projects: schmeide-<slug> (production) on web port 8100 + n and
+# schmeide-<slug>_staging on 18100 + n (test database 5600 + n). See services/resources.ts.
 data_dir="${SCHMEIDE_DATA_DIR:-$HOME/.schmeide}"
 apps="$({
   docker ps -a --format '{{.Label "com.docker.compose.project"}}'
@@ -103,8 +104,10 @@ apps="$({
 } 2>/dev/null | grep '^schmeide-' | sort -u)"
 for app in $apps; do
   slug="${app#schmeide-}"
+  slug="${slug%_staging}"
+  copy="$([[ "$app" == *_staging ]] && echo staging || echo production)"
   if [[ -d "$data_dir/projects/$slug" ]]; then
-    ok "app $slug has containers or volumes and its project workspace"
+    ok "app $slug ($copy) has containers or volumes and its project workspace"
   else
     fail "containers or volumes left over from a deleted project: $app" \
       "docker compose -p $app down --volumes --remove-orphans"
@@ -112,16 +115,16 @@ for app in $apps; do
 done
 busy_app_ports=()
 for ((n = 0; n < 20; n++)); do
-  for port in $((8100 + n)) $((5600 + n)); do
+  for port in $((8100 + n)) $((18100 + n)) $((5600 + n)); do
     owner="$(port_owner "$port")"
     if [[ -n "$owner" && "$owner" != "container schmeide-"* ]]; then busy_app_ports+=("$port by $owner"); fi
   done
 done
 if ((${#busy_app_ports[@]} == 0)); then
-  ok "app ports 8100-8119 and 5600-5619 are free or used by built apps"
+  ok "app ports 8100-8119, 18100-18119, and 5600-5619 are free or used by built apps"
 else
   fail "app ports in use by something else: ${busy_app_ports[*]}" \
-    "stop those processes or containers; built apps take web ports from 8100 and test databases from 5600"
+    "stop those processes or containers; built apps take web ports from 8100, staging copies from 18100, and test databases from 5600"
 fi
 
 if [[ $failed -ne 0 ]]; then

@@ -97,10 +97,12 @@ import {
   approveSpec,
   createProject,
   deleteProject,
+  discardStaging,
   editQueuedChange,
   generateSpec,
   getProject,
   listProjects,
+  promoteStaging,
   removeQueuedChange,
   requestChange,
   setFeatures,
@@ -462,6 +464,14 @@ export const appRouter = t.router({
     ),
     // The deployed app's page title and icon (base64 PNG or ICO); see services/site.ts.
     setSite: onProject(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
+    // Production runs what staging runs; or staging goes back to what production runs. Each is a
+    // build of its own, recorded with who asked.
+    promote: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+      promoteStaging(ctx, { id: input.id, byUserId: ctx.person.id })
+    ),
+    discard: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+      discardStaging(ctx, { id: input.id, byUserId: ctx.person.id })
+    ),
     stop: onProject(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
     delete: onProject(projectIdSchema).mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
   }),

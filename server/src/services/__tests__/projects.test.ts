@@ -2,7 +2,15 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { agentRuns, buildSummaries, builds, projects, usage } from "../../db/schema.ts";
+import {
+  agentRuns,
+  buildSummaries,
+  builds,
+  projects,
+  tenants,
+  usage,
+  users,
+} from "../../db/schema.ts";
 import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../builds.ts";
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
@@ -10,11 +18,13 @@ import {
   createProject,
   deleteProject,
   deleteProjectRows,
+  discardStaging,
   editQueuedChange,
   failOrphanedBuilds,
   findProject,
   getProject,
   generateSpec,
+  promoteStaging,
   removeQueuedChange,
   requestChange,
   setFeatures,
@@ -277,6 +287,40 @@ describe("getProject time", () => {
       failedBuildingMs: 0,
       builderMs: 0,
       builderUnrecorded: true,
+    });
+  });
+
+  it("counts putting a version live and throwing changes away as building time, with no builder time", async () => {
+    const project = await createProject(db, {
+      name: `t ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await db.insert(builds).values([
+      {
+        projectId: project.id,
+        kind: "promote",
+        request: "promote",
+        status: "passed",
+        startedAt: at(0),
+        finishedAt: at(20),
+      },
+      {
+        projectId: project.id,
+        kind: "discard",
+        request: "discard",
+        status: "failed",
+        startedAt: at(30),
+        finishedAt: at(40),
+      },
+    ]);
+
+    const { time } = await getProject(db, project.id);
+
+    expect(time).toEqual({
+      buildingMs: 30_000,
+      failedBuildingMs: 10_000,
+      builderMs: 0,
+      builderUnrecorded: false,
     });
   });
 });
@@ -657,5 +701,156 @@ describe("failOrphanedBuilds", () => {
     } finally {
       await finishBuild(db, alive.build.id);
     }
+  });
+});
+
+describe("the version being worked on", () => {
+  const aPerson = async () =>
+    (
+      await db
+        .insert(users)
+        .values({ id: randomUUID(), name: "Owner", email: `${randomUUID()}@example.com` })
+        .returning()
+    )[0];
+  const STAGING = "a".repeat(40);
+  const PRODUCTION = "b".repeat(40);
+  // A live app whose staging runs `stagingCommit` with `ahead` passed changes not yet promoted.
+  const anApp = async (
+    set: Partial<typeof projects.$inferInsert> = {},
+    ahead = 1,
+    tenantId = DEMO_TENANT_ID
+  ) => {
+    const project = await createProject(db, { name: `v ${randomUUID()}`, tenantId });
+    await db
+      .update(projects)
+      .set({
+        status: "live",
+        spec: "## Features",
+        previewUrl: `http://localhost:${project.webPort}`,
+        stagingUrl: `http://localhost:${project.webPort + 10_000}`,
+        productionCommit: PRODUCTION,
+        stagingCommit: ahead > 0 ? STAGING : PRODUCTION,
+        ...set,
+      })
+      .where(eq(projects.id, project.id));
+    await db.insert(builds).values([
+      {
+        projectId: project.id,
+        kind: "initial",
+        request: "spec",
+        status: "passed",
+        release: "promoted",
+      },
+      ...Array.from({ length: ahead }, (_, index) => ({
+        projectId: project.id,
+        kind: "change" as const,
+        request: `change ${index + 1}`,
+        status: "passed" as const,
+      })),
+    ]);
+    return findProject(db, project.id);
+  };
+
+  it("counts the changes customers do not see yet", async () => {
+    expect((await getProject(db, (await anApp({}, 2)).id)).unreleased).toBe(2);
+    expect((await getProject(db, (await anApp({}, 0)).id)).unreleased).toBe(0);
+  });
+
+  it("promotes staging's commit as a build of its own, recording who asked", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp();
+
+    const { build } = await promoteStaging(deps, { id: project.id, byUserId: person.id });
+
+    expect(build).toMatchObject({
+      kind: "promote",
+      status: "running",
+      commit: STAGING,
+      byUserId: person.id,
+    });
+    expect((await findProject(db, project.id)).status).toBe("building");
+    expect(workflows.start).toHaveBeenCalledWith(
+      "buildWorkflow",
+      expect.objectContaining({ args: [project.id, build.id, "promote"] })
+    );
+    const { latestBuild, latestBuildBy } = await getProject(db, project.id);
+    expect(latestBuild?.id).toBe(build.id);
+    expect(latestBuildBy).toBe("Owner");
+  });
+
+  it("refuses to promote with a plain reason, and starts nothing", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const [suspended] = await db
+      .insert(tenants)
+      .values({ slug: `s-${randomUUID()}`, state: "suspended", stateReason: "test" })
+      .returning();
+    const cases = [
+      [await anApp({}, 0), "Nothing to put live"],
+      [await anApp({ stagingCommit: null, stagingUrl: null }, 0), "Nothing to put live"],
+      [await anApp({ status: "building" }), "is being built"],
+      [await anApp({}, 1, suspended.id), "This business is suspended"],
+    ] as const;
+    for (const [project, reason] of cases)
+      await expect(promoteStaging(deps, { id: project.id, byUserId: person.id })).rejects.toThrow(
+        reason
+      );
+    expect(workflows.start).not.toHaveBeenCalled();
+  });
+
+  it("puts an offline app back up from staging even when nothing changed", async () => {
+    const { deps } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp({ status: "stopped", previewUrl: null, stagingUrl: null }, 0);
+
+    const { build } = await promoteStaging(deps, { id: project.id, byUserId: person.id });
+
+    expect(build.commit).toBe(PRODUCTION);
+  });
+
+  it("discards back to production's commit, and refuses when there is nothing to go back to", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp();
+
+    const { build } = await discardStaging(deps, { id: project.id, byUserId: person.id });
+
+    expect(build).toMatchObject({ kind: "discard", commit: PRODUCTION, byUserId: person.id });
+    expect(workflows.start).toHaveBeenCalledTimes(1);
+    for (const [refused, reason] of [
+      [await anApp({}, 0), "Nothing to throw away"],
+      [await anApp({ productionCommit: null }), "no recorded version"],
+      [await anApp({ status: "building" }), "is being built"],
+    ] as const)
+      await expect(discardStaging(deps, { id: refused.id, byUserId: person.id })).rejects.toThrow(
+        reason
+      );
+    expect(workflows.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves discarded changes out of what the app has been built with", async () => {
+    const project = await anApp({}, 2);
+    await db.insert(builds).values({
+      projectId: project.id,
+      kind: "change",
+      request: "thrown away",
+      status: "passed",
+      release: "discarded",
+    });
+
+    const { changes } = await getProject(db, project.id);
+
+    expect(changes.map((change) => change.request)).toEqual(["change 1", "change 2"]);
+  });
+
+  it("keeps every app's web port below the staging ports", async () => {
+    const project = await createProject(db, {
+      name: `p ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await expect(
+      db.update(projects).set({ webPort: 18_100 }).where(eq(projects.id, project.id))
+    ).rejects.toThrow();
   });
 });

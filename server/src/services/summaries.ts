@@ -12,6 +12,19 @@ import { plainText, type Summarizer } from "./summarizer.ts";
 // The newest events one pass reads at most, so a long quiet spell cannot make a huge prompt.
 const MAX_EVENTS = 100;
 
+// A promote or a discard (services/projects.ts) only moves one copy of the app to a commit.
+export const RELEASE_SUMMARIES = {
+  promote: {
+    passed: "Your customers now see the version being worked on.",
+    failed: "Putting the version being worked on live did not finish.",
+  },
+  discard: {
+    passed:
+      "The changes your customers did not see yet were thrown away. The version being worked on is back to what your customers see, with an empty database of its own.",
+    failed: "Throwing away the changes your customers do not see yet did not finish.",
+  },
+} as const;
+
 export type Summaries = {
   // An event was added to the build.
   readonly noticed: (buildId: number) => void;
@@ -81,6 +94,17 @@ export const createSummaries = (
     ).reverse();
     if (!final && events.length === 0) return;
     const build = await getBuild(db, buildId);
+    if (build.kind === "promote" || build.kind === "discard") {
+      // No builder ran, so there is nothing for the model to tell: one fixed account, at the end.
+      if (final)
+        await db.insert(buildSummaries).values({
+          buildId,
+          throughEventId: events.at(-1)?.id ?? after,
+          final,
+          text: RELEASE_SUMMARIES[build.kind][build.status === "passed" ? "passed" : "failed"],
+        });
+      return;
+    }
     const signal = AbortSignal.timeout(timeoutMs);
     const { text, usage } = await Promise.race([
       summarize({

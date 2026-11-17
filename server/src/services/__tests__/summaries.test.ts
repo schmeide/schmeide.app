@@ -5,7 +5,7 @@ import { createDb } from "../../db/client.ts";
 import { agentRuns, builds, usage } from "../../db/schema.ts";
 import { appendEvent, finishBuild, getBuild, listEvents, type RunUsage } from "../builds.ts";
 import { createProject, getProject } from "../projects.ts";
-import { createSummaries, listSummaries } from "../summaries.ts";
+import { createSummaries, listSummaries, RELEASE_SUMMARIES } from "../summaries.ts";
 import type { Summarizer, SummaryInput } from "../summarizer.ts";
 import { usageSummary } from "../usageSummary.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
@@ -147,6 +147,38 @@ describe("build summaries", () => {
     // Schmeide's admin totals still show it, as its own kind of run.
     const admin = await usageSummary(db, {});
     expect(admin.runKinds.map(({ runKind }) => runKind)).toContain("summary");
+  });
+
+  it("of a promote or a discard ask no model and say only what was done, once it ends", async () => {
+    const summarize = counting();
+    const summaries = createSummaries(db, summarize, { ...quiet, batch: 1 });
+    const cases = [
+      ["promote", undefined, RELEASE_SUMMARIES.promote.passed],
+      ["promote", "make up failed", RELEASE_SUMMARIES.promote.failed],
+      ["discard", undefined, RELEASE_SUMMARIES.discard.passed],
+      ["discard", "make up failed", RELEASE_SUMMARIES.discard.failed],
+    ] as const;
+    for (const [kind, error, text] of cases) {
+      const { projectId } = await aRunningBuild();
+      const [build] = await db
+        .insert(builds)
+        .values({ projectId, kind, request: kind, status: "running" })
+        .returning();
+      await appendEvent(db, build.id, "deploy", "Starting your live app (make up)");
+      summaries.noticed(build.id);
+      await summaries.settled();
+      expect(await listSummaries(db, build.id)).toEqual([]);
+
+      await finishBuild(db, build.id, error);
+      summaries.finished(build.id);
+      await summaries.settled();
+
+      expect((await listSummaries(db, build.id)).map(({ text, final }) => [text, final])).toEqual([
+        [text, true],
+      ]);
+      expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([]);
+    }
+    expect(summarize).not.toHaveBeenCalled();
   });
 
   it("leave the build alone when the summarizer throws or takes too long, and say so in the log", async () => {

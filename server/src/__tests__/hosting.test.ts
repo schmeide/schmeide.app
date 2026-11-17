@@ -6,7 +6,7 @@ import { builds } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { createProject } from "../services/projects.ts";
 import {
-  composeProjectOf,
+  copyOf,
   readResources,
   type ResourceReader,
   type RuntimeFigures,
@@ -99,13 +99,22 @@ describe("listing projects", () => {
 });
 
 describe("what a project takes up", () => {
-  it("is what the runtime and the disk report, by compose project", async () => {
+  it("is what the runtime and the disk report, both copies of an app counted together", async () => {
     const admin = await aSignedInAdmin(app, deps);
     const owner = await aSignedInPerson(app, deps);
     const live = await createProject(db, { name: "Live one", tenantId: owner.tenantId });
     const idle = await createProject(db, { name: "Idle one", tenantId: owner.tenantId });
     running({
-      [composeProjectOf(live.slug)]: { containers: 2, memoryBytes: 1024, cpuPercent: 1.5 },
+      [copyOf("", live.slug, "production").composeProject]: {
+        containers: 2,
+        memoryBytes: 1024,
+        cpuPercent: 1.5,
+      },
+      [copyOf("", live.slug, "staging").composeProject]: {
+        containers: 3,
+        memoryBytes: 2048,
+        cpuPercent: 0.5,
+      },
     });
     reader.workspaceBytes.mockImplementation(async (slug) => (slug === live.slug ? 4096 : 0));
 
@@ -116,7 +125,7 @@ describe("what a project takes up", () => {
       admin.cookie
     );
     expect(data).toEqual([
-      { id: live.id, containers: 2, memoryBytes: 1024, cpuPercent: 1.5, workspaceBytes: 4096 },
+      { id: live.id, containers: 5, memoryBytes: 3072, cpuPercent: 2, workspaceBytes: 4096 },
       // Nothing running is a known zero, not unknown.
       { id: idle.id, containers: 0, memoryBytes: 0, cpuPercent: 0, workspaceBytes: 0 },
     ]);

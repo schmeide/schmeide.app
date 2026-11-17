@@ -37,7 +37,7 @@ const { runAgent } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "90 minutes",
 });
-const { prepareWorkspace, runChecks, deploy } = proxyActivities<Activities>({
+const { prepareWorkspace, runChecks, deploy, release } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "30 minutes",
 });
@@ -66,18 +66,23 @@ export async function specWorkflow(projectId: number): Promise<void> {
 }
 
 // projectId is unused but makes runs easy to find in the Temporal UI. A `site` build only applies
-// the page title and icon and redeploys. kind is missing for runs started before it existed.
+// the page title and icon and redeploys; `promote` and `discard` only move one copy of the app to
+// a commit. kind is missing for runs started before it existed.
 export async function buildWorkflow(
   _projectId: number,
   buildId: number,
   kind?: Build["kind"]
 ): Promise<void> {
   try {
-    await prepareWorkspace(buildId);
-    if (kind !== "site") await buildAndCheck(buildId);
-    // patched: a build already running when this step was added replays without it.
-    if (patched("apply-site")) await applySite(buildId);
-    await deploy(buildId);
+    if (kind === "promote" || kind === "discard") {
+      await release(buildId);
+    } else {
+      await prepareWorkspace(buildId);
+      if (kind !== "site") await buildAndCheck(buildId);
+      // patched: a build already running when this step was added replays without it.
+      if (patched("apply-site")) await applySite(buildId);
+      await deploy(buildId);
+    }
     await finishBuild(buildId);
   } catch (error) {
     const message = isCancellation(error)
