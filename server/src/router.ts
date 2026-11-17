@@ -4,6 +4,7 @@ import superjson from "superjson";
 import type { z } from "zod";
 import {
   acceptInviteSchema,
+  adminListSchema,
   ADMIN_ROLE,
   answerQuestionSchema,
   auditQuerySchema,
@@ -23,6 +24,7 @@ import {
   renameFileSchema,
   setFeaturesSchema,
   sessions,
+  tenantIdSchema,
   users,
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
@@ -36,6 +38,7 @@ import {
 } from "./services/auth.ts";
 import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
+import { getBusiness, listBusinesses, listPeople } from "./services/directory.ts";
 import {
   ConflictError,
   InterviewUnavailableError,
@@ -239,6 +242,14 @@ export const appRouter = t.router({
         .input(auditQuerySchema)
         .query(({ ctx, input }) => listAdminActions(ctx.db, input)),
       filters: admin.query(({ ctx }) => auditFilters(ctx.db)),
+    }),
+    // Every business and every person, read-only; see services/directory.ts.
+    businesses: t.router({
+      list: admin.input(adminListSchema).query(({ ctx, input }) => listBusinesses(ctx.db, input)),
+      get: admin.input(tenantIdSchema).query(({ ctx, input }) => getBusiness(ctx.db, input.id)),
+    }),
+    people: t.router({
+      list: admin.input(adminListSchema).query(({ ctx, input }) => listPeople(ctx.db, input)),
     }),
     impersonation: t.router({
       // Switches the caller to a session as the person, for an hour at most (services/auth.ts).

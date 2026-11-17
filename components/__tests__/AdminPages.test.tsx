@@ -2,10 +2,13 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
-import type { AuditEntry } from "../../trpc";
+import type { AuditEntry, BusinessEntry, PersonEntry } from "../../trpc";
 import type { Session } from "../../utils/session";
 import { AdminAuditPage } from "../AdminAuditPage";
+import { AdminBusinessPage } from "../AdminBusinessPage";
+import { AdminBusinessesPage } from "../AdminBusinessesPage";
 import { AdminPage } from "../AdminPage";
+import { AdminPeoplePage } from "../AdminPeoplePage";
 import { ViewAsForm } from "../ViewAsForm";
 import { renderWithApi } from "./fakeApi";
 
@@ -39,7 +42,11 @@ describe("AdminPage", () => {
       within(nav)
         .getAllByRole("link")
         .map((link) => [link.textContent, link.getAttribute("href")])
-    ).toEqual([[copy.routes.adminAudit, "/admin/audit"]]);
+    ).toEqual([
+      [copy.routes.adminBusinesses, "/admin/businesses"],
+      [copy.routes.adminPeople, "/admin/people"],
+      [copy.routes.adminAudit, "/admin/audit"],
+    ]);
     expect(
       screen.getAllByRole("link").filter((link) => link.getAttribute("href") === "/admin/view-as")
     ).toEqual([]);
@@ -161,5 +168,277 @@ describe("AdminAuditPage", () => {
     expect(screen.getByText("newer")).toBeInTheDocument();
     expect(calls.at(-1)?.input).toMatchObject({ cursor: 2 });
     expect(screen.queryByRole("button", { name: copy.audit.more })).toBeNull();
+  });
+});
+
+const created = new Date("2026-11-01T10:00:00Z");
+
+const aBusiness = (overrides: Partial<BusinessEntry> = {}): BusinessEntry => ({
+  id: 4,
+  name: "Ada's bakery",
+  slug: "ada",
+  members: 2,
+  projects: 3,
+  createdAt: created,
+  ...overrides,
+});
+
+const aPerson = (overrides: Partial<PersonEntry> = {}): PersonEntry => ({
+  name: "Ada",
+  email: "ada@example.com",
+  approved: true,
+  admin: false,
+  businesses: [{ id: 4, name: "Ada's bakery" }],
+  ...overrides,
+});
+
+const cellsOf = (row: HTMLElement) =>
+  within(row)
+    .getAllByRole("cell")
+    .map((cell) => cell.textContent);
+
+describe("AdminBusinessesPage", () => {
+  it("lists every business with its counts, linking to its page", async () => {
+    renderWithApi(
+      <AdminBusinessesPage />,
+      { "admin.businesses.list": () => ({ entries: [aBusiness()], nextCursor: null }) },
+      admin
+    );
+    const table = await screen.findByRole("table", { name: copy.businesses.caption });
+    const [row] = within(table).getAllByRole("row").slice(1);
+    expect(cellsOf(row)).toEqual(["Ada's bakery", "ada", "2", "3", "Nov 1, 2026"]);
+    expect(within(row).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
+      "href",
+      "/admin/businesses/4"
+    );
+  });
+
+  it("says when nothing matches", async () => {
+    renderWithApi(
+      <AdminBusinessesPage />,
+      { "admin.businesses.list": () => ({ entries: [], nextCursor: null }) },
+      admin
+    );
+    expect(await screen.findByText(copy.businesses.empty)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("searches by what is typed", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessesPage />,
+      { "admin.businesses.list": () => ({ entries: [aBusiness()], nextCursor: null }) },
+      admin
+    );
+    await screen.findByRole("table");
+    await userEvent.type(screen.getByRole("searchbox"), "ada@example.com");
+    await userEvent.click(screen.getByRole("button", { name: copy.adminSearch.action }));
+    await waitFor(() =>
+      expect(
+        calls.filter(({ path }) => path === "admin.businesses.list").at(-1)?.input
+      ).toMatchObject({ search: "ada@example.com" })
+    );
+  });
+
+  it("loads more a page at a time", async () => {
+    renderWithApi(
+      <AdminBusinessesPage />,
+      {
+        "admin.businesses.list": (input) =>
+          input.cursor
+            ? { entries: [aBusiness({ id: 5, name: "Older" })], nextCursor: null }
+            : { entries: [aBusiness()], nextCursor: 1 },
+      },
+      admin
+    );
+    await userEvent.click(await screen.findByRole("button", { name: copy.adminSearch.more }));
+    expect(await screen.findByText("Older")).toBeInTheDocument();
+  });
+});
+
+describe("AdminBusinessPage", () => {
+  it("shows the members with their roles and the apps with their state", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => ({
+          business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+          members: [{ name: "Ada", email: "ada@example.com", role: "owner", admin: false }],
+          projects: [{ id: 7, name: "Invoices", status: "live" }],
+        }),
+      },
+      admin
+    );
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "Ada's bakery" })
+    ).toBeInTheDocument();
+    const members = screen.getByRole("table", { name: copy.business.membersTitle });
+    expect(cellsOf(within(members).getAllByRole("row")[1]).slice(0, 3)).toEqual([
+      "Ada",
+      "ada@example.com",
+      copy.business.roles.owner,
+    ]);
+    const apps = screen.getByRole("table", { name: copy.business.projectsTitle });
+    expect(cellsOf(within(apps).getAllByRole("row")[1])).toEqual([
+      "Invoices",
+      copy.status.live.label,
+    ]);
+  });
+
+  it("says when it has nobody and no apps", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => ({
+          business: { id: 4, name: "", slug: "ada", createdAt: created },
+          members: [],
+          projects: [],
+        }),
+      },
+      admin
+    );
+    expect(await screen.findByText(copy.business.noMembers)).toBeInTheDocument();
+    expect(screen.getByText(copy.business.noProjects)).toBeInTheDocument();
+    // A business with no name goes by its slug.
+    expect(screen.getByRole("heading", { level: 1, name: "ada" })).toBeInTheDocument();
+  });
+
+  const withMembers = () => ({
+    business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+    members: [
+      { name: "Ada", email: "ada@example.com", role: "owner", admin: false },
+      { name: "Stella", email: "stella@example.com", role: "editor", admin: true },
+      { name: "Grace", email: admin.person?.email ?? "", role: "editor", admin: false },
+      { name: "Eddie", email: "eddie@example.com", role: "editor", admin: false },
+    ],
+    projects: [],
+  });
+
+  it("offers viewing as a member only to customers who are not the admin", async () => {
+    renderWithApi(<AdminBusinessPage id={4} />, { "admin.businesses.get": withMembers }, admin);
+    const members = await screen.findByRole("table", { name: copy.business.membersTitle });
+    const offers = within(members)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).queryByText(copy.people.viewAs(cellsOf(row)[0] ?? "")) !== null);
+    // Ada and Eddie, but not another admin, nor yourself.
+    expect(offers).toEqual([true, false, false, true]);
+  });
+
+  it("needs a reason, and starts with the member's email", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": withMembers,
+        "admin.impersonation.start": (input) => ({ name: "Eddie", email: input.email }),
+        "session.get": () => ({ ...admin, providers: [] }),
+      },
+      admin
+    );
+    await userEvent.click(await screen.findByText(copy.people.viewAs("Eddie")));
+    const form = screen.getByText(copy.people.viewAs("Eddie")).closest("details") as HTMLElement;
+    expect(within(form).queryByLabelText(copy.viewAs.emailLabel)).toBeNull();
+    await userEvent.click(within(form).getByRole("button", { name: copy.viewAs.action }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(copy.viewAs.reasonNeeded);
+    expect(calls.filter(({ path }) => path === "admin.impersonation.start")).toEqual([]);
+    await userEvent.type(within(form).getByLabelText(copy.viewAs.reasonLabel), "Ticket 42");
+    await userEvent.click(within(form).getByRole("button", { name: copy.viewAs.action }));
+    await waitFor(() =>
+      expect(calls.find(({ path }) => path === "admin.impersonation.start")?.input).toEqual({
+        email: "eddie@example.com",
+        reason: "Ticket 42",
+      })
+    );
+  });
+});
+
+describe("AdminPeoplePage", () => {
+  const people = () => ({
+    entries: [
+      aPerson(),
+      aPerson({ name: "Grace", email: "grace@example.com", admin: true, businesses: [] }),
+      aPerson({ name: "Ed", email: "ed@example.com", approved: false, businesses: [] }),
+    ],
+    nextCursor: null,
+  });
+
+  it("lists every person with their businesses, approval, and role", async () => {
+    renderWithApi(<AdminPeoplePage />, { "admin.people.list": people }, admin);
+    const table = await screen.findByRole("table", { name: copy.people.caption });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(cellsOf(rows[0]).slice(0, 5)).toEqual([
+      "Ada",
+      "ada@example.com",
+      "Ada's bakery",
+      copy.people.yes,
+      copy.people.no,
+    ]);
+    expect(within(rows[0]).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
+      "href",
+      "/admin/businesses/4"
+    );
+    expect(cellsOf(rows[1])[4]).toBe(copy.people.yes);
+    expect(cellsOf(rows[2])[3]).toBe(copy.people.no);
+  });
+
+  it("says when nobody matches, and searches by what is typed", async () => {
+    const calls = renderWithApi(
+      <AdminPeoplePage />,
+      { "admin.people.list": () => ({ entries: [], nextCursor: null }) },
+      admin
+    );
+    expect(await screen.findByText(copy.people.empty)).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox"), "Ada");
+    await userEvent.click(screen.getByRole("button", { name: copy.adminSearch.action }));
+    await waitFor(() => expect(calls.at(-1)?.input).toMatchObject({ search: "Ada" }));
+  });
+
+  it("offers viewing as a person only to customers who are not the admin", async () => {
+    renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({
+          entries: [
+            ...people().entries,
+            aPerson({ name: "Grace", email: admin.person?.email ?? "", admin: false }),
+          ],
+          nextCursor: null,
+        }),
+      },
+      admin
+    );
+    const rows = within(await screen.findByRole("table"))
+      .getAllByRole("row")
+      .slice(1);
+    const offers = rows.map(
+      (row) => within(row).queryByText(copy.people.viewAs(cellsOf(row)[0] ?? "")) !== null
+    );
+    // Ada and Ed (unapproved, which still works) but not another admin, nor yourself.
+    expect(offers).toEqual([true, false, true, false]);
+  });
+
+  it("needs a reason, and starts with the row's email", async () => {
+    const calls = renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({ entries: [aPerson()], nextCursor: null }),
+        "admin.impersonation.start": (input) => ({ name: "Ada", email: input.email }),
+        "session.get": () => ({ ...admin, providers: [] }),
+      },
+      admin
+    );
+    await userEvent.click(await screen.findByText(copy.people.viewAs("Ada")));
+    // The email is the row's; only the reason is asked.
+    expect(screen.queryByLabelText(copy.viewAs.emailLabel)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.viewAs.reasonNeeded);
+    expect(calls.filter(({ path }) => path === "admin.impersonation.start")).toEqual([]);
+    await userEvent.type(screen.getByLabelText(copy.viewAs.reasonLabel), "Ticket 42");
+    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
+    await waitFor(() =>
+      expect(calls.find(({ path }) => path === "admin.impersonation.start")?.input).toEqual({
+        email: "ada@example.com",
+        reason: "Ticket 42",
+      })
+    );
   });
 });

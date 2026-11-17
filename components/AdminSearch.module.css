@@ -1,0 +1,27 @@
+.search {
+  display: grid;
+  gap: var(--space-xs);
+  max-width: 32rem;
+  margin: var(--space-l) 0 var(--space-m);
+}
+
+.search label {
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s);
+}
+
+.row input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}

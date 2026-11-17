@@ -18,6 +18,8 @@ export type PlanItem = Interview["items"][number];
 export type Question = Interview["questions"][number];
 export type Answer = NonNullable<Question["answer"]>;
 export type AuditEntry = Outputs["admin"]["audit"]["list"]["entries"][number];
+export type BusinessEntry = Outputs["admin"]["businesses"]["list"]["entries"][number];
+export type PersonEntry = Outputs["admin"]["people"]["list"]["entries"][number];
 
 // How often a spec in progress, a running build, or its log is checked.
 export const POLL_MS = 2000;
