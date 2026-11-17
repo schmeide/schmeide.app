@@ -25,6 +25,15 @@ export const parseRunner = (value: string | undefined): "host" | "kubernetes" =>
   return runner;
 };
 
+// ponytail: the design lead and review read the project's workspace on this machine, which
+// Kubernetes mode has not got; running them in a pod lifts this (#219).
+export const refuseDesignTeam = (env: Env): void => {
+  if (env.SCHMEIDE_DESIGN_TEAM === "1" && parseRunner(env.SCHMEIDE_RUNNER) === "kubernetes")
+    throw new Error(
+      "SCHMEIDE_DESIGN_TEAM=1 does not work with SCHMEIDE_RUNNER=kubernetes yet: the design lead and the design review read the project's workspace on this machine, and in Kubernetes mode the code lives on Forgejo. Unset SCHMEIDE_DESIGN_TEAM, or set SCHMEIDE_RUNNER=host."
+    );
+};
+
 // What Kubernetes mode reads, each with what to set it to.
 const NEEDED = {
   SCHMEIDE_BUILD_IMAGE: "the server's own image, such as schmeide.azurecr.io/schmeide-app:<sha>",

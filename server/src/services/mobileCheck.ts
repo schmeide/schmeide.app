@@ -1,6 +1,9 @@
 // What can be told about a built app on a phone from its files alone, without a browser.
 // ponytail: static only; opening the app in a browser at phone width needs a browser where checks run.
 
+import { readFile, readdir } from "node:fs/promises";
+import { join } from "node:path";
+
 export type BuiltApp = {
   // frontend/dist/index.html
   readonly html: string;
@@ -142,3 +145,24 @@ export const mobileProblems = ({ html, css }: BuiltApp): readonly string[] => {
       : fixedWidthProblems(sheets)),
   ];
 };
+
+// What `make build` left in frontend/dist. A missing page reads as an empty one, which the check reports.
+export const builtApp = async (workspace: string): Promise<BuiltApp> => {
+  const dist = join(workspace, "frontend", "dist");
+  const names = await readdir(dist, { recursive: true }).catch(() => []);
+  return {
+    html: await readFile(join(dist, "index.html"), "utf8").catch(() => ""),
+    css: await Promise.all(
+      names
+        .filter((name) => name.endsWith(".css"))
+        .map((name) => readFile(join(dist, name), "utf8"))
+    ),
+  };
+};
+
+export const notReadyForPhones = (count: number): string =>
+  `The built app is not ready for phones (${count} ${count === 1 ? "problem" : "problems"})`;
+
+// What the builder is told when the check fails.
+export const phonesReport = (problems: readonly string[]): string =>
+  `Schmeide's check of the built app (frontend/dist) for phones found:\n${problems.map((problem) => `- ${problem}`).join("\n")}`;

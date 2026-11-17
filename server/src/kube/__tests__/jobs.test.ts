@@ -139,6 +139,8 @@ describe("runJob", () => {
     const script = container.command.join(" ");
     expect(script).toContain('git checkout -q --detach "$SCHMEIDE_COMMIT"');
     for (const { target } of CHECK_TARGETS) expect(script).toContain(checksMarker("start", target));
+    // The phone check runs after make build, on what it built (#219).
+    expect(CHECK_TARGETS.map(({ target }) => target)).toEqual(["check", "test", "build", "phones"]);
   });
 
   it("checks Forgejo's host key when it is known, and trusts the first one otherwise", () => {
@@ -188,6 +190,11 @@ describe("checks markers", () => {
       step: "failed",
       target: "build",
       code: 2,
+    });
+    expect(parseChecksMarker("::schmeide:: failed phones 3")).toEqual({
+      step: "failed",
+      target: "phones",
+      code: 3,
     });
     expect(parseChecksMarker("npm ERR! ::schmeide:: start check")).toBeUndefined();
     expect(parseChecksMarker("::schmeide:: start rm")).toBeUndefined();

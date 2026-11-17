@@ -533,6 +533,7 @@ describe("kubernetes mode", () => {
     const { build } = await newBuild();
     const passing = `checks-${build.id}-0`;
     const failing = `checks-${build.id}-1`;
+    const phones = `checks-${build.id}-2`;
     const { config, kube, forgejo } = setup({
       [passing]: {
         lines: [
@@ -542,6 +543,20 @@ describe("kubernetes mode", () => {
           "::schmeide:: passed test",
           "::schmeide:: start build",
           "::schmeide:: passed build",
+          "::schmeide:: start phones",
+          "::schmeide:: passed phones",
+        ],
+        exit: 0,
+      },
+      [phones]: {
+        lines: [
+          "::schmeide:: start build",
+          "::schmeide:: passed build",
+          "::schmeide:: start phones",
+          "Schmeide's check of the built app (frontend/dist) for phones found:",
+          "- no stylesheet",
+          "- no viewport",
+          "::schmeide:: failed phones 2",
         ],
         exit: 0,
       },
@@ -572,12 +587,25 @@ describe("kubernetes mode", () => {
       output: string;
     };
 
+    const notForPhones = await env.run(activities.runChecks, build.id, 2);
+
     expect(ok).toEqual({ ok: true, output: "" });
     expect(failed).toEqual({ ok: false, output: "$ make test\nFAIL todos.test.ts\n" });
-    expect(readOnly).toEqual([true, true]);
-    expect(kube.deleted).toEqual([passing, failing]);
+    expect(notForPhones).toEqual({
+      ok: false,
+      output:
+        "Schmeide's check of the built app (frontend/dist) for phones found:\n- no stylesheet\n- no viewport\n",
+    });
+    expect(readOnly).toEqual([true, true, true]);
+    expect(kube.deleted).toEqual([passing, failing, phones]);
     expect(await messages(build.id)).toEqual(
-      expect.arrayContaining(["make check passed", "make test failed (exit 2)"])
+      expect.arrayContaining([
+        "make check passed",
+        "make test failed (exit 2)",
+        "Checking the built app for phones",
+        "The built app is ready for phones",
+        "The built app is not ready for phones (2 problems)",
+      ])
     );
   });
 
