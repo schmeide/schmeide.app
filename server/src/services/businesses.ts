@@ -47,8 +47,14 @@ export const businessesOf = async (db: Db, person: Person): Promise<readonly Bus
   });
 };
 
-// Adds the person to a business: its owner when it has nobody yet, an editor otherwise.
-export const joinBusiness = async (db: Db, userId: string, tenantId: number): Promise<void> => {
+// Adds the person to a business, as `role` when given: otherwise its owner when it has nobody yet,
+// an editor when it has. Someone already in it keeps their role.
+export const joinBusiness = async (
+  db: Db,
+  userId: string,
+  tenantId: number,
+  role?: "owner" | "editor"
+): Promise<void> => {
   const [anyone] = await db
     .select({ userId: memberships.userId })
     .from(memberships)
@@ -56,7 +62,7 @@ export const joinBusiness = async (db: Db, userId: string, tenantId: number): Pr
     .limit(1);
   await db
     .insert(memberships)
-    .values({ userId, tenantId, role: anyone ? "editor" : "owner" })
+    .values({ userId, tenantId, role: role ?? (anyone ? "editor" : "owner") })
     .onConflictDoNothing();
 };
 

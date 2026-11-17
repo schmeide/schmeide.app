@@ -6,6 +6,18 @@ email addresses on the approved list can have an account, so nobody else can spe
 This page covers approving people, the settings, registering with each provider, and connecting the hosted site
 (schmeide.app on GitHub Pages) to a server.
 
+## Local logins
+
+On localhost, `make serve` runs `make db/seed` after the migrations, so there is no approval step for local work. It
+leaves two approved logins, both with the password `schmeide-local-only`, and prints them:
+
+- `admin@schmeide.localhost`: the platform admin role, in no business. Its grant is in the audit log like any other.
+- `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role.
+
+Running it again adds only what is missing: it does not reset a changed password or sign anyone out. It refuses, and
+writes nothing, unless `SCHMEIDE_PUBLIC_URL` is localhost, so a known password never reaches a deployed database. For
+a real environment, use `make access/approve` and `make access/admin` below.
+
 ## Approve a person
 
 ```sh
