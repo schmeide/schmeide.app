@@ -48,6 +48,24 @@ export const copy = {
     intro: "For the people who run Schmeide.",
     sectionsNav: "Admin sections",
   },
+  // The banner on every page while an admin views the app as someone.
+  impersonation: {
+    label: "Viewing as a customer",
+    viewing: (name: string, email: string) => `You are viewing Schmeide as ${name} (${email}).`,
+    recorded: (admin: string) =>
+      `Signed in as ${admin}. What you change is recorded in the audit log. Ends after an hour.`,
+    stop: "Stop",
+    stopping: "Stopping…",
+  },
+  viewAs: {
+    emailLabel: "Their email",
+    reasonLabel: "Reason",
+    reasonHint:
+      "Why you need to see their account, for example a ticket number. Kept in the audit log.",
+    reasonNeeded: "Give a reason before viewing as someone.",
+    action: "View as this person",
+    starting: "Starting…",
+  },
   audit: {
     intro: "What admins did, newest first. Nothing here is ever edited or removed.",
     adminLabel: "Admin",

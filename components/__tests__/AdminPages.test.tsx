@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -6,6 +6,7 @@ import type { AuditEntry } from "../../trpc";
 import type { Session } from "../../utils/session";
 import { AdminAuditPage } from "../AdminAuditPage";
 import { AdminPage } from "../AdminPage";
+import { ViewAsForm } from "../ViewAsForm";
 import { renderWithApi } from "./fakeApi";
 
 const admin: Session = {
@@ -31,7 +32,7 @@ const filters = () => ({
 });
 
 describe("AdminPage", () => {
-  it("links to every admin section", () => {
+  it("links to every admin section, and to no page for viewing as a customer", () => {
     renderWithApi(<AdminPage />, {}, admin);
     const nav = screen.getByRole("navigation", { name: copy.admin.sectionsNav });
     expect(
@@ -39,6 +40,40 @@ describe("AdminPage", () => {
         .getAllByRole("link")
         .map((link) => [link.textContent, link.getAttribute("href")])
     ).toEqual([[copy.routes.adminAudit, "/admin/audit"]]);
+    expect(
+      screen.getAllByRole("link").filter((link) => link.getAttribute("href") === "/admin/view-as")
+    ).toEqual([]);
+  });
+});
+
+describe("ViewAsForm", () => {
+  it("asks only for a reason when it is given the person, and needs one before it starts", async () => {
+    const calls = renderWithApi(<ViewAsForm email="ada@example.com" />, {}, admin);
+    expect(screen.queryByLabelText(copy.viewAs.emailLabel)).toBeNull();
+    await userEvent.type(screen.getByLabelText(copy.viewAs.reasonLabel), "   ");
+    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.viewAs.reasonNeeded);
+    expect(screen.getByLabelText(copy.viewAs.reasonLabel)).toHaveAttribute("aria-invalid", "true");
+    expect(calls.filter(({ path }) => path === "admin.impersonation.start")).toEqual([]);
+  });
+
+  it("starts with the email it was given and the reason, then lands on the person's home", async () => {
+    window.history.replaceState(null, "", "/admin");
+    const calls = renderWithApi(
+      <ViewAsForm email="ada@example.com" />,
+      {
+        "admin.impersonation.start": (input) => ({ name: "Ada", email: input.email }),
+        "session.get": () => ({ ...admin, providers: [] }),
+      },
+      "server"
+    );
+    await userEvent.type(screen.getByLabelText(copy.viewAs.reasonLabel), "Ticket 42");
+    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(calls.find(({ path }) => path === "admin.impersonation.start")?.input).toEqual({
+      email: "ada@example.com",
+      reason: "Ticket 42",
+    });
   });
 });
 

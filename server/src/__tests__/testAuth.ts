@@ -32,6 +32,13 @@ const procedures = appRouter._def.procedures as unknown as Readonly<
 export const procedurePaths = Object.keys(procedures);
 // The procedures on the admin base (router.ts): everything under `admin`.
 export const adminPaths = procedurePaths.filter((path) => path.startsWith("admin."));
+// The procedures only a session an admin views the app through can call (router.ts).
+export const impersonationPaths = procedurePaths.filter((path) =>
+  path.startsWith("impersonation.")
+);
+export const mutationPaths = procedurePaths.filter(
+  (path) => procedures[path]._def.type === "mutation"
+);
 
 // Calls one procedure over HTTP as the browser would, with the session cookie when given.
 export const callApi = async (

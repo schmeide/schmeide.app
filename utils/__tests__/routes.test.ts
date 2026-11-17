@@ -91,6 +91,13 @@ describe("the admin area", () => {
   });
 });
 
+describe("viewing as a customer", () => {
+  it("has no page of its own: it starts from a person's row in the admin area", () => {
+    expect(routes.map((entry) => entry.path)).not.toContain("/admin/view-as");
+    expect(matchRoute("/admin/view-as")).toBeNull();
+  });
+});
+
 describe("nextPath", () => {
   it("only returns to a path on this site", () => {
     expect(nextPath("?next=%2Fbilling%3Fpaid%3D1")).toBe("/billing?paid=1");

@@ -538,6 +538,12 @@ export const readWebsiteSchema = z.object({
 
 export const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
 
+// Starting to view the app as a person: whom, and why, which the audit log keeps.
+export const impersonateSchema = z.object({
+  email: emailSchema,
+  reason: z.string().trim().min(1).max(500),
+});
+
 export const inviteTokenSchema = z.object({ token: z.string().min(1).max(200) });
 
 export const MIN_PASSWORD_LENGTH = 10;

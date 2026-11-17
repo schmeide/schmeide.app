@@ -1,0 +1,19 @@
+.form {
+  display: grid;
+  gap: var(--space-s);
+  max-width: 26rem;
+}
+
+.form label {
+  margin-top: var(--space-s);
+}
+
+.form button {
+  margin-top: var(--space-m);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}

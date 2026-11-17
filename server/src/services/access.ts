@@ -52,8 +52,16 @@ export const approveEmail = async (
   return { email, token, expiresAt };
 };
 
+// Ends every view of the app as someone else that the admin has open, and answers how many.
+// Taking the admin role away (#136) must call this; currentPerson (auth.ts) also stops honoring
+// such a view the moment its admin loses the role or their approval, whatever removed it.
+export const endImpersonationsBy = async (db: Db, adminId: string): Promise<number> =>
+  (await db.delete(sessions).where(eq(sessions.impersonatedBy, adminId)).returning()).length;
+
 // Takes the address off the list and signs the person out everywhere. Their account and what
-// they made stay; approving the address again gives it all back.
+// they made stay; approving the address again gives it all back. An admin viewing the app as
+// them keeps that view ("I cannot get in" is worth seeing from their side); the views a removed
+// admin has open end with their own sessions.
 export const removeApproval = async (db: Db, rawEmail: string): Promise<boolean> => {
   const email = emailSchema.parse(rawEmail);
   return db.transaction(async (tx) => {
@@ -62,7 +70,12 @@ export const removeApproval = async (db: Db, rawEmail: string): Promise<boolean>
       .where(eq(approvedEmails.email, email))
       .returning();
     const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.email, email));
-    if (user) await tx.delete(sessions).where(eq(sessions.userId, user.id));
+    if (user) {
+      await tx
+        .delete(sessions)
+        .where(and(eq(sessions.userId, user.id), isNull(sessions.impersonatedBy)));
+      await endImpersonationsBy(tx as unknown as Db, user.id);
+    }
     return removed.length > 0;
   });
 };
@@ -184,6 +197,9 @@ export const acceptInvite = async (
       password: hash,
     });
   await internalAdapter.updateUser(userId, { emailVerified: true });
-  await internalAdapter.deleteUserSessions(userId);
+  // The person's own sessions; an admin viewing as them is left alone, as in removeApproval.
+  await db
+    .delete(sessions)
+    .where(and(eq(sessions.userId, userId), isNull(sessions.impersonatedBy)));
   return { email };
 };

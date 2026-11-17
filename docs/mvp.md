@@ -15,7 +15,10 @@ setup, and how to connect the hosted site.
    after the migrations), both with the password `schmeide-local-only`:
    - `owner@schmeide.localhost` owns the `demo` business, which holds the projects made before sign-in existed.
      Use it to work on projects.
-   - `admin@schmeide.localhost` has the admin role and no business, and lands on `/admin`.
+   - `admin@schmeide.localhost` has the admin role and no business, and lands on `/admin`. To work on a customer's
+     screens from there, view as `owner@schmeide.localhost` from their row in the admin area, with any reason
+     ([Viewing as a customer](auth.md#viewing-as-a-customer)). A banner shows while you do; its Stop button brings
+     you back to `/admin`.
 
    The seed runs only when `SCHMEIDE_PUBLIC_URL` is localhost, and leaves existing logins, passwords, and sessions
    alone. To sign in as yourself instead, see [Approve a person](auth.md#approve-a-person).

@@ -4,6 +4,7 @@ import { copy } from "../data/copy";
 import { pathTo, type RouteName } from "../utils/routes";
 import { isAdmin } from "../utils/session";
 import { AccountMenu } from "./AccountMenu";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
 
@@ -22,7 +23,7 @@ type Props = {
 
 // The frame around every signed-in page: header, navigation, a banner slot, and the footer.
 // What it offers follows the session: signed out, signed in with no business yet, or in a business,
-// and the admin area to an admin.
+// and the admin area to an admin. While an admin views the app as someone, a banner says so first.
 export function Shell({ current, banner, children }: Props) {
   const { session, business, chooseBusiness } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -37,6 +38,7 @@ export function Shell({ current, banner, children }: Props) {
       <a href="#main" className={styles.skip}>
         {copy.shell.skip}
       </a>
+      <ImpersonationBanner />
       <header className={styles.header}>
         <div className={styles.bar}>
           <Link to={pathTo("apps")} className={styles.logo}>

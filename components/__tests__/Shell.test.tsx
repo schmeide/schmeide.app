@@ -13,6 +13,9 @@ const person = { name: "Ada Lovelace", email: "ada@example.com" };
 const owner: Session = { person, businesses: [{ id: 1, name: "Ada's bakery" }] };
 const newcomer: Session = { person, businesses: [] };
 const admin: Session = { person: { ...person, role: "admin" }, businesses: [] };
+const grace = { name: "Grace Admin", email: "grace@example.com" };
+// An admin viewing the app as Ada.
+const viewing: Session = { ...owner, impersonatedBy: grace };
 const bookkeeper: Session = {
   person,
   businesses: [
@@ -243,5 +246,92 @@ describe("route guards", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");
     expect(document.title).toBe(copy.pageTitle(copy.problems.notFound.title));
+  });
+
+  it("has no page for viewing as a customer, even for an admin", () => {
+    open("/admin/view-as", admin);
+    expect(
+      screen.getByRole("heading", { level: 1, name: copy.problems.notFound.title })
+    ).toBeInTheDocument();
+  });
+});
+
+describe("viewing as a customer", () => {
+  const banner = () => screen.queryByRole("region", { name: copy.impersonation.label });
+
+  it("shows a banner on every page naming the person, with Stop and no way to dismiss it", () => {
+    open("/", viewing);
+    expect(banner()).toHaveTextContent(copy.impersonation.viewing(person.name, person.email));
+    expect(
+      within(banner()!)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual([copy.impersonation.stop]);
+    act(() => navigate("/terms"));
+    expect(banner()).toHaveTextContent(person.name);
+    act(() => navigate("/nowhere"));
+    expect(banner()).toHaveTextContent(person.name);
+  });
+
+  it("announces the banner and puts Stop first in the tab order after the skip link", async () => {
+    open("/", viewing);
+    expect(screen.getByRole("status")).toHaveTextContent(person.name);
+    await userEvent.tab();
+    await userEvent.tab();
+    expect(screen.getByRole("button", { name: copy.impersonation.stop })).toHaveFocus();
+  });
+
+  it("shows no banner otherwise", () => {
+    open("/", owner);
+    expect(banner()).toBeNull();
+  });
+
+  it("shows no banner to an admin as themselves", () => {
+    open("/admin", admin);
+    expect(banner()).toBeNull();
+  });
+
+  it("hides the admin area, even from a session that claims the role", async () => {
+    open("/", { ...viewing, person: { ...person, role: "admin" } });
+    expect(within(primaryNav()).queryByRole("link", { name: copy.routes.admin })).toBeNull();
+    act(() => navigate("/admin"));
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+  });
+
+  it("stops, and returns the admin to the admin area as themselves", async () => {
+    const state: { session: Session } = { session: viewing };
+    window.history.replaceState(null, "", "/projects/7");
+    const calls = renderWithApi(
+      <App isPublicSite={false} />,
+      {
+        ...api,
+        "session.get": () => ({ ...state.session, providers: [] }),
+        "impersonation.stop": () => {
+          state.session = { person: { ...grace, role: "admin" }, businesses: [] };
+          return null;
+        },
+      },
+      "server"
+    );
+    await userEvent.click(await screen.findByRole("button", { name: copy.impersonation.stop }));
+    await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: copy.routes.admin })
+    ).toBeInTheDocument();
+    expect(banner()).toBeNull();
+    expect(calls.filter(({ path }) => path === "impersonation.stop")).toHaveLength(1);
+  });
+
+  it("stops the view before signing out from the account menu", async () => {
+    const { handlers, requests } = authServer({ session: viewing });
+    const calls = renderWithApi(
+      <App isPublicSite={false} />,
+      { ...api, ...handlers, "impersonation.stop": () => null },
+      "server"
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Ada Lovelace" }));
+    await userEvent.click(screen.getByRole("button", { name: copy.shell.signOut }));
+    await waitFor(() => expect(requests.map((request) => request.path)).toEqual(["/sign-out"]));
+    expect(calls.filter(({ path }) => path === "impersonation.stop")).toHaveLength(1);
   });
 });

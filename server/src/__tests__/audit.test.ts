@@ -52,16 +52,21 @@ type Walkable = {
 
 // The input each admin mutation is called with by the walk below, by path. A new admin mutation
 // needs an entry here that makes it succeed.
-const walkInputs: Readonly<Record<string, unknown>> = {};
+const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
+  const owner = await aSignedInPerson(app, deps);
+  return { "admin.impersonation.start": { email: owner.email, reason: "audit walk" } };
+};
 
 // Calls every admin mutation in `router` as a signed-in admin and returns the paths that left no
 // audit row by that admin.
 const unauditedAdminMutations = async (router: Walkable) => {
+  const inputs = await walkInputs();
   const admin = await aSignedInAdmin(app, deps);
   const adminId = await idOf(admin.email);
   const caller = router.createCaller({
     ...deps,
     headers: new Headers({ cookie: admin.cookie }),
+    responseCookies: [],
   }) as Callable;
   const procedures = router._def.procedures as Readonly<
     Record<string, { readonly _def: { readonly type: string } }>
@@ -73,7 +78,7 @@ const unauditedAdminMutations = async (router: Walkable) => {
   for (const path of mutations) {
     const before = (await rowsBy(adminId)).length;
     const call = path.split(".").reduce((node, key) => node[key], caller);
-    await call(walkInputs[path]).catch(() => undefined);
+    await call(inputs[path]).catch(() => undefined);
     if ((await rowsBy(adminId)).length === before) unaudited.push(path);
   }
   return unaudited;
@@ -109,7 +114,11 @@ describe("every admin write", () => {
         return "done";
       }),
     });
-    const caller = router.createCaller({ ...deps, headers: new Headers({ cookie: admin.cookie }) });
+    const caller = router.createCaller({
+      ...deps,
+      headers: new Headers({ cookie: admin.cookie }),
+      responseCookies: [],
+    });
     expect(await caller.act()).toBe("done");
     expect(await rowsBy(adminId)).toEqual([
       expect.objectContaining({
@@ -168,7 +177,11 @@ describe("an admin action and its audit row", () => {
         throw new Error("no");
       }),
     });
-    const caller = router.createCaller({ ...deps, headers: new Headers({ cookie: admin.cookie }) });
+    const caller = router.createCaller({
+      ...deps,
+      headers: new Headers({ cookie: admin.cookie }),
+      responseCookies: [],
+    });
     await expect(caller.act()).rejects.toThrow("no");
     expect(await rowsBy(await idOf(admin.email))).toEqual([]);
   });

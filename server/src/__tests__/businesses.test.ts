@@ -9,7 +9,14 @@ import { approveEmail } from "../services/access.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 import { approveSpec, createProject, transition } from "../services/projects.ts";
 import { finishBuild } from "../services/builds.ts";
-import { adminPaths, aSignedInPerson, callApi, procedurePaths, testAuth } from "./testAuth.ts";
+import {
+  adminPaths,
+  aSignedInPerson,
+  callApi,
+  impersonationPaths,
+  procedurePaths,
+  testAuth,
+} from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -43,8 +50,11 @@ beforeEach(() => {
 
 // The procedures anyone may call. Everything else needs a signed-in, approved caller.
 const OPEN = ["session.get", "invites.get", "invites.accept"];
-// Every procedure but the admin ones, which admin.test.ts walks on their own.
-const customerPaths = procedurePaths.filter((path) => !adminPaths.includes(path));
+// Every procedure but the admin ones and stopping a view as someone, which admin.test.ts walks on
+// their own.
+const customerPaths = procedurePaths.filter(
+  (path) => !adminPaths.includes(path) && !impersonationPaths.includes(path)
+);
 
 // One call of every customer procedure, aimed at the given project and build. A procedure added
 // to the router must be added here, or the first test fails.

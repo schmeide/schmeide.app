@@ -14,6 +14,9 @@ leaves two approved logins, both with the password `schmeide-local-only`, and pr
 - `admin@schmeide.localhost`: the platform admin role, in no business. Its grant is in the audit log like any other.
 - `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role.
 
+To work on customer screens, sign in as the admin and view as `owner@schmeide.localhost`
+([Viewing as a customer](#viewing-as-a-customer)).
+
 Running it again adds only what is missing: it does not reset a changed password or sign anyone out. It refuses, and
 writes nothing, unless `SCHMEIDE_PUBLIC_URL` is localhost, so a known password never reaches a deployed database. For
 a real environment, use `make access/approve` and `make access/admin` below.
@@ -57,6 +60,32 @@ procedure that does not exist.
   is off the list.
 - The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
+
+## Viewing as a customer
+
+An admin can see and use the app exactly as a person does, to reproduce what they report: their businesses, their
+projects, and the same guards. There is no page of its own: the control sits on a person's row in the admin area, on
+the people screen and on a business's page (#132). The admin gives a reason, and the browser switches to a session
+as that person (`admin.impersonation.start`, built on Better Auth's admin plugin, which records the admin on the
+session as `sessions.impersonated_by`).
+
+- Every page shows a banner naming the person, which cannot be dismissed. Its Stop button
+  (`impersonation.stop`) returns the admin to their own session at `/admin`. Signing out from the account menu
+  stops the view first.
+- A view lasts an hour from its start, whatever renews the session. After that the browser is signed out, and the
+  admin signs in again.
+- The audit log records the start (with the reason), the stop, and, against the admin, every change made in
+  between (`impersonation.write`, naming the person, the business, and the procedure, or `files.upload` for an
+  upload), so the history never says the customer did it.
+- Refused while viewing: every `/api/auth` route but reading the session, so the person's password, email,
+  providers, account, and other sessions cannot be changed, and nothing about them is shown. Accepting a
+  set-password link is refused too, and so will be anything that charges money.
+- Not another admin, not yourself, and not a second view from inside one: while viewing, the admin is not an
+  admin.
+- A person whose approval was removed can still be viewed as ("I cannot get in" is worth seeing from their side);
+  they still cannot sign in themselves. `access/remove` for the person leaves an admin's view of them alone.
+- Taking the admin role or approval away from the admin ends every view they have open.
+- Customers are not told at the time. The privacy text should say that staff can view an account to give support.
 
 ## Settings
 
