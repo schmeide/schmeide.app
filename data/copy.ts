@@ -458,7 +458,8 @@ export const copy = {
     retryTitle: "Try again",
     firstBuildTitle: "First build",
     manageBusy: "You can delete the project once the build has finished.",
-    featuresTitle: "1. What your app should do",
+    // The stepper already numbers this step. A leading "1." reads as the first interview question.
+    featuresTitle: "What your app should do",
     featuresIntro:
       "Write one request in each box, in your own words. Press Enter or “Add another request” for a new box.",
     featuresLabel: "Your requests",
