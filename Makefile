@@ -138,8 +138,12 @@ access/approve: node_modules env-EMAIL ## Approve an email for prelaunch sign-in
 access/remove: node_modules env-EMAIL ## Take an email off the approved list and sign that person out (EMAIL=person@example.com)
 	$(JS_EXEC) run --silent access -w server -- remove "$(EMAIL)"
 
+.PHONY: access/admin
+access/admin: node_modules env-EMAIL ## Give an approved person who has signed in the platform admin role (EMAIL=person@example.com)
+	$(JS_EXEC) run --silent access -w server -- admin "$(EMAIL)"
+
 .PHONY: access/list
-access/list: node_modules ## List approved emails and whether each has signed in
+access/list: node_modules ## List approved emails, whether each has signed in, and who is an admin
 	$(JS_EXEC) run --silent access -w server -- list
 
 .PHONY: doctor
@@ -273,7 +277,7 @@ docker/check:
 
 env-%: ## Check if env var is defined
 	if [ -z "$($*)" ]; then \
-		echo "Error: Environment variable '$*' is not set."; \
+		echo "Error: Environment variable '$*' is not set. Usage: make $(MAKECMDGOALS) $*=..."; \
 		exit 1; \
 	fi
 

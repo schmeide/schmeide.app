@@ -32,7 +32,12 @@ const aBusiness = async () => {
 };
 
 const aPerson = async (tenantId: number, domain = `${randomUUID()}.example`) => {
-  const person = { id: randomUUID(), name: "Ada Example", email: `ada-${randomUUID()}@${domain}` };
+  const person = {
+    id: randomUUID(),
+    name: "Ada Example",
+    email: `ada-${randomUUID()}@${domain}`,
+    admin: false,
+  };
   await db.insert(users).values({ ...person, emailVerified: true });
   await db.insert(memberships).values({ userId: person.id, tenantId, role: "owner" });
   return person;

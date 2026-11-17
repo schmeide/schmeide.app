@@ -71,7 +71,7 @@ describe("the approved list", () => {
       error: REFUSED.notApproved,
     });
     expect(await validate({ user: { email, emailVerified: true }, source })).toBeUndefined();
-    expect(await listApproved(db)).toContainEqual({ email, hasAccount: false });
+    expect(await listApproved(db)).toContainEqual({ email, hasAccount: false, admin: false });
   });
 
   it("has no public password sign-up", async () => {

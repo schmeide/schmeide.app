@@ -26,6 +26,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   business: placeholder("business"),
   account: placeholder("account"),
   welcome: placeholder("welcome"),
+  admin: placeholder("admin"),
   help: placeholder("help"),
   signIn: () => <SignInPage />,
   setPassword: () => <SetPasswordPage />,

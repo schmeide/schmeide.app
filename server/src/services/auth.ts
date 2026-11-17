@@ -4,10 +4,12 @@
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { admin } from "better-auth/plugins/admin";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   accounts,
+  ADMIN_ROLE,
   MAX_PASSWORD_LENGTH,
   MIN_PASSWORD_LENGTH,
   rateLimits,
@@ -55,6 +57,12 @@ export const admit = async (
   return undefined;
 };
 
+// Better Auth's admin plugin gives the role, bans, and impersonation (the admin behind a session,
+// an hour at most). Its own HTTP endpoints are all refused: an admin acts only through the
+// `admin` procedures (router.ts), which call `auth.api` on the server.
+const adminPlugin = admin({ adminRoles: [ADMIN_ROLE] });
+export const ADMIN_PLUGIN_PATHS = Object.values(adminPlugin.endpoints).map(({ path }) => path);
+
 export const createAuth = (db: Db, config: AuthConfig) =>
   betterAuth({
     appName: "Schmeide",
@@ -78,7 +86,8 @@ export const createAuth = (db: Db, config: AuthConfig) =>
     }),
     // No public sign-up: a password account opens only through an invite link, or anyone could
     // claim an approved address by knowing it.
-    disabledPaths: ["/sign-up/email"],
+    disabledPaths: ["/sign-up/email", ...ADMIN_PLUGIN_PATHS],
+    plugins: [adminPlugin],
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
@@ -129,7 +138,13 @@ export const createAuth = (db: Db, config: AuthConfig) =>
 
 export type Auth = ReturnType<typeof createAuth>;
 
-export type Person = { readonly id: string; readonly name: string; readonly email: string };
+export type Person = {
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  // Has the platform role: may call the `admin` procedures.
+  readonly admin: boolean;
+};
 
 // The signed-in, still-approved person behind a request, or null.
 export const currentPerson = async (
@@ -138,8 +153,8 @@ export const currentPerson = async (
 ): Promise<Person | null> => {
   const session = await auth.api.getSession({ headers });
   if (!session || !(await isApproved(db, session.user.email))) return null;
-  const { id, name, email } = session.user;
-  return { id, name, email };
+  const { id, name, email, role } = session.user;
+  return { id, name, email, admin: role === ADMIN_ROLE };
 };
 
 export const enabledProviders = (config: Pick<AuthConfig, "providers">): readonly Provider[] =>

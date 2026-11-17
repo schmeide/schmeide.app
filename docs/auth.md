@@ -10,8 +10,9 @@ This page covers approving people, the settings, registering with each provider,
 
 ```sh
 make access/approve EMAIL=person@example.com   # approve, and print a set-password link
-make access/list                               # who is approved, and who has signed in
+make access/list                               # who is approved, who has signed in, and who is an admin
 make access/remove EMAIL=person@example.com    # take them off the list and sign them out
+make access/admin EMAIL=person@example.com     # give an approved person who has signed in the admin role
 ```
 
 - An approved person can sign in with any provider that is turned on, as long as the provider account uses that
@@ -26,6 +27,22 @@ make access/remove EMAIL=person@example.com    # take them off the list and sign
   made before sign-in existed). Without it, a new person gets an empty business of their own.
 - These commands act on the database in `DATABASE_URL`. To approve someone on a hosted server, run them where that
   database is reachable, with `SCHMEIDE_PUBLIC_URL` set so the printed link has the right address.
+
+## Admins
+
+The people who run Schmeide have the platform `admin` role (`users.role`), separate from being an owner or editor of
+a business. An admin sees an Admin entry in the navigation and the admin area at `/admin`, and only an admin can call
+the server's `admin.*` procedures, the only ones that read across businesses. To anyone else they answer exactly as a
+procedure that does not exist.
+
+- `access/admin` works only for an approved address whose person has already set a password or signed in; it says
+  what to run first otherwise. The role takes effect on their next request.
+- An admin is not given a business of their own, and lands on `/admin`. Approving them with `TENANT=...` puts them in
+  one.
+- `access/remove` takes an admin's access away like anyone else's: the role is kept but does nothing while the address
+  is off the list.
+- The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
+  go through the `admin.*` procedures instead.
 
 ## Settings
 

@@ -1,4 +1,5 @@
-export type Person = { readonly name: string; readonly email: string };
+// `role` is there only for a person with the platform admin role.
+export type Person = { readonly name: string; readonly email: string; readonly role?: "admin" };
 export type Business = { readonly id: number; readonly name: string };
 export type Provider = "google" | "microsoft" | "apple";
 
@@ -9,3 +10,5 @@ export type Session = {
 };
 
 export const signedOut: Session = { person: null, businesses: [] };
+
+export const isAdmin = (session: Session): boolean => session.person?.role === "admin";

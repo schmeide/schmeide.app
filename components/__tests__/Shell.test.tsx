@@ -12,6 +12,7 @@ import { aProject, authServer, projectServer, renderWithApi } from "./fakeApi";
 const person = { name: "Ada Lovelace", email: "ada@example.com" };
 const owner: Session = { person, businesses: [{ id: 1, name: "Ada's bakery" }] };
 const newcomer: Session = { person, businesses: [] };
+const admin: Session = { person: { ...person, role: "admin" }, businesses: [] };
 const bookkeeper: Session = {
   person,
   businesses: [
@@ -207,6 +208,32 @@ describe("route guards", () => {
         .getAllByRole("link")
         .map((link) => link.textContent)
     ).toEqual(["Account", "Help"]);
+  });
+
+  it("offers the admin area only to an admin, who lands there without a business", async () => {
+    open("/", admin);
+    await waitFor(() => expect(window.location.pathname).toBe("/admin"));
+    expect(screen.getByRole("heading", { level: 1, name: copy.routes.admin })).toBeInTheDocument();
+    expect(
+      within(primaryNav())
+        .getAllByRole("link")
+        .map((link) => [link.textContent, link.getAttribute("href")])
+    ).toEqual([[copy.routes.admin, "/admin"]]);
+  });
+
+  it("shows an admin in a business the admin area after the business navigation", () => {
+    open("/", { ...admin, businesses: owner.businesses });
+    expect(
+      within(primaryNav())
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/", "/usage", "/billing", "/help", "/admin"]);
+  });
+
+  it("sends a person without the role away from the admin area, and never offers it", async () => {
+    open("/admin", owner);
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(within(primaryNav()).queryByRole("link", { name: copy.routes.admin })).toBeNull();
   });
 
   it("says so when the address matches nothing", () => {
