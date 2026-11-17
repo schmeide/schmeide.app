@@ -16,7 +16,7 @@ import styles from "./ProjectSetup.module.css";
 type Props = {
   readonly project: Project;
   readonly latestBuild: Build | null;
-  readonly specFailed: boolean;
+  readonly specFailed: Project["specError"];
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly onStop: () => void;

@@ -391,6 +391,7 @@ export const generateSpec = async (
   return db.transaction(async (tx) => {
     const project = await transition(tx as unknown as Db, id, ["draft", "spec_ready"], {
       status: "spec_generating",
+      specError: null,
     });
     await workflows.start<typeof specWorkflow>("specWorkflow", {
       taskQueue,

@@ -10,7 +10,7 @@ type Props = {
   readonly project: Project;
   readonly editing: boolean;
   readonly onEditingChange: (editing: boolean) => void;
-  readonly specFailed: boolean;
+  readonly specFailed: Project["specError"];
 };
 
 // The two ways to describe an app: answer questions that build a plan, or type the requests.

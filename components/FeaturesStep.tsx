@@ -18,7 +18,7 @@ import styles from "./FeaturesStep.module.css";
 type Props = {
   readonly project: Project;
   readonly onEditingChange: (editing: boolean) => void;
-  readonly specFailed: boolean;
+  readonly specFailed: Project["specError"];
   // Offered while describing: switch to answering questions instead of typing requests.
   readonly onUseInterview?: () => void;
 };
@@ -113,7 +113,7 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
       </h2>
       <form onSubmit={onWriteSpec} className={stepStyles.form}>
         <p className={stepStyles.muted}>{copy.project.featuresIntro}</p>
-        {specFailed && <p role="alert">{copy.project.specFailed}</p>}
+        {specFailed && <p role="alert">{copy.project.specFailed[specFailed]}</p>}
         <fieldset className={styles.requests}>
           <legend>{copy.project.featuresLabel}</legend>
           <ol className={styles.list}>
