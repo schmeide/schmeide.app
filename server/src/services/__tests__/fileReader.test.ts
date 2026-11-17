@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Query } from "../builds.ts";
 import { ReadUnavailableError } from "../errors.ts";
 import { MAX_PROPOSALS, createFileReader, readPrompt, type FileReader } from "../fileReader.ts";
@@ -53,6 +53,7 @@ const input: Parameters<FileReader>[0] = {
 
 describe("createFileReader", () => {
   it("sends the picture itself with the prompt, with no tools and a fixed answer shape", async () => {
+    vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
     const calls: Call[] = [];
     const reader = createFileReader(config, fakeQuery(calls, { structured_output: READING }));
 
@@ -92,6 +93,8 @@ describe("createFileReader", () => {
     expect(options.outputFormat?.schema).not.toHaveProperty("$schema");
     expect(options.allowedTools).toBeUndefined();
     expect(options.mcpServers).toBeUndefined();
+    expect(options.env?.SCHMEIDE_AUTH_SECRET).toBeUndefined();
+    expect(options.env?.DATABASE_URL).toBeUndefined();
     expect(options.additionalDirectories).toBeUndefined();
   });
 

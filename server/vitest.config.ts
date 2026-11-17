@@ -13,5 +13,6 @@ export default defineConfig({
     include: ["src/**/__tests__/*.test.ts"],
     // Files share one database and the one-running-build rule, so they run one at a time.
     fileParallelism: false,
+    unstubEnvs: true,
   },
 });
