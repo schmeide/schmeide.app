@@ -86,14 +86,16 @@ clean: ## Clean build artifacts
 		./node_modules/.tmp
 
 .PHONY: serve
-serve: infra/up node_modules ## Infra, migrations, the platform server on :3100, and Vite on :5173 (proxies /api)
+serve: infra/up node_modules ## Infra, migrations, the local logins, the platform server on :3100, and Vite on :5173 (proxies /api)
 	$(MAKE) db/migrate
+	$(MAKE) db/seed
 	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run start -w server" "$(JS_EXEC) run dev"
 
 .PHONY: serve/watch
 serve/watch: infra/up node_modules ## Like serve, but the server reloads on code changes (a reload restarts a running build's step)
 	$(MAKE) db/migrate
+	$(MAKE) db/seed
 	echo "App: http://localhost:5173  API: http://localhost:$(PORT)/api  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
 
@@ -122,6 +124,10 @@ infra/down: docker/check ## Stop the infrastructure (the database volume is kept
 .PHONY: db/migrate
 db/migrate: node_modules ## Apply server/drizzle migrations to DATABASE_URL
 	$(JS_EXEC) run db:migrate -w server
+
+.PHONY: db/seed
+db/seed: node_modules ## Add the local admin and demo-owner logins and print them (localhost only; safe to rerun)
+	$(JS_EXEC) run --silent access -w server -- seed
 
 .PHONY: db/generate
 db/generate: node_modules ## Generate a migration from server/src/db/schema.ts (NAME=create_widgets to name it)

@@ -11,10 +11,15 @@ setup, and how to connect the hosted site.
 
 1. `make doctor`: fix anything it marks `FAIL` (each line says how), until it prints "All good".
 2. `make serve`, and leave it running (Ctrl-C stops it).
-3. In a second terminal, `make access/approve EMAIL=you@example.com TENANT=demo`. Open the link it prints and set a
-   password. `TENANT=demo` puts you in the business that holds the projects made before sign-in existed; leave it
-   out and you get an empty business of your own.
-   You are now signed in; next time, sign in at <http://localhost:5173> with that email and password.
+3. Sign in at <http://localhost:5173/sign-in> with one of the two logins `make serve` prints (it runs `make db/seed`
+   after the migrations), both with the password `schmeide-local-only`:
+   - `owner@schmeide.localhost` owns the `demo` business, which holds the projects made before sign-in existed.
+     Use it to work on projects.
+   - `admin@schmeide.localhost` has the admin role and no business, and lands on `/admin`.
+
+   The seed runs only when `SCHMEIDE_PUBLIC_URL` is localhost, and leaves existing logins, passwords, and sessions
+   alone. To sign in as yourself instead, see [Approve a person](auth.md#approve-a-person).
+
 4. Under "What do you need?", say what the app is for in a sentence or two (or pick a starting point) and press
    "Continue". With apps already there, "New app" leads to the same page.
 5. Answer the questions, or press "Write it myself" and type one request per box ("Add another request" or Enter
@@ -86,7 +91,7 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 ## Using the UI
 
 Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install. Sign in with
-an approved email (step 3 of the quick start).
+a seeded login or an approved email (step 3 of the quick start).
 
 1. **Start an app**: the start page (`/new`, and the home page until there is a first app) asks "What do you
    need?". The answer is kept as the app's first answer (`projects.need`), the app is named from it (the name of a

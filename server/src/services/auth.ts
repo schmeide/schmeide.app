@@ -161,14 +161,19 @@ export const enabledProviders = (config: Pick<AuthConfig, "providers">): readonl
   PROVIDERS.filter((provider) => config.providers[provider]);
 
 const DEV_SECRET = "schmeide-dev-only-secret-never-use-on-a-public-address";
-const isLocal = (url: string) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(url);
+// Whether the address is this machine. Only there is the dev secret, or a seeded login, allowed.
+export const isLocal = (url: string) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(url);
+
+// The address people open in a browser, without a trailing slash.
+export const publicUrlFromEnv = (env: Readonly<Record<string, string | undefined>>): string =>
+  (env.SCHMEIDE_PUBLIC_URL ?? "http://localhost:5173").replace(/\/+$/, "");
 
 // Reads the sign-in settings from the environment (docs/auth.md lists them). Throws with what
 // to set when a public address has no secret.
 export const authConfigFromEnv = (
   env: Readonly<Record<string, string | undefined>>
 ): AuthConfig => {
-  const publicUrl = (env.SCHMEIDE_PUBLIC_URL ?? "http://localhost:5173").replace(/\/+$/, "");
+  const publicUrl = publicUrlFromEnv(env);
   const apiUrl = (env.SCHMEIDE_API_URL ?? publicUrl).replace(/\/+$/, "");
   const secret = env.SCHMEIDE_AUTH_SECRET ?? (isLocal(publicUrl) ? DEV_SECRET : undefined);
   if (!secret || secret.length < 32)
