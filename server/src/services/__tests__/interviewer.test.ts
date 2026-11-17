@@ -19,6 +19,7 @@ const fakeQuery = (calls: Call[], result: Record<string, unknown>): Query =>
     return (async function* (): AsyncGenerator<SDKMessage> {
       yield {
         type: "result",
+        duration_ms: 1500,
         subtype: "success",
         is_error: false,
         result: "",
@@ -91,15 +92,18 @@ describe("createInterviewer", () => {
     const result = await interviewer(input);
 
     expect(result.turn).toEqual(TURN);
-    expect(result.usage).toEqual([
-      expect.objectContaining({
-        projectId: 7,
-        buildId: null,
-        runKind: "interview",
-        model: "claude-test",
-        costUsd: 0.01,
-      }),
-    ]);
+    expect(result.usage).toEqual({
+      run: { projectId: 7, buildId: null, runKind: "interview", durationMs: 1500 },
+      models: [
+        expect.objectContaining({
+          projectId: 7,
+          buildId: null,
+          runKind: "interview",
+          model: "claude-test",
+          costUsd: 0.01,
+        }),
+      ],
+    });
     const [{ prompt, options }] = calls;
     expect(prompt).toContain("Invoices");
     expect(prompt).toContain("Keep a list of my clients");
@@ -161,6 +165,6 @@ describe("createInterviewer", () => {
     );
     const interviewer = createInterviewer({ ...config, agentCmd: script }, fakeQuery([], {}));
 
-    expect(await interviewer(input)).toEqual({ turn: TURN, usage: [] });
+    expect(await interviewer(input)).toEqual({ turn: TURN, usage: null });
   });
 });

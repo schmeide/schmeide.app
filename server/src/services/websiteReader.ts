@@ -5,8 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
-import type { NewUsage } from "../db/schema.ts";
-import { usageRows, type Query } from "./builds.ts";
+import { runUsage, type Query, type RunUsage } from "./builds.ts";
 import { claudeEnv } from "./claudeEnv.ts";
 import { ReaderUnavailableError } from "./errors.ts";
 import type { PageDigest } from "./htmlText.ts";
@@ -134,7 +133,7 @@ export const createWebsiteReader = (
     prompt: string,
     whose: Whose,
     projectId: number
-  ): Promise<{ readonly reading: Reading; readonly usage: readonly NewUsage[] }> => {
+  ): Promise<{ readonly reading: Reading; readonly usage: RunUsage | null }> => {
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), TIMEOUT_MS);
     try {
@@ -161,7 +160,7 @@ export const createWebsiteReader = (
         }
         return {
           reading: parseReading(whose, message.structured_output ?? parseJson(message.result)),
-          usage: usageRows(message, projectId, null, "website"),
+          usage: runUsage(message, projectId, null, "website"),
         };
       }
       throw new ReaderUnavailableError("Claude ended without a result");
@@ -174,7 +173,7 @@ export const createWebsiteReader = (
     const prompt = websitePrompt({ whose, pages });
     try {
       return config.agentCmd
-        ? { reading: await viaCommand(config.agentCmd, whose, prompt), usage: [] }
+        ? { reading: await viaCommand(config.agentCmd, whose, prompt), usage: null }
         : await viaClaude(prompt, whose, projectId);
     } catch (error) {
       if (error instanceof ReaderUnavailableError) throw error;

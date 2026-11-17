@@ -9,11 +9,10 @@ import {
   PLAN_SECTIONS,
   planSection,
   type FileRow,
-  type NewUsage,
   type PlanSection,
   type Project,
 } from "../db/schema.ts";
-import { usageRows, type Query } from "./builds.ts";
+import { runUsage, type Query, type RunUsage } from "./builds.ts";
 import { claudeEnv } from "./claudeEnv.ts";
 import { ReadUnavailableError } from "./errors.ts";
 import { isPicture } from "./fileTypes.ts";
@@ -38,7 +37,7 @@ export type FileReader = (input: {
   readonly project: Pick<Project, "id" | "name">;
   readonly file: Pick<FileRow, "type" | "owner" | "displayName">;
   readonly bytes: Buffer;
-}) => Promise<{ readonly reading: Reading; readonly usage: readonly NewUsage[] }>;
+}) => Promise<{ readonly reading: Reading; readonly usage: RunUsage | null }>;
 
 export type FileReaderConfig = {
   readonly dataDir: string;
@@ -182,7 +181,7 @@ export const createFileReader = (config: FileReaderConfig, query: Query = sdkQue
         },
       })) {
         if (message.type !== "result") continue;
-        const usage = usageRows(message, projectId, null, "read");
+        const usage = runUsage(message, projectId, null, "read");
         if (message.subtype !== "success" || message.is_error) {
           throw new ReadUnavailableError(`The model run failed: ${message.subtype}`);
         }
@@ -202,7 +201,7 @@ export const createFileReader = (config: FileReaderConfig, query: Query = sdkQue
     try {
       const attachment = attachmentBlock(file.type, bytes);
       return config.agentCmd
-        ? { reading: await viaCommand(config.agentCmd, prompt), usage: [] }
+        ? { reading: await viaCommand(config.agentCmd, prompt), usage: null }
         : await viaClaude(prompt, attachment, project.id);
     } catch (error) {
       if (error instanceof ReadUnavailableError) throw error;

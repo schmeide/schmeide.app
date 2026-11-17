@@ -79,19 +79,22 @@ const reads = (site: SiteRead, reading: unknown = MINE) => {
   const siteFetcher = vi.fn<SiteFetcher>(async () => site);
   const websiteReader = vi.fn<WebsiteReader>(async ({ projectId }) => ({
     reading,
-    usage: [
-      {
-        projectId,
-        buildId: null,
-        runKind: "website" as const,
-        model: "claude-test",
-        inputTokens: 1,
-        outputTokens: 2,
-        cacheReadTokens: 3,
-        cacheCreationTokens: 4,
-        costUsd: 0.01,
-      },
-    ],
+    usage: {
+      run: { projectId, buildId: null, runKind: "website" as const, durationMs: 4000 },
+      models: [
+        {
+          projectId,
+          buildId: null,
+          runKind: "website" as const,
+          model: "claude-test",
+          inputTokens: 1,
+          outputTokens: 2,
+          cacheReadTokens: 3,
+          cacheCreationTokens: 4,
+          costUsd: 0.01,
+        },
+      ],
+    },
   }));
   const deps: WebsiteDeps = { db, siteFetcher, websiteReader };
   return { deps, siteFetcher, websiteReader };

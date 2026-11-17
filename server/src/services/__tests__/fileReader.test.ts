@@ -20,6 +20,7 @@ const fakeQuery = (calls: Call[], result: Record<string, unknown>): Query =>
       calls.push({ messages, options: params.options });
       yield {
         type: "result",
+        duration_ms: 3500,
         subtype: "success",
         is_error: false,
         result: "",
@@ -60,15 +61,18 @@ describe("createFileReader", () => {
     const result = await reader(input);
 
     expect(result.reading).toEqual(READING);
-    expect(result.usage).toEqual([
-      expect.objectContaining({
-        projectId: 7,
-        buildId: null,
-        runKind: "read",
-        model: "claude-test",
-        costUsd: 0.02,
-      }),
-    ]);
+    expect(result.usage).toEqual({
+      run: { projectId: 7, buildId: null, runKind: "read", durationMs: 3500 },
+      models: [
+        expect.objectContaining({
+          projectId: 7,
+          buildId: null,
+          runKind: "read",
+          model: "claude-test",
+          costUsd: 0.02,
+        }),
+      ],
+    });
     const [{ messages, options }] = calls;
     expect(messages).toHaveLength(1);
     expect(messages[0].message).toEqual({
@@ -244,6 +248,6 @@ describe("createFileReader", () => {
     );
     const reader = createFileReader({ ...config, agentCmd: script }, fakeQuery([], {}));
 
-    expect(await reader(input)).toEqual({ reading: READING, usage: [] });
+    expect(await reader(input)).toEqual({ reading: READING, usage: null });
   });
 });

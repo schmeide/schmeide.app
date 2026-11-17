@@ -18,6 +18,7 @@ const fakeQuery = (calls: Call[], result: Record<string, unknown>): Query =>
     return (async function* (): AsyncGenerator<SDKMessage> {
       yield {
         type: "result",
+        duration_ms: 2500,
         subtype: "success",
         is_error: false,
         result: "",
@@ -103,15 +104,18 @@ describe("createWebsiteReader", () => {
     const result = await reader({ projectId: 7, whose: "mine", pages: PAGES });
 
     expect(result.reading).toEqual({ whose: "mine", ...MINE });
-    expect(result.usage).toEqual([
-      expect.objectContaining({
-        projectId: 7,
-        buildId: null,
-        runKind: "website",
-        model: "claude-test",
-        costUsd: 0.01,
-      }),
-    ]);
+    expect(result.usage).toEqual({
+      run: { projectId: 7, buildId: null, runKind: "website", durationMs: 2500 },
+      models: [
+        expect.objectContaining({
+          projectId: 7,
+          buildId: null,
+          runKind: "website",
+          model: "claude-test",
+          costUsd: 0.01,
+        }),
+      ],
+    });
     const [{ prompt, options }] = calls;
     expect(prompt).toContain("Acme Bakery");
     expect(options).toMatchObject({
@@ -223,7 +227,7 @@ describe("createWebsiteReader", () => {
 
     expect(await reader({ projectId: 7, whose: "someone_else", pages: PAGES })).toEqual({
       reading: { whose: "someone_else", ...OTHERS },
-      usage: [],
+      usage: null,
     });
   });
 

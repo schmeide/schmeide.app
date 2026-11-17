@@ -47,7 +47,7 @@ const app = buildApp(deps);
 afterAll(() => app.close());
 beforeEach(() => {
   siteFetcher.mockReset().mockResolvedValue(FOUND);
-  websiteReader.mockReset().mockResolvedValue({ reading: { features: FEATURES }, usage: [] });
+  websiteReader.mockReset().mockResolvedValue({ reading: { features: FEATURES }, usage: null });
 });
 
 const aPersonWithAProject = async (name?: string) => {
@@ -79,7 +79,7 @@ describe("website.read", () => {
     const { cookie, id } = await aPersonWithAProject();
     websiteReader.mockResolvedValue({
       reading: { businessName: "Example Bakery", logo: null, colors: [], offers: [], features: [] },
-      usage: [],
+      usage: null,
     });
 
     const read = await callApi(app, "website.read", { id, address: "www.example.com" }, cookie);
@@ -148,7 +148,10 @@ describe("website.read", () => {
     const { cookie, id } = await aPersonWithAProject();
     const input = { id, address: "bakery.example", whose: "someone_else" };
 
-    websiteReader.mockResolvedValue({ reading: { features: FEATURES, text: "copied" }, usage: [] });
+    websiteReader.mockResolvedValue({
+      reading: { features: FEATURES, text: "copied" },
+      usage: null,
+    });
     expect((await callApi(app, "website.read", input, cookie)).code).toBe("SERVICE_UNAVAILABLE");
 
     websiteReader.mockRejectedValue(new ReaderUnavailableError("The model run failed"));

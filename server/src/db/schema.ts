@@ -126,6 +126,19 @@ export const agentRunKind = pgEnum("agent_run_kind", [
   "read",
 ]);
 
+// One row per agent run: how long the model ran, as the SDK's result reports it. A run's tokens and
+// cost are its `usage` rows, one per model, so the time is kept once here rather than on each.
+export const agentRuns = pgTable("agent_runs", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  buildId: integer("build_id").references(() => builds.id),
+  runKind: agentRunKind("run_kind").notNull(),
+  durationMs: integer("duration_ms").notNull(),
+  at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 // One row per model per agent run. buildId is null for spec generation and interview questions. model is what the run
 // used, as the SDK reports it; runKind is what the run was, so cost can be compared per kind.
 export const usage = pgTable("usage", {
@@ -134,6 +147,8 @@ export const usage = pgTable("usage", {
     .notNull()
     .references(() => projects.id),
   buildId: integer("build_id").references(() => builds.id),
+  // Null for rows recorded before runs were: their run's time is not known.
+  runId: integer("run_id").references(() => agentRuns.id),
   runKind: agentRunKind("run_kind").notNull(),
   model: text("model").notNull(),
   inputTokens: integer("input_tokens").notNull(),
@@ -339,6 +354,7 @@ export type BuildEvent = typeof buildEvents.$inferSelect;
 export type BuildEventKind = BuildEvent["kind"];
 export type RunKind = (typeof agentRunKind.enumValues)[number];
 export type NewUsage = typeof usage.$inferInsert;
+export type NewAgentRun = typeof agentRuns.$inferInsert;
 export type PlanSection = (typeof PLAN_SECTIONS)[number];
 export type PlanItem = typeof planItems.$inferSelect;
 export type Question = typeof interviewQuestions.$inferSelect;

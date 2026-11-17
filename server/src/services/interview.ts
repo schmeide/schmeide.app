@@ -12,13 +12,12 @@ import {
   projects,
   questionKind,
   type Answer,
-  type NewUsage,
   type PlanItem,
   type PlanSection,
   type Project,
   type Question,
 } from "../db/schema.ts";
-import { recordUsage } from "./builds.ts";
+import { recordUsage, type RunUsage } from "./builds.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
 import { findProject, transition } from "./projects.ts";
 
@@ -64,7 +63,7 @@ export type Interviewer = (input: {
   readonly project: Pick<Project, "id" | "name" | "need" | "features">;
   readonly items: readonly PlanItem[];
   readonly trail: readonly AnsweredQuestion[];
-}) => Promise<{ readonly turn: Turn; readonly usage: readonly NewUsage[] }>;
+}) => Promise<{ readonly turn: Turn; readonly usage: RunUsage | null }>;
 
 export type InterviewDeps = { readonly db: Db; readonly interviewer: Interviewer };
 

@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { builds } from "../../db/schema.ts";
-import { appendEvent, finishBuild, listEvents } from "../builds.ts";
+import { agentRuns, builds, usage } from "../../db/schema.ts";
+import { appendEvent, finishBuild, listEvents, recordUsage, runUsage } from "../builds.ts";
 import { createProject } from "../projects.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
@@ -41,5 +43,41 @@ describe("build events", () => {
 
     expect(finished).toMatchObject({ status: "failed", error: "make test failed" });
     expect(finished.finishedAt).toBeInstanceOf(Date);
+  });
+});
+
+const USED = {
+  inputTokens: 1,
+  outputTokens: 2,
+  cacheReadInputTokens: 3,
+  cacheCreationInputTokens: 4,
+  costUSD: 0.5,
+} as const;
+
+describe("agent run usage", () => {
+  it("keeps the run's time once, and one usage row per model that names the run", async () => {
+    const build = await newBuild();
+    const result = {
+      type: "result",
+      subtype: "success",
+      duration_ms: 65_400,
+      modelUsage: { "claude-a": USED, "claude-b": USED },
+    } as unknown as SDKResultMessage;
+
+    await recordUsage(db, runUsage(result, build.projectId, build.id, "initial"));
+
+    const runs = await db.select().from(agentRuns).where(eq(agentRuns.buildId, build.id));
+    expect(runs).toEqual([
+      expect.objectContaining({
+        projectId: build.projectId,
+        runKind: "initial",
+        durationMs: 65_400,
+      }),
+    ]);
+    const rows = await db.select().from(usage).where(eq(usage.buildId, build.id));
+    expect(rows.map(({ model, runId }) => [model, runId])).toEqual([
+      ["claude-a", runs[0].id],
+      ["claude-b", runs[0].id],
+    ]);
   });
 });
