@@ -805,7 +805,7 @@ describe("the two copies", () => {
     (await db.select().from(projects).where(eq(projects.id, id)))[0];
   const headOf = (dir: string) => git(dir, "rev-parse", "HEAD").trim();
 
-  it("runs a passed build on staging from the workspace, and production from its own checkout", async () => {
+  it("puts the first passed build on staging and live, and every later one on staging only", async () => {
     const {
       project,
       build,
@@ -837,20 +837,26 @@ describe("the two copies", () => {
     });
     expect((await buildRow(build.id)).release).toBe("promoted");
 
-    // The next commit reaches production with its own dependencies installed afresh.
-    mkdirSync(join(production, "node_modules"));
+    // The next build changes staging's address and leaves production as it was.
     writeFileSync(join(workspace, "second.ts"), "export const second = 2;\n");
     const next = await anotherBuild();
+    const before = ran().length;
     await env.run(activities.deploy, next.id);
 
     const second = (await buildRow(next.id)).commit;
     expect(second).not.toBe(first);
-    expect(headOf(production)).toBe(second);
-    expect(existsSync(join(production, "node_modules"))).toBe(false);
+    expect(ran().slice(before)).toEqual([`up ${staging} ${second} ${workspace}`]);
+    expect(headOf(production)).toBe(first);
+    expect(await projectRow(project.id)).toMatchObject({
+      stagingCommit: second,
+      productionCommit: first,
+    });
+    expect((await buildRow(next.id)).release).toBeNull();
   });
 
   it("gives an app that is live with one copy a staging copy on its next build", async () => {
-    const { project, activities, env, workspace, staging, ran, anotherBuild } = await prepared();
+    const { project, activities, env, workspace, staging, ran, anotherBuild, dataDir } =
+      await prepared();
     // As the migration leaves an app that was live before staging: running, its builds promoted.
     await db
       .update(projects)
@@ -861,7 +867,9 @@ describe("the two copies", () => {
     const next = await anotherBuild();
     await env.run(activities.deploy, next.id);
 
-    expect(ran()[0]).toBe(`up ${staging} ${(await buildRow(next.id)).commit} ${workspace}`);
+    // Production keeps running untouched, from the images built in the workspace.
+    expect(ran()).toEqual([`up ${staging} ${(await buildRow(next.id)).commit} ${workspace}`]);
+    expect(existsSync(join(dataDir, "production", project.slug))).toBe(false);
     expect((await projectRow(project.id)).stagingUrl).toBe(
       `http://localhost:${project.webPort + 10_000}`
     );
@@ -875,12 +883,16 @@ describe("the two copies", () => {
     const change = await anotherBuild({ status: "passed", commit: ahead });
     await db.update(projects).set({ stagingCommit: ahead }).where(eq(projects.id, project.id));
     const promote = await anotherBuild({ kind: "promote", commit: ahead });
+    mkdirSync(join(production, "node_modules"));
     const before = ran().length;
 
     await env.run(activities.release, promote.id);
 
     expect(ran().slice(before)).toEqual([`up ${live} ${ahead} ${production}`]);
     expect(headOf(production)).toBe(ahead);
+    expect(existsSync(join(production, "ahead.ts"))).toBe(true);
+    // Its dependencies are installed afresh by `make up`.
+    expect(existsSync(join(production, "node_modules"))).toBe(false);
     expect((await projectRow(project.id)).productionCommit).toBe(ahead);
     expect((await buildRow(change.id)).release).toBe("promoted");
     expect(await messages(promote.id)).toContain(`Live at http://localhost:${project.webPort}`);

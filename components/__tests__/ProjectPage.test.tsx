@@ -358,7 +358,7 @@ describe("ProjectPage", () => {
         },
       })
     );
-    const link = await screen.findByRole("link", { name: new RegExp(copy.project.open) });
+    const link = await screen.findByRole("link", { name: new RegExp(copy.project.openLive) });
     expect(link).toHaveAttribute("href", "http://localhost:8100");
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByText("$0.42")).toBeInTheDocument();
@@ -658,7 +658,7 @@ describe("ProjectPage designer", () => {
   });
 
   it.each(["overview", "changes"] as const)(
-    "shows the app and the way to change it together on %s, the request box saying when a change goes live",
+    "shows the app and the way to change it together on %s, the request box saying a change is looked at before it goes live",
     async (view) => {
       renderWithApi(
         <ProjectPage id={7} view={view} />,
@@ -667,9 +667,9 @@ describe("ProjectPage designer", () => {
       const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
       expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
       expect(screen.getByLabelText(copy.project.changeLabel)).toHaveAccessibleDescription(
-        copy.project.designer.goesLive
+        copy.project.designer.buildsToStaging
       );
-      expect(screen.getByText(copy.project.designer.goesLive)).toBeVisible();
+      expect(screen.getByText(copy.project.designer.buildsToStaging)).toBeVisible();
     }
   );
 
@@ -722,10 +722,9 @@ describe("ProjectPage designer", () => {
     const title = copy.project.designer.frameTitle("Invoices");
     const before = within(app).getByTitle(title);
     expect(within(app).getByText(copy.project.designer.building)).toBeVisible();
-    expect(within(app).getByRole("link", { name: new RegExp(copy.project.open) })).toHaveAttribute(
-      "href",
-      "http://localhost:8100"
-    );
+    expect(
+      within(app).getByRole("link", { name: new RegExp(copy.project.openLive) })
+    ).toHaveAttribute("href", "http://localhost:8100");
     fireEvent.load(before);
     await userEvent.click(
       within(app).getByRole("checkbox", { name: copy.project.designer.reloadOnBuild })
@@ -841,7 +840,7 @@ describe("ProjectPage designer", () => {
         hasBeenLive: true,
       })
     );
-    await screen.findByRole("link", { name: new RegExp(copy.project.open) });
+    await screen.findByRole("link", { name: new RegExp(copy.project.openLive) });
     expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
     expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
     expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
@@ -885,7 +884,7 @@ describe("ProjectPage designer", () => {
     const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
     expect(within(app).getByText(copy.project.designer.offline)).toBeVisible();
     expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).toBeNull();
-    expect(screen.queryByRole("link", { name: new RegExp(copy.project.open) })).toBeNull();
+    expect(screen.queryByRole("link", { name: new RegExp(copy.project.openLive) })).toBeNull();
     expect(screen.queryByRole("group", { name: copy.project.designer.widthLabel })).toBeNull();
     expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
     expect(primaryButtons()).toHaveLength(1);
@@ -951,5 +950,224 @@ describe("ProjectPage designer", () => {
     expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
     await userEvent.click(screen.getByRole("link", { name: copy.project.views.designer }));
     expect(screen.getByLabelText(copy.project.changeLabel)).toHaveValue("Add a due");
+  });
+});
+
+describe("ProjectPage, the version being worked on", () => {
+  const LIVE = "http://localhost:8100";
+  const STAGING = "http://localhost:18100";
+  const COMMIT = "a".repeat(40);
+  const app = aProject({
+    status: "live",
+    spec: SPEC,
+    previewUrl: LIVE,
+    stagingUrl: STAGING,
+    productionCommit: COMMIT,
+    stagingCommit: "b".repeat(40),
+  });
+  const passed = aBuild({ kind: "change", status: "passed", finishedAt: new Date() });
+  const region = () => screen.findByRole("region", { name: copy.project.designer.appTitle });
+
+  it("frames the version being worked on, says customers see the same, and opens either copy", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: { ...app, stagingCommit: COMMIT },
+        latestBuild: passed,
+        hasBeenLive: true,
+      })
+    );
+    const shown = await region();
+    expect(within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"))).toHaveAttribute(
+      "src",
+      STAGING
+    );
+    expect(within(shown).getByText(copy.project.release.showing)).toBeVisible();
+    expect(within(shown).getByText(copy.project.release.same)).toBeVisible();
+    expect(
+      within(shown).getByRole("link", { name: new RegExp(copy.project.openStaging) })
+    ).toHaveAttribute("href", STAGING);
+    expect(
+      within(shown).getByRole("link", { name: new RegExp(copy.project.openLive) })
+    ).toHaveAttribute("href", LIVE);
+    expect(screen.queryByRole("button", { name: copy.project.release.promote })).toBeNull();
+    expect(screen.queryByRole("button", { name: copy.project.release.discard })).toBeNull();
+  });
+
+  it("says how many changes customers do not see yet, and puts them live", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({ project: app, latestBuild: passed, hasBeenLive: true, unreleased: 2 }),
+      "projects.promote": () => ({ project: app, build: aBuild({ kind: "promote" }) }),
+    });
+    const shown = await region();
+    expect(within(shown).getByText(copy.project.release.ahead(2))).toBeVisible();
+
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.release.promote })
+    );
+
+    expect(calls).toContainEqual({ path: "projects.promote", input: { id: 7 } });
+    expect(primaryButtons()).toHaveLength(1);
+  });
+
+  it("asks before throwing changes away, saying what happens to each copy's information", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({ project: app, latestBuild: passed, hasBeenLive: true, unreleased: 1 }),
+      "projects.discard": () => ({ project: app, build: aBuild({ kind: "discard" }) }),
+    });
+    const shown = await region();
+    expect(within(shown).getByText(copy.project.release.ahead(1))).toBeVisible();
+
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.release.discard })
+    );
+    const confirm = within(shown).getByRole("group", {
+      name: copy.project.release.discardConfirm(1),
+    });
+    await userEvent.click(
+      within(confirm).getByRole("button", { name: copy.project.release.discardNo })
+    );
+    expect(
+      within(shown).queryByRole("group", { name: copy.project.release.discardConfirm(1) })
+    ).toBeNull();
+    expect(calls.map((call) => call.path)).not.toContain("projects.discard");
+
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.release.discard })
+    );
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.release.discardYes })
+    );
+
+    expect(calls).toContainEqual({ path: "projects.discard", input: { id: 7 } });
+  });
+
+  it("says why changes cannot be thrown away for an app live before versions were recorded", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: { ...app, productionCommit: null },
+        latestBuild: passed,
+        hasBeenLive: true,
+        unreleased: 1,
+      })
+    );
+    const shown = await region();
+    expect(within(shown).getByText(copy.project.release.noDiscardYet)).toBeVisible();
+    expect(within(shown).queryByRole("button", { name: copy.project.release.discard })).toBeNull();
+    expect(within(shown).getByRole("button", { name: copy.project.release.promote })).toBeVisible();
+  });
+
+  it("offers nothing to put live or throw away while a change is built", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: { ...app, status: "building" },
+        latestBuild: aBuild({ kind: "change", request: "Add a logo" }),
+        hasBeenLive: true,
+        unreleased: 1,
+      })
+    );
+    const shown = await region();
+    expect(within(shown).getByText(copy.project.release.ahead(1))).toBeVisible();
+    expect(within(shown).queryByRole("button", { name: copy.project.release.promote })).toBeNull();
+    expect(within(shown).queryByRole("button", { name: copy.project.release.discard })).toBeNull();
+  });
+
+  it("shows an app live before staging existed, and its one address, until its next build", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: { ...app, stagingUrl: null, stagingCommit: null, productionCommit: null },
+        latestBuild: passed,
+        hasBeenLive: true,
+      })
+    );
+    const shown = await region();
+    expect(within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"))).toHaveAttribute(
+      "src",
+      LIVE
+    );
+    expect(
+      within(shown)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual([LIVE]);
+  });
+
+  it("puts an offline app back up from the version being worked on", async () => {
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...projectServer({
+        project: { ...app, status: "stopped", previewUrl: null, stagingUrl: null },
+        latestBuild: passed,
+        hasBeenLive: true,
+      }),
+      "projects.promote": () => ({ project: app, build: aBuild({ kind: "promote" }) }),
+    });
+    const shown = await region();
+    expect(within(shown).getByText(copy.project.designer.offline)).toBeVisible();
+
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.release.promote })
+    );
+
+    expect(calls).toContainEqual({ path: "projects.promote", input: { id: 7 } });
+  });
+
+  // The page polls while a build runs; each case moves the latest build from running to passed.
+  const afterRelease = async (kind: "promote" | "discard") => {
+    const state = {
+      project: aProject({ ...app, status: "building" }),
+      latestBuild: aBuild({ id: 9, kind, status: "running" }),
+      hasBeenLive: true,
+    };
+    renderWithApi(<ProjectPage id={7} />, projectServer(state));
+    const shown = await region();
+    const before = within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"));
+    expect(within(shown).queryByText(copy.project.designer.newVersion)).toBeNull();
+
+    state.project = { ...state.project, status: "live" };
+    state.latestBuild = { ...state.latestBuild, status: "passed", finishedAt: new Date() };
+    await waitFor(
+      () =>
+        expect(
+          within(shown).queryByText(copy.project.designer.building, { exact: false })
+        ).toBeNull(),
+      { timeout: 4000 }
+    );
+    return { shown, before };
+  };
+
+  it("says nothing new is ready once a promote passes: the version being worked on is unchanged", async () => {
+    const { shown, before } = await afterRelease("promote");
+    expect(within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBe(before);
+    expect(within(shown).queryByText(copy.project.designer.newVersion)).toBeNull();
+  });
+
+  it("says a new version is ready once a discard passes, without reloading by itself", async () => {
+    const { shown, before } = await afterRelease("discard");
+    expect(await within(shown).findByText(copy.project.designer.newVersion)).toBeVisible();
+    expect(within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBe(before);
+
+    await userEvent.click(
+      within(shown).getByRole("button", { name: copy.project.designer.reloadNew })
+    );
+    expect(within(shown).getByTitle(copy.project.designer.frameTitle("Invoices"))).not.toBe(before);
+    expect(within(shown).queryByText(copy.project.designer.newVersion)).toBeNull();
+  });
+
+  it("shows a promote as the latest change, with who asked for it", async () => {
+    renderWithApi(
+      <ProjectPage id={7} view="changes" />,
+      projectServer({
+        project: app,
+        latestBuild: aBuild({ kind: "promote", request: "server words", status: "running" }),
+        latestBuildBy: "Demo owner",
+        hasBeenLive: true,
+      })
+    );
+    expect(await screen.findByText(copy.project.release.promoteRequest)).toBeVisible();
+    expect(screen.getByText(copy.project.release.askedBy("Demo owner"))).toBeVisible();
+    expect(screen.queryByText("server words")).toBeNull();
   });
 });

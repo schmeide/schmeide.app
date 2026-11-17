@@ -124,23 +124,29 @@ stepper (Describe, Spec, Build, Live) above it, and one main button per step:
    again".
 
 "Delete project" is at the bottom of every setup step except while the spec is written or a build runs. It asks
-first and removes the running app, its data, the code, the spec, and the build history.
+first and removes both copies of the app, their data, the code, the spec, and the build history.
 
 **Your app** is the project's home once it has been live, and it stays so if a later change fails or the app is
 taken offline. It has three views, each with its own address:
 
-- **Overview** (`/projects/<id>`): "Open your app" opens the preview in a new tab, "Request a change" leads to
-  Changes, and below are token usage with the reported cost and "The spec your app started from". That spec is
-  never rewritten: the changes built since are listed beside it, oldest first, and a change build is given the
-  spec plus those changes, so the builder is not told something the code no longer does.
+- **Overview** (`/projects/<id>`): the frame shows the version being worked on (staging; production for an app live
+  before staging existed, until its next build), says whether customers see the same version or how many changes they do
+  not see yet, and offers "Put this version live" (promote) and "Throw these changes away" (discard, which asks first
+  and says staging's information is emptied and the live app's is not touched). Neither is offered while a build runs;
+  discard is not offered for an app whose live commit was never recorded, which says why. "Open the version being
+  worked on" and "Open your live app" open each copy in a new tab. An offline app offers "Put this version live" to
+  bring it back. A promote or discard shows as the latest change, with who asked. "Request a change" leads to Changes,
+  and below are token usage with the reported cost and "The spec your app started from". That spec is never
+  rewritten: the changes built since are listed beside it, oldest first (a thrown-away change is no longer one), and a
+  change build is given the spec plus those changes, so the builder is not told something the code no longer does.
 - **Changes** (`/projects/<id>/changes`): "Request a change" starts a change build (also the way to retry a failed
-  change or bring an offline app back). Below it are the latest build with its log, with "Cancel the build" while
-  it runs, and the "Waiting changes": while a build runs a new change waits there, where it can be edited or removed
-  until it starts.
-- **Settings** (`/projects/<id>/settings`): the page title (the project name unless changed) and a PNG or ICO icon
-  of at most 256 KB. Saving a live app publishes it again with them in under a minute, without the builder; while a
-  build runs, the update waits its turn. "Use the default icon" goes back to the template's. Under "Manage" are
-  "Take the app offline" while live and "Delete project".
+  change, or to build an offline app again before putting it live). Below it are the latest build with its log, with
+  "Cancel the build" while it runs, and the "Waiting changes": while a build runs a new change waits there, where it
+  can be edited or removed until it starts.
+- **Settings** (`/projects/<id>/settings`): the page title (the project name unless changed) and a PNG or ICO icon of at
+  most 256 KB. Saving a live app builds them into the version being worked on in under a minute, without the builder, to
+  put live like any change; while a build runs, the update waits its turn. "Use the default icon" goes back to the
+  template's. Under "Manage" are "Take the app offline" while live and "Delete project".
 
 Every page sits in the app shell: the logo (back to the list), the business name, the navigation (Apps, Usage,
 Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal links in the footer. The
@@ -154,15 +160,15 @@ refresh and Back work. Different projects build at the same time; one project ru
 builds share its workspace. If the server is not running, the page says to start it with `make serve`. The production
 build (GitHub Pages) has no API and shows the "Coming soon" page instead, with no shell.
 
-| Status shown         | Server status     | Meaning                                                  |
-| -------------------- | ----------------- | -------------------------------------------------------- |
-| Describing           | `draft`           | Requests being written; no spec yet                      |
-| Writing the spec     | `spec_generating` | The spec is being written                                |
-| Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec)   |
-| Building             | `building`        | A build or change build is running                       |
-| Live                 | `live`            | The app is running at its preview link                   |
-| Build failed         | `failed`          | The last build failed or was canceled; request a change  |
-| Offline              | `stopped`         | The app was taken offline; a change build brings it back |
+| Status shown         | Server status     | Meaning                                                 |
+| -------------------- | ----------------- | ------------------------------------------------------- |
+| Describing           | `draft`           | Requests being written; no spec yet                     |
+| Writing the spec     | `spec_generating` | The spec is being written                               |
+| Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec)  |
+| Building             | `building`        | A build, a change build, a promote, or a discard runs   |
+| Live                 | `live`            | The app is running at its links                         |
+| Build failed         | `failed`          | The last build failed or was canceled; request a change |
+| Offline              | `stopped`         | Taken offline; putting a version live brings it back    |
 
 ## End-to-end runs
 
@@ -171,12 +177,13 @@ Each run creates a uniquely named project, drives it to `live`, checks `/` and `
 prints the events, elapsed time, and token usage, and then deletes the project (deployment,
 volumes, workspace, and rows) whether it passed or failed. It exits non-zero on failure.
 
-- `make e2e/fake`: no Claude usage. Starts its own server on `:3199` (task queue `schmeide-fake`)
-  with `SCHMEIDE_AGENT_CMD=server/e2e/fake-agent.sh`, which prints a fixed spec and makes one small
-  real commit (it retitles the page). Clone, the independent checks, deploy, and preview all run for
-  real. It builds two projects at once and queues a change on one of them while it builds
-  (`E2E_CONCURRENT=1`), and fails unless both were seen building together. About 75 seconds. Run
-  this one while developing; it needs only `make infra/up`, which it runs.
+- `make e2e/fake`: no Claude usage. Starts its own server on `:3199` (task queue `schmeide-fake`) with
+  `SCHMEIDE_AGENT_CMD=server/e2e/fake-agent.sh`, which prints a fixed spec and makes one small real commit (it retitles
+  the page). Clone, the independent checks, deploy, and preview all run for real. The project without the queued change
+  also saves a page title and icon, checks they reach staging and not production, promotes, and checks production has
+  them. It builds two projects at once and queues a change on one of them while it builds (`E2E_CONCURRENT=1`), and
+  fails unless both were seen building together. About 75 seconds. Run this one while developing; it needs only
+  `make infra/up`, which it runs.
 - `make e2e`: the same flow with Claude against the server from `make serve` (`:3100`). A few
   minutes and well under a dollar with `opus` so far. Run it sparingly.
 - `KEEP=1` on either leaves the app running and prints its preview URL, and the email and password
@@ -217,7 +224,9 @@ Print an invoice as a clean page I can save as a PDF
    4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, and
       records it (`builds.commit`). Then `make up` in the workspace for **staging** (Compose project
       `schmeide-<slug>_staging`, web port + 10000) and a wait for `/` and `/api/healthz` to answer
-      200: status `live`, with `stagingUrl` and `stagingCommit`. Then the build is promoted (below).
+      200: status `live`, with `stagingUrl` and `stagingCommit`. Production is left alone, except for an
+      app's first passed build: with nothing live to protect, it is promoted at once (below), so a new
+      app is live as soon as it is built.
 
    Every app runs as two copies, named in one place (`copyOf` in `server/src/services/resources.ts`):
 

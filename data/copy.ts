@@ -170,20 +170,21 @@ export const copy = {
   // Every hosted project, in the admin area.
   hosting: {
     intro:
-      "Every app across businesses, newest first. What each takes up is read from the container runtime and the disk as the page opens, and is not kept.",
+      "Every app across businesses, newest first. Each runs as two copies, live and being worked on; what each app takes up counts both, read from the container runtime and the disk as the page opens, and is not kept.",
     searchHint: "An app's name, or its business's name.",
     caption: "Hosted apps",
     columns: [
       "App",
       "Business",
       "State",
-      "Port",
+      "Ports",
       "Last build",
       "Containers",
       "Memory",
       "CPU",
       "Workspace",
     ],
+    ports: (live: number, staging: number) => `${live} live, ${staging} being worked on`,
     neverBuilt: "Never built",
     empty: "No app matches.",
   },
@@ -401,30 +402,57 @@ export const copy = {
     designer: {
       tabsLabel: "App or changes",
       appTitle: "Your app",
-      frameTitle: (name: string) => `${name}, your app as it is now`,
+      frameTitle: (name: string) => `${name}, the version being worked on`,
       widthLabel: "Width",
       width: { phone: "Phone", computer: "Computer" },
       reload: "Reload the app",
       reloadOnBuild: "Reload when a change is built",
-      newVersion: "A new version of your app is ready. Reloading returns it to its first screen.",
+      newVersion:
+        "The version being worked on has changed. Reloading returns it to its first screen.",
       reloadNew: "Reload",
       loading: "Loading your app…",
       frameHelp:
-        "If your app does not appear here, open it in its own tab with “Open your app”. Some apps cannot be shown inside another page.",
+        "If your app does not appear here, open it in its own tab with “Open the version being worked on”. Some apps cannot be shown inside another page.",
       building:
-        "A change is being built. This is your app as it is now; the new version replaces it when the build finishes.",
+        "A change is being built. This is the version being worked on as it is now; the change appears here when the build finishes. Your customers keep seeing your live app.",
       buildingNoApp:
         "Your app is being built. It appears here when the build finishes; this page updates by itself.",
       failed:
-        "The last change did not finish, so this is your app from before it. See what went wrong under “Latest change”.",
+        "The last change did not finish, so this is the version being worked on from before it. See what went wrong under “Latest change”.",
       offline:
-        "Your app is offline, so there is nothing to show here. Request a change to build it and bring it back online.",
-      goesLive:
-        "Your change goes live as soon as it is built. There is no step to look at it first.",
+        "Your app is offline, so there is nothing to show here. To bring it back, put a version live: this one, when it is offered below, or a change you request.",
+      buildsToStaging:
+        "Your change is built into the version being worked on, for you to look at first. Your customers see it once you put it live.",
       noChanges: "No changes yet. The first change you request shows here while it is built.",
     },
     appBuildingHint:
-      "A change is being built. Your app stays as it is until the build finishes; this page updates by itself.",
+      "A change is being built. Your live app stays as it is; this page updates by itself.",
+    // The two copies of an app: the version being worked on (staging), and the live app its
+    // customers use (production).
+    release: {
+      showing:
+        "This is the version being worked on. It keeps its own information, separate from your live app's: nothing entered here reaches your customers.",
+      same: "Your customers see this same version.",
+      ahead: (count: number) =>
+        count === 1
+          ? "It has 1 change your customers do not see yet."
+          : `It has ${count} changes your customers do not see yet.`,
+      promote: "Put this version live",
+      promoteHint:
+        "Your live app then runs this version. The information your customers entered is kept, and updated to fit the new version.",
+      promoting: "Starting…",
+      discard: "Throw these changes away",
+      discardConfirm: (count: number) =>
+        `Throw away ${count === 1 ? "the change" : `the ${count} changes`} your customers do not see yet? The version being worked on goes back to what your customers see, and its own information is emptied. Your live app and its information are not touched.`,
+      discardYes: "Yes, throw them away",
+      discardNo: "Keep them",
+      discarding: "Starting…",
+      noDiscardYet:
+        "Your app went live before Schmeide kept track of versions, so these changes cannot be thrown away yet. Once you put this version live, later changes can be.",
+      promoteRequest: "Put the version being worked on live.",
+      discardRequest: "Throw away the changes your customers did not see yet.",
+      askedBy: (name: string) => `Asked for by ${name}.`,
+    },
     appFailedHint:
       "The last change did not finish. See what went wrong under “Latest change”, then request a change to try again.",
     retryTitle: "Try again",
@@ -503,7 +531,8 @@ export const copy = {
       deploy: "Putting your app online.",
       error: "Something went wrong.",
     },
-    open: "Open your app",
+    openStaging: "Open the version being worked on",
+    openLive: "Open your live app",
     opensInNewTab: "(opens in a new tab)",
     changeTitleForm: "Request a change",
     changeIntro:
@@ -542,12 +571,12 @@ export const copy = {
       notRecorded: "Not recorded",
       partlyRecorded: "Earlier runs were not timed and are left out.",
       explained:
-        "Building time runs from the start to the end of each build, checks and publishing included: the time you waited. A change waiting its turn starts counting when it starts. Builder time is how long the AI itself was working, on builds, the spec, and questions.",
+        "Building time runs from the start to the end of each build, checks and publishing included, and of each time you put a version live or throw changes away: the time you waited. A change waiting its turn starts counting when it starts. Builder time is how long the AI itself was working, on builds, the spec, and questions.",
     },
     site: {
       title: "Page title and icon",
       intro:
-        "The name shown on the browser tab, and the small picture beside it. Saving publishes your app again with them; this does not use the builder.",
+        "The name shown on the browser tab, and the small picture beside it. Saving builds them into the version being worked on, without the builder; put it live to show them to your customers.",
       titleLabel: "Page title",
       iconLabel: "Icon (a PNG or ICO file, up to 256 KB)",
       iconSet: "Your app uses your own icon. Choose a new file to replace it.",
@@ -563,7 +592,7 @@ export const copy = {
     stopping: "Stopping…",
     delete: "Delete project",
     deleteConfirm: (name: string) =>
-      `Delete “${name}”? This removes the running app and everything stored in it, its preview link, the code that was built, the spec, and the build history. This cannot be undone.`,
+      `Delete “${name}”? This removes your live app and the version being worked on, everything stored in both, their links, the code that was built, the spec, and the build history. This cannot be undone.`,
     deleteYes: "Yes, delete it",
     deleteNo: "Keep it",
     deleting: "Deleting… this can take a few seconds.",
@@ -627,7 +656,7 @@ export const copy = {
     },
     building: {
       label: "Building",
-      hint: "Your app is being built. This can take several minutes; this page updates by itself.",
+      hint: "Your app is being built. This can take several minutes; this page updates by itself. This first version goes live as soon as it is built, since nothing is live yet. After that, each change is built for you to look at first, and goes live when you put it live.",
     },
     live: { label: "Live", hint: "Your app is live. Open it, or request a change." },
     failed: {
@@ -636,7 +665,7 @@ export const copy = {
     },
     stopped: {
       label: "Offline",
-      hint: "Your app is offline. Request a change to build it and bring it back online.",
+      hint: "Your app is offline. Put a version live to bring it back.",
     },
   },
   errors: {

@@ -15,7 +15,7 @@ import {
   type adminListSchema,
 } from "../db/schema.ts";
 import { NotFoundError } from "./errors.ts";
-import { readResources, type ResourceReader } from "./resources.ts";
+import { readResources, STAGING_PORT_OFFSET, type ResourceReader } from "./resources.ts";
 
 type ListQuery = z.infer<typeof adminListSchema>;
 
@@ -162,6 +162,7 @@ export const listHostedProjects = async (db: Db, query: ListQuery) => {
       slug: projects.slug,
       status: projects.status,
       webPort: projects.webPort,
+      stagingWebPort: sql`${projects.webPort} + ${STAGING_PORT_OFFSET}`.mapWith(Number),
       business: { id: tenants.id, name: tenants.name },
       lastBuild: { kind: last.kind, status: last.status, startedAt: last.startedAt },
     })

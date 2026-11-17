@@ -76,6 +76,8 @@ describe("summaryPrompt", () => {
     const prompt = summaryPrompt(input({ outcome: { status: "passed", error: null } }), "m");
     expect(prompt).toContain("two or three sentences");
     expect(prompt).toContain("The build finished and passed.");
+    // A passed change waits on the version being worked on until the person puts it live.
+    expect(prompt).toContain("Their customers do not see it until an event says it is live");
   });
 
   it("asks a failed build to say what went wrong without guessing, and fences the error too", () => {

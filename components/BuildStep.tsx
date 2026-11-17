@@ -74,8 +74,22 @@ function useBuildSummaries(build: Build): readonly BuildSummary[] {
   return data ?? [];
 }
 
+// What a build was asked for, in words: the person's own for a change, ours for the rest.
+const REQUESTS: Readonly<Partial<Record<Build["kind"], string>>> = {
+  site: copy.project.siteChangeRequest,
+  promote: copy.project.release.promoteRequest,
+  discard: copy.project.release.discardRequest,
+};
+
+type Props = {
+  readonly build: Build;
+  readonly title: string;
+  // Who asked for it, for a build a person asked for by name (putting live, throwing away).
+  readonly by?: string | null;
+};
+
 // `title` differs by place: a numbered setup step, or the latest change of a running app.
-export function BuildStep({ build, title }: { readonly build: Build; readonly title: string }) {
+export function BuildStep({ build, title, by = null }: Props) {
   const events = useBuildEvents(build);
   const summaries = useBuildSummaries(build);
   const running = build.status === "running";
@@ -98,7 +112,8 @@ export function BuildStep({ build, title }: { readonly build: Build; readonly ti
       {build.kind !== "initial" && (
         <p>
           <span className={stepStyles.muted}>{copy.project.changeRequestLabel}</span>{" "}
-          {build.kind === "site" ? copy.project.siteChangeRequest : build.request}
+          {REQUESTS[build.kind] ?? build.request}
+          {by && <span className={stepStyles.muted}> {copy.project.release.askedBy(by)}</span>}
         </p>
       )}
       <p className={styles.summary} data-status={build.status}>

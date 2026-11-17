@@ -6,6 +6,7 @@ import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
 import { Link } from "./Link";
 import { QueuedChanges } from "./QueuedChanges";
+import { Release } from "./Release";
 import { Spec } from "./Spec";
 import { StopButton } from "./StopButton";
 import { UsageSummary } from "./UsageSummary";
@@ -24,7 +25,9 @@ type Props = {
   readonly view: DesignerView;
   readonly project: Project;
   readonly latestBuild: Build | null;
+  readonly latestBuildBy: string | null;
   readonly queued: readonly Build[];
+  readonly unreleased: number;
   readonly changes: readonly BuiltChange[];
   readonly usage: Usage;
   readonly time: TimeTotals;
@@ -44,7 +47,9 @@ export function Designer({
   view,
   project,
   latestBuild,
+  latestBuildBy,
   queued,
+  unreleased,
   changes,
   usage,
   time,
@@ -76,21 +81,32 @@ export function Designer({
 
         <section aria-labelledby="your-app" className={`${stepStyles.step} ${styles.app}`}>
           <h2 id="your-app">{copy.project.designer.appTitle}</h2>
-          {project.previewUrl ? (
+          {(project.stagingUrl ?? project.previewUrl) ? (
             <>
               {note && <p>{note}</p>}
+              <Release project={project} unreleased={unreleased} />
               <AppFrame
                 name={project.name}
-                url={project.previewUrl}
-                version={latestBuild?.status === "passed" ? latestBuild.id : null}
+                stagingUrl={project.stagingUrl}
+                liveUrl={project.previewUrl}
+                // A new version is a passed build that changed staging: every kind but a promote,
+                // which changes only the live app. A discard returns staging to the live version.
+                version={
+                  latestBuild?.status === "passed" && latestBuild.kind !== "promote"
+                    ? latestBuild.id
+                    : null
+                }
               />
             </>
           ) : (
-            <p>
-              {project.status === "building"
-                ? copy.project.designer.buildingNoApp
-                : copy.project.designer.offline}
-            </p>
+            <>
+              <p>
+                {project.status === "building"
+                  ? copy.project.designer.buildingNoApp
+                  : copy.project.designer.offline}
+              </p>
+              <Release project={project} unreleased={unreleased} />
+            </>
           )}
         </section>
 
@@ -101,7 +117,7 @@ export function Designer({
               project={project}
               request={request}
               onRequestChange={onRequestChange}
-              note={copy.project.designer.goesLive}
+              note={copy.project.designer.buildsToStaging}
             />
             {noChanges && <p className={stepStyles.muted}>{copy.project.designer.noChanges}</p>}
           </section>
@@ -109,6 +125,7 @@ export function Designer({
             <BuildStep
               key={latestBuild.id}
               build={latestBuild}
+              by={latestBuildBy}
               title={
                 latestBuild.kind === "initial"
                   ? copy.project.firstBuildTitle

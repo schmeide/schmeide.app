@@ -4,14 +4,15 @@ import userEvent from "@testing-library/user-event";
 import { copy } from "../../data/copy";
 import { AppFrame } from "../AppFrame";
 
-const URL = "http://localhost:8100";
+// The frame shows the version being worked on (staging).
+const URL = "http://localhost:18100";
 const text = copy.project.designer;
 const frame = () => screen.getByTitle(text.frameTitle("Invoices"));
 const toggle = () => screen.getByRole("checkbox", { name: text.reloadOnBuild });
 const notice = () => screen.queryByText(text.newVersion);
 
 const frameAt = (version: number | null) => (
-  <AppFrame name="Invoices" url={URL} version={version} />
+  <AppFrame name="Invoices" stagingUrl={URL} liveUrl="http://localhost:8100" version={version} />
 );
 
 describe("AppFrame", () => {

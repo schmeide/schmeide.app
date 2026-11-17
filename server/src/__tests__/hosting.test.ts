@@ -81,6 +81,7 @@ describe("listing projects", () => {
         slug: project.slug,
         status: "draft",
         webPort: project.webPort,
+        stagingWebPort: project.webPort + 10_000,
         business: { id: owner.tenantId, name: "Olive’s business" },
         lastBuild: { kind: "change", status: "failed", startedAt: expect.any(String) },
       },

@@ -16,7 +16,9 @@ type Props = {
   readonly view: ProjectView;
   readonly project: Project;
   readonly latestBuild: Build | null;
+  readonly latestBuildBy: string | null;
   readonly queued: readonly Build[];
+  readonly unreleased: number;
   readonly changes: readonly BuiltChange[];
   readonly hasIcon: boolean;
   readonly usage: Usage;
@@ -32,7 +34,9 @@ export function ProjectWorkspace({
   view,
   project,
   latestBuild,
+  latestBuildBy,
   queued,
+  unreleased,
   changes,
   hasIcon,
   usage,
@@ -71,7 +75,9 @@ export function ProjectWorkspace({
           view={designerView}
           project={project}
           latestBuild={latestBuild}
+          latestBuildBy={latestBuildBy}
           queued={queued}
+          unreleased={unreleased}
           changes={changes}
           usage={usage}
           time={time}
