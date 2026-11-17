@@ -24,6 +24,7 @@ import type {
   stopWorkflow,
 } from "../temporal/workflows.ts";
 import { appendEvent, finishBuild, getBuild } from "./builds.ts";
+import { assertActive, businessSuspended } from "./businesses.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
@@ -279,6 +280,7 @@ export const generateSpec = async (
   id: number
 ): Promise<Project> => {
   const current = await findProject(db, id);
+  await assertActive(db, current.tenantId);
   // A project is described by typed requests, by the interview's plan, or by both.
   const [planned] = await db
     .select({ id: planItems.id })
@@ -321,7 +323,14 @@ const hasRunningBuild = async (tx: Db, projectId: number): Promise<boolean> =>
 
 // Called inside the transaction that marks the build running, so a failed start rolls it back. A
 // repeated start (an activity retried after its first start went through) leaves the run alone.
-const startWorkflow = async ({ workflows, taskQueue }: Deps, build: Build): Promise<void> => {
+// Every build starts here, so a suspended business's never does, whoever asked.
+const startWorkflow = async (
+  { workflows, taskQueue }: Deps,
+  tx: Db,
+  project: Pick<Project, "tenantId">,
+  build: Build
+): Promise<void> => {
+  await assertActive(tx, project.tenantId);
   try {
     await workflows.start<typeof buildWorkflow>("buildWorkflow", {
       taskQueue,
@@ -347,7 +356,7 @@ const startBuild = async (
     .insert(builds)
     .values({ projectId: id, kind, request: request(project) })
     .returning();
-  await startWorkflow(deps, build);
+  await startWorkflow(deps, tx, project, build);
   return { project, build };
 };
 
@@ -447,12 +456,14 @@ export const setSite = (
 
 // When a build passes: starts the project's oldest queued change. Safe to repeat (an activity retry,
 // or a restart replaying it): it does nothing while a build runs or the project is not live, so a
-// failed or canceled build leaves the queue waiting until a later build passes.
+// failed or canceled build leaves the queue waiting until a later build passes. Nor while its
+// business is suspended: the queue waits, as after a cancel.
 export const startNextChange = (deps: Deps, projectId: number): Promise<Build | undefined> =>
   deps.db.transaction(async (raw) => {
     const tx = raw as unknown as Db;
     const project = await lockProject(tx, projectId);
     if (project.status !== "live" || (await hasRunningBuild(tx, projectId))) return undefined;
+    if (await businessSuspended(tx, project.tenantId)) return undefined;
     const [next] = await tx
       .select({ id: builds.id })
       .from(builds)
@@ -466,7 +477,7 @@ export const startNextChange = (deps: Deps, projectId: number): Promise<Build | 
       .set({ status: "running", startedAt: new Date() })
       .where(eq(builds.id, next.id))
       .returning();
-    await startWorkflow(deps, build);
+    await startWorkflow(deps, tx, project, build);
     return build;
   });
 

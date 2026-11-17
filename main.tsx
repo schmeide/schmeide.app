@@ -19,12 +19,14 @@ if (!root) throw new Error("index.html is missing #root");
 
 // No retries: an unreachable API (the static site, or the server not started) should say so at once.
 // A call that answers "signed out" (the session ended, or the approval was removed) asks the
-// server again who this is, which sends the person to the sign-in page.
+// server again who this is, which sends the person to the sign-in page. One that answers
+// "suspended" does too, so the business's pages give way to the suspended page.
 const queryClient: QueryClient = new QueryClient({
   defaultOptions: { queries: { retry: false } },
   queryCache: new QueryCache({
     onError: (error) => {
-      if (classifyError(error) === "signedOut")
+      const problem = classifyError(error);
+      if (problem === "signedOut" || problem === "suspended")
         void queryClient.invalidateQueries({ queryKey: [["session"]] });
     },
   }),

@@ -88,6 +88,7 @@ describe("listing businesses", () => {
       id: owner.tenantId,
       name: "Olive’s business",
       slug: expect.any(String),
+      state: "active",
       members: 2,
       projects: 1,
       createdAt: expect.any(String),
@@ -146,6 +147,9 @@ describe("one business", () => {
         id: owner.tenantId,
         name: "Olive’s business",
         slug: expect.any(String),
+        state: "active",
+        stateReason: null,
+        stateChangedAt: null,
         createdAt: expect.any(String),
       },
       members: [
@@ -184,6 +188,7 @@ describe("listing people", () => {
       email: owner.email,
       approved: true,
       admin: false,
+      hasAccount: true,
       businesses: [{ id: owner.tenantId, name: "Olive’s business" }],
     });
     expect(await find(removed.email)).toEqual([expect.objectContaining({ approved: false })]);

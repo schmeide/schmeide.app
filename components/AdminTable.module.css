@@ -143,3 +143,12 @@
 .period label {
   font-weight: 600;
 }
+
+/* An action behind a disclosure, above a list or in a page header. */
+.action {
+  margin-top: var(--space-m);
+}
+
+.action summary {
+  cursor: pointer;
+}

@@ -7,10 +7,11 @@ import { RoutePage } from "./RoutePage";
 import { RouteProblem } from "./RouteProblem";
 import { useSession } from "./SessionProvider";
 import { Shell } from "./Shell";
+import { SuspendedPage } from "./SuspendedPage";
 
 // Shows the page the address names inside the shell, after the route guard has had its say.
 export function Routes({ banner }: { readonly banner?: ReactNode }) {
-  const { session } = useSession();
+  const { session, business } = useSession();
   const location = useSyncExternalStore(subscribe, currentLocation);
   const [pathname, query = ""] = location.split("?");
   const search = query && `?${query}`;
@@ -49,7 +50,9 @@ export function Routes({ banner }: { readonly banner?: ReactNode }) {
     <Shell current={match?.route.name ?? null} banner={banner}>
       {!match ? (
         <RouteProblem kind="notFound" />
-      ) : redirect ? null : (
+      ) : redirect ? null : match.route.access === "business" && business?.suspended ? (
+        <SuspendedPage />
+      ) : (
         <RoutePage name={match.route.name} params={match.params} />
       )}
     </Shell>

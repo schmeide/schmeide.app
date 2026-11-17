@@ -19,6 +19,7 @@ export type Question = Interview["questions"][number];
 export type Answer = NonNullable<Question["answer"]>;
 export type AuditEntry = Outputs["admin"]["audit"]["list"]["entries"][number];
 export type BusinessEntry = Outputs["admin"]["businesses"]["list"]["entries"][number];
+export type BusinessPage = Outputs["admin"]["businesses"]["get"];
 export type PersonEntry = Outputs["admin"]["people"]["list"]["entries"][number];
 export type HostedProject = Outputs["admin"]["projects"]["list"]["entries"][number];
 export type ProjectResources = Outputs["admin"]["projects"]["resources"][number];

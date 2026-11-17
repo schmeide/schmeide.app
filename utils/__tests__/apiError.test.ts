@@ -22,6 +22,9 @@ describe("classifyError", () => {
     expect(classifyError(trpcError("FORBIDDEN", "not a member"))).toBe("forbidden");
     expect(classifyError(trpcError("BAD_REQUEST", "too long"))).toBe("badRequest");
     expect(classifyError(trpcError("SERVICE_UNAVAILABLE", "no model"))).toBe("unavailable");
+    expect(classifyError(trpcError("PRECONDITION_FAILED", "This business is suspended"))).toBe(
+      "suspended"
+    );
     expect(classifyError(trpcError("INTERNAL_SERVER_ERROR", "boom"))).toBe("other");
   });
 });

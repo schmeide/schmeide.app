@@ -1,12 +1,18 @@
 import { initTRPC } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import superjson from "superjson";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
 import { adminActions, tenants, users } from "../db/schema.ts";
 import { adminMutation, appRouter, type AppContext, type Context } from "../router.ts";
-import { acceptInvite, approveEmail, grantAdmin } from "../services/access.ts";
+import {
+  acceptInvite,
+  approveAccess,
+  approveEmail,
+  grantAdmin,
+  removeAccess,
+} from "../services/access.ts";
 import { COMMAND_LINE, withAudit } from "../services/audit.ts";
 import {
   aSignedInAdmin,
@@ -55,7 +61,19 @@ type Walkable = {
 // needs an entry here that makes it succeed.
 const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
   const owner = await aSignedInPerson(app, deps);
-  return { "admin.impersonation.start": { email: owner.email, reason: "audit walk" } };
+  const leaving = await aSignedInPerson(app, deps);
+  const teammate = await aSignedInPerson(app, deps, { joins: owner.tenantId });
+  const reason = "audit walk";
+  return {
+    "admin.impersonation.start": { email: owner.email, reason },
+    "admin.access.approve": { email: anEmail(), reason },
+    "admin.access.remove": { email: leaving.email, reason },
+    "admin.businesses.create": { name: "Audit walk", ownerEmail: anEmail(), reason },
+    "admin.businesses.removeMember": { id: owner.tenantId, email: teammate.email, reason },
+    // Walked in the router's order: suspended first, then restored.
+    "admin.businesses.suspend": { id: owner.tenantId, reason },
+    "admin.businesses.restore": { id: owner.tenantId, reason },
+  };
 };
 
 // Calls every admin mutation in `router` as a signed-in admin and returns the paths that left no
@@ -201,6 +219,28 @@ describe("granting the admin role from the command line", () => {
     expect(rows).toEqual([
       expect.objectContaining({ adminId: null, adminLabel: COMMAND_LINE.label, detail: email }),
     ]);
+  });
+});
+
+describe("approving and removing from the command line", () => {
+  it("is recorded with the command line as the admin, through the screen's own functions", async () => {
+    const email = anEmail();
+    // What `make access/approve` and `make access/remove` run (cli/access.ts).
+    const approved = await withAudit(db, COMMAND_LINE, "access.approve", (tx, audit) =>
+      approveAccess(tx, audit, email)
+    );
+    await withAudit(db, COMMAND_LINE, "access.remove", (tx, audit) =>
+      removeAccess(tx, audit, email)
+    );
+    const rows = await db
+      .select()
+      .from(adminActions)
+      .where(and(isNull(adminActions.adminId), eq(adminActions.detail, email)));
+    expect(rows.map(({ action, adminLabel }) => [action, adminLabel])).toEqual([
+      ["access.approve", COMMAND_LINE.label],
+      ["access.remove", COMMAND_LINE.label],
+    ]);
+    expect(JSON.stringify(rows)).not.toContain(approved.token);
   });
 });
 

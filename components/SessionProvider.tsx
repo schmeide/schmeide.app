@@ -84,8 +84,10 @@ export function SessionProvider({
           ? "unreachable"
           : "loading",
       session,
+      // As the server picks when none is chosen: the first that is not suspended.
       business:
         session.businesses.find((business) => business.id === businessId) ??
+        session.businesses.find((business) => !business.suspended) ??
         session.businesses[0] ??
         null,
       // What is on screen belongs to the business being left, so it is all loaded again.

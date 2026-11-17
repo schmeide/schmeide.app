@@ -8,6 +8,7 @@ import { approveEmail, endImpersonationsBy, removeApproval } from "../services/a
 import { AUTH_PATHS_WHILE_IMPERSONATING, IMPERSONATION_SECONDS } from "../services/auth.ts";
 import { createProject } from "../services/projects.ts";
 import {
+  adminPaths,
   aSignedInAdmin,
   aSignedInPerson,
   callApi,
@@ -402,6 +403,15 @@ describe("while viewing as a person", () => {
     expect(read.json().user.email).toBe(owner.email);
     // The person still signs in with the same password: nothing was changed.
     expect((await signIn(app, owner.email)).status).toBe(200);
+  });
+
+  it("answers every admin procedure as missing, so no admin write is made from inside a view", async () => {
+    const { cookie } = await viewing();
+    expect(adminPaths).toEqual(
+      expect.arrayContaining(["admin.whoami", "admin.businesses.suspend", "admin.access.remove"])
+    );
+    for (const path of adminPaths)
+      expect([path, await answer(path, cookie)]).toEqual([path, noProcedure(path)]);
   });
 
   it("cannot be claimed by a person marking their own session", async () => {

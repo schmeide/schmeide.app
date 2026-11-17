@@ -15,7 +15,7 @@ import { join, relative } from "node:path";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MockActivityEnvironment } from "@temporalio/testing";
 import { eq } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
 import {
   buildFiles,
@@ -23,6 +23,7 @@ import {
   files,
   projectIcons,
   projects,
+  tenants,
   usage,
   type FileRow,
 } from "../../db/schema.ts";
@@ -566,6 +567,78 @@ describe("files attached to a change", () => {
     expect(calls[0].options.additionalDirectories).toBeUndefined();
     expect(calls[0].prompt).not.toContain("attached");
     expect(existsSync(join(dataDir, "attachments"))).toBe(false);
+  });
+});
+
+describe("a suspended business", () => {
+  // A build of a project whose business is suspended after the build was started.
+  const suspendedBuild = async () => {
+    const [tenant] = await db
+      .insert(tenants)
+      .values({ slug: `s-${randomUUID()}`, name: "Suspended" })
+      .returning();
+    const project = await createProject(db, { name: `s ${randomUUID()}`, tenantId: tenant.id });
+    await transition(db, project.id, ["draft"], { status: "building", spec: "## Features" });
+    const [build] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "change", request: "x", status: "running" })
+      .returning();
+    await db
+      .update(tenants)
+      .set({ state: "suspended", stateReason: "test", stateChangedAt: new Date() })
+      .where(eq(tenants.id, tenant.id));
+    return { tenant, project, build };
+  };
+
+  it("starts no further step of a build already running, and no agent run", async () => {
+    const { config } = setup();
+    const { build } = await suspendedBuild();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    for (const step of [
+      () => env.run(activities.prepareWorkspace, build.id),
+      () => env.run(activities.runAgent, { buildId: build.id }),
+      () => env.run(activities.runChecks, build.id),
+      () => env.run(activities.applySite, build.id),
+      () => env.run(activities.deploy, build.id),
+    ])
+      await expect(step()).rejects.toThrow("This business is suspended");
+    expect(calls).toEqual([]);
+    // Recording how the build ended still works, so it ends as failed, like a cancel.
+    await env.run(activities.finishBuild, build.id, "This business is suspended");
+    const [after] = await db.select().from(builds).where(eq(builds.id, build.id));
+    expect(after.status).toBe("failed");
+  });
+
+  it("does not start the next queued change when a build passes", async () => {
+    const { config } = setup();
+    const { project, build } = await suspendedBuild();
+    const [queued] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "change", request: "next", status: "queued" })
+      .returning();
+    await db.update(projects).set({ status: "live" }).where(eq(projects.id, project.id));
+    const start = vi.fn();
+    const activities = createActivities({ ...deps, workflows: { start } as never }, config);
+    await new MockActivityEnvironment().run(activities.finishBuild, build.id);
+    expect(start).not.toHaveBeenCalled();
+    const [after] = await db.select().from(builds).where(eq(builds.id, queued.id));
+    expect(after.status).toBe("queued");
+  });
+
+  it("writes no spec, and the project goes back to describing", async () => {
+    const { config } = setup();
+    const { project } = await suspendedBuild();
+    await db.update(projects).set({ status: "spec_generating" }).where(eq(projects.id, project.id));
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    await expect(
+      new MockActivityEnvironment().run(activities.generateSpec, project.id)
+    ).rejects.toThrow("This business is suspended");
+    expect(calls).toEqual([]);
+    const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(after.status).toBe("draft");
   });
 });
 

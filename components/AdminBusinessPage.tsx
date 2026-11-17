@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { copy } from "../data/copy";
-import { useTRPC } from "../trpc";
+import { useTRPC, useTRPCClient } from "../trpc";
 import {
   describeFigure,
   formatBytes,
@@ -10,6 +10,7 @@ import {
   sumResources,
 } from "../utils/resources";
 import { NO_USAGE } from "../utils/usage";
+import { AdminActionForm } from "./AdminActionForm";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
 import { UsageSummary } from "./UsageSummary";
@@ -19,10 +20,12 @@ import styles from "./AdminTable.module.css";
 
 const day = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 
-// One business: who is in it, with a way to view the app as each customer, and what it has made.
-// Later admin tickets add their sections here.
+// One business: its state, who is in it, and what it has made. It is suspended or restored from the
+// header. A member's row offers viewing the app as them (a customer only) and removing them, each
+// with a reason.
 export function AdminBusinessPage({ id }: { readonly id: number }) {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const query = useQuery(trpc.admin.businesses.get.queryOptions({ id }));
   const ids = query.data?.projects.map((project) => project.id).slice(0, 100) ?? [];
   const resources = useQuery(
@@ -41,6 +44,7 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
     );
 
   const { business, members, projects } = query.data;
+  const suspended = business.state === "suspended";
   // Over more than the hundred apps read at once, the sums are unknown rather than short.
   const totals =
     projects.length === 0 || resources.data
@@ -71,7 +75,44 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
               </time>
             </dd>
           </div>
+          <div>
+            <dt>{copy.business.state}</dt>
+            <dd>
+              {copy.business.states[business.state]}
+              {business.stateReason && business.stateChangedAt && (
+                <span className={styles.stacked}>
+                  {copy.business.stateWhy(
+                    business.stateReason,
+                    day.format(business.stateChangedAt)
+                  )}
+                </span>
+              )}
+            </dd>
+          </div>
         </dl>
+        {suspended ? (
+          <details key="restore" className={styles.action}>
+            <summary>{copy.business.restore}</summary>
+            <AdminActionForm
+              hint={copy.business.restoreHint}
+              action={copy.business.restoreAction}
+              run={({ reason }) =>
+                client.admin.businesses.restore.mutate({ id, reason }).then(() => null)
+              }
+            />
+          </details>
+        ) : (
+          <details key="suspend" className={styles.action}>
+            <summary>{copy.business.suspend}</summary>
+            <AdminActionForm
+              hint={copy.business.suspendHint}
+              action={copy.business.suspendAction}
+              run={({ reason }) =>
+                client.admin.businesses.suspend.mutate({ id, reason }).then(() => null)
+              }
+            />
+          </details>
+        )}
       </header>
 
       <section aria-labelledby="business-members" className={styles.section}>
@@ -87,6 +128,18 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
                 <td>{copy.business.roles[member.role]}</td>
                 <td>
                   <ViewAsDisclosure name={member.name} email={member.email} admin={member.admin} />
+                  <details>
+                    <summary>{copy.business.removeMember(member.name)}</summary>
+                    <AdminActionForm
+                      hint={copy.business.removeMemberHint}
+                      action={copy.business.removeMemberAction}
+                      run={({ reason }) =>
+                        client.admin.businesses.removeMember
+                          .mutate({ id, email: member.email, reason })
+                          .then(() => null)
+                      }
+                    />
+                  </details>
                 </td>
               </tr>
             ))}
