@@ -171,6 +171,7 @@ export const projectServer = (state: {
   project: Project;
   latestBuild?: Build | null;
   queued?: readonly Build[];
+  changes?: readonly Pick<Build, "id" | "request" | "finishedAt">[];
   hasIcon?: boolean;
   hasBeenLive?: boolean;
   events?: BuildEvent[];
@@ -183,6 +184,7 @@ export const projectServer = (state: {
     project: state.project,
     latestBuild: state.latestBuild ?? null,
     queued: state.queued ?? [],
+    changes: state.changes ?? [],
     hasIcon: state.hasIcon ?? false,
     hasBeenLive: state.hasBeenLive ?? false,
     usage: state.usage ?? noUsage,

@@ -72,6 +72,7 @@ describe("App", () => {
           latestBuild: null,
           queued: [],
           hasIcon: false,
+          changes: [],
           hasBeenLive: false,
           usage: {},
         }),

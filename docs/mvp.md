@@ -117,7 +117,9 @@ first and removes the running app, its data, the code, the spec, and the build h
 taken offline. It has three views, each with its own address:
 
 - **Overview** (`/projects/<id>`): "Open your app" opens the preview in a new tab, "Request a change" leads to
-  Changes, and below are token usage with the reported cost and the spec the app was built from.
+  Changes, and below are token usage with the reported cost and "The spec your app started from". That spec is
+  never rewritten: the changes built since are listed beside it, oldest first, and a change build is given the
+  spec plus those changes, so the builder is not told something the code no longer does.
 - **Changes** (`/projects/<id>/changes`): "Request a change" starts a change build (also the way to retry a failed
   change or bring an offline app back). Below it are the latest build with its log, with "Cancel the build" while
   it runs, and the "Waiting changes": while a build runs a new change waits there, where it can be edited or removed

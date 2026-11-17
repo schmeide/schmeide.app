@@ -1,5 +1,5 @@
 import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
-import { and, asc, desc, eq, inArray, like, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, like, lt, ne, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
@@ -106,6 +106,26 @@ export type UsageTotals = {
   readonly costUsd: number;
 };
 
+export type BuiltChange = Pick<Build, "id" | "request" | "finishedAt">;
+
+export const builtChanges = (
+  db: Db,
+  projectId: number,
+  beforeBuildId?: number
+): Promise<readonly BuiltChange[]> =>
+  db
+    .select({ id: builds.id, request: builds.request, finishedAt: builds.finishedAt })
+    .from(builds)
+    .where(
+      and(
+        eq(builds.projectId, projectId),
+        eq(builds.kind, "change"),
+        eq(builds.status, "passed"),
+        beforeBuildId === undefined ? undefined : lt(builds.id, beforeBuildId)
+      )
+    )
+    .orderBy(asc(builds.id));
+
 export const getProject = async (
   db: Db,
   id: number
@@ -113,6 +133,7 @@ export const getProject = async (
   project: Project;
   latestBuild: Build | null;
   queued: readonly Build[];
+  changes: readonly BuiltChange[];
   hasIcon: boolean;
   // A build of this project has passed, so the app has been live at least once.
   hasBeenLive: boolean;
@@ -153,6 +174,7 @@ export const getProject = async (
     project,
     latestBuild: latestBuild ?? null,
     queued,
+    changes: await builtChanges(db, id),
     hasIcon: Boolean(icon),
     hasBeenLive: Boolean(passed),
     usage: totals,

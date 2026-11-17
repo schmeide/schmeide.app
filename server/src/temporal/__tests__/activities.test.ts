@@ -14,6 +14,7 @@ import { createProject, transition } from "../../services/projects.ts";
 import {
   AGENT_ALLOWED_TOOLS,
   GIT_CONFIG,
+  buildPrompt,
   createActivities,
   gitConfigFile,
   specPrompt,
@@ -147,6 +148,26 @@ describe("specPrompt", () => {
   });
 });
 
+describe("buildPrompt", () => {
+  it("gives a change the first spec and every change built since, oldest first", () => {
+    const prompt = buildPrompt("change", "## Features\n- Invoices", "Add a due date", [
+      "Add client phone numbers",
+      "Send invoices by email",
+    ]);
+
+    expect(prompt).toContain("Spec the app was first built from");
+    expect(prompt).toMatch(
+      /Changes built since then, oldest first[^]*1\. Add client phone numbers\n2\. Send invoices by email[^]*Change request:\n\nAdd a due date/
+    );
+  });
+
+  it("says nothing about earlier changes when this is the first one", () => {
+    expect(buildPrompt("change", "## Features", "Add a due date", [])).not.toContain(
+      "Changes built since"
+    );
+  });
+});
+
 describe("build activities", () => {
   it("prepares a fresh one-commit workspace from the template, then reuses it", async () => {
     const { config, dataDir } = setup();
@@ -258,6 +279,33 @@ describe("build activities", () => {
     expect(await kindsOf(drafted.id)).toEqual(["spec"]);
     expect(await kindsOf(initial.project.id)).toEqual(["initial"]);
     expect(await kindsOf(change.project.id)).toEqual(["change", "change"]);
+  });
+
+  it("tells the agent about the changes already built, and not about failed or waiting ones", async () => {
+    const { config } = setup();
+    const { project } = await newBuild();
+    const rows = await db
+      .insert(builds)
+      .values([
+        { projectId: project.id, kind: "change", request: "built one", status: "passed" },
+        { projectId: project.id, kind: "change", request: "broke", status: "failed" },
+        { projectId: project.id, kind: "site", request: "page icon", status: "passed" },
+        { projectId: project.id, kind: "change", request: "built two", status: "passed" },
+        { projectId: project.id, kind: "change", request: "this one", status: "running" },
+        { projectId: project.id, kind: "change", request: "waiting", status: "queued" },
+      ])
+      .returning();
+    const current = rows[4];
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, current.id);
+
+    await env.run(activities.runAgent, { buildId: current.id });
+
+    expect(calls[0].prompt).toContain("1. built one\n2. built two");
+    expect(calls[0].prompt).toContain("Change request:\n\nthis one");
+    expect(calls[0].prompt).not.toMatch(/broke|waiting|page icon/);
   });
 
   it("fails the activity when the agent run does not succeed", async () => {
