@@ -27,6 +27,12 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
         <>
           <p className={styles.muted}>{copy.project.specIntro}</p>
           <Spec source={project.spec} />
+          {project.need && (
+            <details>
+              <summary>{copy.project.showNeed}</summary>
+              <p className={styles.need}>{project.need}</p>
+            </details>
+          )}
           {!session.canBuild && <p>{copy.project.buildsOff}</p>}
           <div className={styles.actions}>
             {session.canBuild && (

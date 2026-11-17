@@ -608,6 +608,7 @@ export const copy = {
       "Your app has changed since this was written. The spec is kept as it was; the changes built after it are listed here, oldest first.",
     changesSince: "Changes built since",
     showSpec: "Show the spec",
+    showNeed: "Show what you first asked for",
     // The app's look (#159), shown while the design team is on.
     look: {
       title: "Look",

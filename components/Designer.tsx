@@ -166,6 +166,12 @@ export function Designer({
               <summary>{copy.project.showSpec}</summary>
               <Spec source={project.spec} />
             </details>
+            {project.need && (
+              <details>
+                <summary>{copy.project.showNeed}</summary>
+                <p className={stepStyles.need}>{project.need}</p>
+              </details>
+            )}
           </section>
         )}
         <LookStep project={project} />
