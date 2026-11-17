@@ -4,6 +4,12 @@
 import { randomBytes } from "node:crypto";
 import pg from "pg";
 
+// What every app database is copied from. On Azure the public schema of a new database, even one
+// copied from template0, belongs to azure_pg_admin, so its owner may not create tables there. This
+// one was made once by an admin with `ALTER SCHEMA public OWNER TO pg_database_owner` (schmeide/iac
+// gitops/README.md), and the provisioner owns it, so it may copy it.
+export const APP_DATABASE_TEMPLATE = "schmeide_app_template";
+
 export const newPassword = (): string => randomBytes(24).toString("hex");
 
 // The copy's own URL, as its pods get it in their DATABASE_URL Secret.
@@ -43,7 +49,9 @@ export const createAppDatabases = (provisionerUrl: string) => {
         );
         await client.query(`GRANT ${role} TO CURRENT_USER`);
         if (!(await exists(client, "pg_database", "datname", name)))
-          await client.query(`CREATE DATABASE ${role} OWNER ${role}`);
+          await client.query(
+            `CREATE DATABASE ${role} OWNER ${role} TEMPLATE ${client.escapeIdentifier(APP_DATABASE_TEMPLATE)}`
+          );
         await client.query(`REVOKE CONNECT ON DATABASE ${role} FROM PUBLIC`);
       }),
 
@@ -55,8 +63,12 @@ export const createAppDatabases = (provisionerUrl: string) => {
         if (options.role) await client.query(`DROP ROLE IF EXISTS ${role}`);
       }),
 
-    // For the startup check: the provisioner can sign in and may create both.
-    rights: (): Promise<{ readonly createDb: boolean; readonly createRole: boolean }> =>
+    // For the startup check: the provisioner can sign in, may create both, and has the template.
+    rights: (): Promise<{
+      readonly createDb: boolean;
+      readonly createRole: boolean;
+      readonly template: boolean;
+    }> =>
       session(async (client) => {
         const { rows } = await client.query<{ rolcreatedb: boolean; rolcreaterole: boolean }>(
           "SELECT rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname = CURRENT_USER"
@@ -64,6 +76,7 @@ export const createAppDatabases = (provisionerUrl: string) => {
         return {
           createDb: rows[0]?.rolcreatedb === true,
           createRole: rows[0]?.rolcreaterole === true,
+          template: await exists(client, "pg_database", "datname", APP_DATABASE_TEMPLATE),
         };
       }),
   };

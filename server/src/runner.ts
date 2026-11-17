@@ -12,7 +12,7 @@ import {
 } from "./kube/client.ts";
 import { ANTHROPIC_SECRET, BUILDS_NAMESPACE, POSTGRES_IMAGE } from "./kube/jobs.ts";
 import { createAcr } from "./services/acr.ts";
-import { createAppDatabases } from "./services/appDatabases.ts";
+import { APP_DATABASE_TEMPLATE, createAppDatabases } from "./services/appDatabases.ts";
 import { createForgejo } from "./services/forgejo.ts";
 import type { KubeRunner } from "./temporal/activities.ts";
 
@@ -129,6 +129,10 @@ export const checkRunner = async (
       if (!rights.createDb || !rights.createRole)
         problems.push(
           "The role in SCHMEIDE_PROVISIONER_URL may not create databases and roles. ALTER ROLE schmeide_provisioner CREATEDB CREATEROLE."
+        );
+      if (!rights.template)
+        problems.push(
+          `The provisioner has no ${APP_DATABASE_TEMPLATE} database to copy app databases from. Make it as described in schmeide/iac gitops/README.md (the provisioner creates it, an admin runs ALTER SCHEMA public OWNER TO pg_database_owner in it).`
         );
     },
     (error: unknown) => {
