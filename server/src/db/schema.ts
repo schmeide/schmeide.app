@@ -499,6 +499,9 @@ export const adminListSchema = z.object({
 
 export const tenantIdSchema = z.object({ id: createSelectSchema(tenants).shape.id });
 
+// Projects to read what they take up, at most a page of them at a time.
+export const projectIdsSchema = z.object({ ids: z.array(projectId).max(100) });
+
 // Prelaunch: only these addresses (lowercase) may have an account or a session. Delete the table
 // and its checks (services/access.ts) to open sign-up to everyone.
 export const approvedEmails = pgTable("approved_emails", {

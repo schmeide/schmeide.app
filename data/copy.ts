@@ -37,6 +37,7 @@ export const copy = {
     adminBusinesses: "Businesses",
     adminBusiness: "Business",
     adminPeople: "People",
+    adminProjects: "Hosted apps",
     adminAudit: "Audit log",
     help: "Help",
     signIn: "Sign in",
@@ -104,6 +105,38 @@ export const copy = {
     no: "No",
     empty: "Nobody matches.",
     viewAs: (name: string) => `View as ${name}`,
+  },
+  // Every hosted project, in the admin area.
+  hosting: {
+    intro:
+      "Every app across businesses, newest first. What each takes up is read from the container runtime and the disk as the page opens, and is not kept.",
+    searchHint: "An app's name, or its business's name.",
+    caption: "Hosted apps",
+    columns: [
+      "App",
+      "Business",
+      "State",
+      "Port",
+      "Last build",
+      "Containers",
+      "Memory",
+      "CPU",
+      "Workspace",
+    ],
+    neverBuilt: "Never built",
+    empty: "No app matches.",
+  },
+  // What hosted apps take up, on the hosted apps page and a business's page.
+  resources: {
+    title: "What its apps take up",
+    intro:
+      "Read from the container runtime and the disk now. Unknown means the runtime or the disk did not answer in time.",
+    containers: "Containers running",
+    memory: "Memory",
+    cpu: "CPU",
+    workspace: "Workspace on disk",
+    unknown: "unknown",
+    reading: "…",
   },
   audit: {
     intro: "What admins did, newest first. Nothing here is ever edited or removed.",

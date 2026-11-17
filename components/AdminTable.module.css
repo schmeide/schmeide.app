@@ -85,3 +85,38 @@
 .facts dd {
   margin: 0;
 }
+
+/* Figures as tiles, like the usage summary on a project's page. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+  gap: var(--space-s);
+  margin: var(--space-m) 0 0;
+}
+
+.tiles div {
+  padding: var(--space-m);
+  background: var(--color-surface);
+  border-radius: var(--radius-input);
+}
+
+.tiles dt {
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.tiles dd {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.note {
+  max-width: var(--prose-width);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+}

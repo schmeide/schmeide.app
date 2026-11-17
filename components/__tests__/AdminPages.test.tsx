@@ -2,13 +2,20 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
-import type { AuditEntry, BusinessEntry, PersonEntry } from "../../trpc";
+import type {
+  AuditEntry,
+  BusinessEntry,
+  HostedProject,
+  PersonEntry,
+  ProjectResources,
+} from "../../trpc";
 import type { Session } from "../../utils/session";
 import { AdminAuditPage } from "../AdminAuditPage";
 import { AdminBusinessPage } from "../AdminBusinessPage";
 import { AdminBusinessesPage } from "../AdminBusinessesPage";
 import { AdminPage } from "../AdminPage";
 import { AdminPeoplePage } from "../AdminPeoplePage";
+import { AdminProjectsPage } from "../AdminProjectsPage";
 import { ViewAsForm } from "../ViewAsForm";
 import { renderWithApi } from "./fakeApi";
 
@@ -45,6 +52,7 @@ describe("AdminPage", () => {
     ).toEqual([
       [copy.routes.adminBusinesses, "/admin/businesses"],
       [copy.routes.adminPeople, "/admin/people"],
+      [copy.routes.adminProjects, "/admin/projects"],
       [copy.routes.adminAudit, "/admin/audit"],
     ]);
     expect(
@@ -265,6 +273,7 @@ describe("AdminBusinessPage", () => {
           members: [{ name: "Ada", email: "ada@example.com", role: "owner", admin: false }],
           projects: [{ id: 7, name: "Invoices", status: "live" }],
         }),
+        "admin.projects.resources": () => [figures()],
       },
       admin
     );
@@ -440,5 +449,136 @@ describe("AdminPeoplePage", () => {
         reason: "Ticket 42",
       })
     );
+  });
+});
+
+const figures = (overrides: Partial<ProjectResources> = {}): ProjectResources => ({
+  id: 7,
+  containers: 2,
+  memoryBytes: 3 * 1024 ** 2,
+  cpuPercent: 1.5,
+  workspaceBytes: 2 * 1024 ** 3,
+  ...overrides,
+});
+
+const aHostedProject = (overrides: Partial<HostedProject> = {}): HostedProject => ({
+  id: 7,
+  name: "Invoices",
+  slug: "invoices",
+  status: "live",
+  webPort: 8101,
+  business: { id: 4, name: "Ada's bakery" },
+  lastBuild: { kind: "change", status: "passed", startedAt: created },
+  ...overrides,
+});
+
+describe("AdminProjectsPage", () => {
+  it("lists every project with its business, port, last build, and what it takes up", async () => {
+    const calls = renderWithApi(
+      <AdminProjectsPage />,
+      {
+        "admin.projects.list": () => ({ entries: [aHostedProject()], nextCursor: null }),
+        "admin.projects.resources": () => [figures()],
+      },
+      admin
+    );
+    const table = await screen.findByRole("table", { name: copy.hosting.caption });
+    const [row] = within(table).getAllByRole("row").slice(1);
+    expect(await within(row).findByText("3.0 MiB")).toBeInTheDocument();
+    expect(cellsOf(row)).toEqual([
+      "Invoices",
+      "Ada's bakery",
+      copy.status.live.label,
+      "8101",
+      `${copy.project.buildStatus.passed}Nov 1, 2026`,
+      "2",
+      "3.0 MiB",
+      "1.5%",
+      "2.0 GiB",
+    ]);
+    expect(within(row).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
+      "href",
+      "/admin/businesses/4"
+    );
+    expect(calls.find(({ path }) => path === "admin.projects.resources")?.input).toEqual({
+      ids: [7],
+    });
+  });
+
+  it("says unknown for figures that could not be read", async () => {
+    renderWithApi(
+      <AdminProjectsPage />,
+      {
+        "admin.projects.list": () => ({
+          entries: [aHostedProject({ lastBuild: null })],
+          nextCursor: null,
+        }),
+        "admin.projects.resources": () => [
+          figures({ containers: null, memoryBytes: null, cpuPercent: null }),
+        ],
+      },
+      admin
+    );
+    const table = await screen.findByRole("table");
+    const [row] = within(table).getAllByRole("row").slice(1);
+    expect(await within(row).findAllByText(copy.resources.unknown)).toHaveLength(3);
+    expect(cellsOf(row)[4]).toBe(copy.hosting.neverBuilt);
+  });
+
+  it("says when nothing matches, and searches by what is typed", async () => {
+    const calls = renderWithApi(
+      <AdminProjectsPage />,
+      { "admin.projects.list": () => ({ entries: [], nextCursor: null }) },
+      admin
+    );
+    expect(await screen.findByText(copy.hosting.empty)).toBeInTheDocument();
+    await userEvent.type(screen.getByRole("searchbox"), "bakery");
+    await userEvent.click(screen.getByRole("button", { name: copy.adminSearch.action }));
+    await waitFor(() =>
+      expect(
+        calls.filter(({ path }) => path === "admin.projects.list").at(-1)?.input
+      ).toMatchObject({ search: "bakery" })
+    );
+    // Nothing listed, nothing to read.
+    expect(calls.filter(({ path }) => path === "admin.projects.resources")).toEqual([]);
+  });
+});
+
+describe("AdminBusinessPage's resources", () => {
+  const business = (projects: readonly { readonly id: number }[]) => () => ({
+    business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+    members: [],
+    projects: projects.map(({ id }) => ({ id, name: `App ${id}`, status: "live" })),
+  });
+  const totals = async () =>
+    within(await screen.findByRole("region", { name: copy.resources.title }));
+
+  it("sums what its apps take up", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": business([{ id: 7 }, { id: 8 }]),
+        "admin.projects.resources": () => [figures(), figures({ id: 8, containers: 1 })],
+      },
+      admin
+    );
+    const region = await totals();
+    expect(await region.findByText("6.0 MiB")).toBeInTheDocument();
+    expect(region.getByText("3")).toBeInTheDocument();
+    expect(region.getByText("4.0 GiB")).toBeInTheDocument();
+  });
+
+  it("says unknown rather than undercount when one app could not be read", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": business([{ id: 7 }, { id: 8 }]),
+        "admin.projects.resources": () => [figures(), figures({ id: 8, memoryBytes: null })],
+      },
+      admin
+    );
+    const region = await totals();
+    expect(await region.findByText(copy.resources.unknown)).toBeInTheDocument();
+    expect(region.getByText("4")).toBeInTheDocument();
   });
 });

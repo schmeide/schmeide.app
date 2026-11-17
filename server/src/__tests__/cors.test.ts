@@ -18,6 +18,7 @@ const app = buildApp(
     websiteReader: vi.fn(),
     files: {} as never,
     reader: vi.fn(),
+    resources: {} as never,
     auth: testAuth(db, { publicUrl: SITE, apiUrl: "https://api.schmeide.app" }),
     providers: [],
   },

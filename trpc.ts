@@ -20,6 +20,8 @@ export type Answer = NonNullable<Question["answer"]>;
 export type AuditEntry = Outputs["admin"]["audit"]["list"]["entries"][number];
 export type BusinessEntry = Outputs["admin"]["businesses"]["list"]["entries"][number];
 export type PersonEntry = Outputs["admin"]["people"]["list"]["entries"][number];
+export type HostedProject = Outputs["admin"]["projects"]["list"]["entries"][number];
+export type ProjectResources = Outputs["admin"]["projects"]["resources"][number];
 
 // How often a spec in progress, a running build, or its log is checked.
 export const POLL_MS = 2000;
