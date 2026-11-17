@@ -12,15 +12,28 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
+import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
+import type { Kube } from "../kube/client.ts";
 import {
+  buildSelector,
+  LABELS,
+  parseChecksMarker,
+  parseRunName,
+  runName,
+  WORK_DIR,
+  type RunJob,
+  type RunKind,
+} from "../kube/jobs.ts";
+import { deleteRun, followRun, startRun, sweepRuns, type Position } from "../kube/runs.ts";
+import {
+  agentRuns,
   buildFiles,
   builds,
   files,
@@ -28,6 +41,7 @@ import {
   projects,
   type BuildEventKind,
   type FileRow,
+  type NewAgentRun,
   type Project,
 } from "../db/schema.ts";
 import {
@@ -42,6 +56,7 @@ import { businessSuspended } from "../services/businesses.ts";
 import { claudeEnv } from "../services/claudeEnv.ts";
 import { BUSINESS_SUSPENDED } from "../services/errors.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
+import { deployKeyPair, orgOf, type Forgejo } from "../services/forgejo.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
   builtChanges,
@@ -71,6 +86,21 @@ export type Config = {
   readonly agentCmd?: string;
   // How deploy asks a started app whether it answers; tests stand in for a running app.
   readonly fetch?: typeof fetch;
+  // SCHMEIDE_RUNNER=kubernetes: the code lives on Forgejo and the agent and the checks run as Jobs.
+  // Unset is host mode: a local workspace, and the agent and make run on this machine.
+  readonly runner?: KubeRunner;
+};
+
+export type KubeRunner = {
+  readonly kube: Kube;
+  readonly forgejo: Forgejo;
+  // The server's own image, which build pods run.
+  readonly image: string;
+  readonly postgresImage: string;
+  // Forgejo's SSH host key as a known_hosts line; without it a pod trusts the first one it sees.
+  readonly knownHosts?: string;
+  // How often to look at a pod that has not started; tests make it short.
+  readonly pollMs?: number;
 };
 
 // A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
@@ -212,6 +242,19 @@ ${output}
 export const INTERRUPTED_NOTE =
   "An earlier run of this task was interrupted before it finished. Its partial work is in the workspace (see `git status`); continue from there rather than starting over.";
 
+// A build pod has no Docker, so `make test`, which starts its database with Compose, cannot run
+// there until the template uses TEST_DATABASE_URL (docs/stage2.md, "The template contract").
+export const POD_NOTE =
+  'There is no Docker here. Run the tests with `make test/run DATABASE_URL="$TEST_DATABASE_URL"`, against the database this machine already has, wherever the rules say `make test`.';
+
+// Until slice 2 stores files where a build pod can read them (docs/stage2.md, slice 1 step 4).
+export const ATTACHMENTS_REFUSED =
+  "Files attached to a change cannot reach the builder on the cluster yet. Ask for the change again without them.";
+
+// Until #194 deploys to tenant namespaces, a build on the cluster ends with its code on staging.
+export const DEPLOY_REFUSED =
+  "Deploying on the cluster is not built yet (#194). The code is on the project's staging branch.";
+
 const SPEC_FORMAT = `Write a short plain-language spec for it in markdown with exactly three sections: "## Features", "## Screens", and "## Data it stores". Use short bullet points a non-technical reader understands. No code, no technology names, no title. Reply with only the markdown.`;
 
 // A project is described by typed requests, by the plan from the interview, or by both. With a
@@ -288,6 +331,40 @@ export const describeToolUse = (
     }
     default:
       return `Using ${name}`;
+  }
+};
+
+// Shared by spec and build runs, here and in a build pod (sandbox/agent.ts); only the model differs
+// by run kind. settingSources keeps the owner's user-level settings, hooks, and plugins out;
+// claudeMdExcludes keeps out the user CLAUDE.md, which loads regardless of sources.
+export const agentOptions = (
+  cwd: string,
+  env: Record<string, string>,
+  model: string,
+  claudeBin?: string
+): Options => ({
+  cwd,
+  env,
+  model,
+  pathToClaudeCodeExecutable: claudeBin,
+  settingSources: ["project"],
+  settings: {
+    claudeMdExcludes: [join(homedir(), ".claude", "**")],
+    attribution: { commit: "", pr: "" },
+  },
+  permissionMode: "dontAsk",
+});
+
+// A log line that is one JSON object, as sandbox/agent.ts prints each message; undefined otherwise.
+const jsonLine = (text: string): Record<string, unknown> | undefined => {
+  if (!text.startsWith("{")) return undefined;
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
   }
 };
 
@@ -409,9 +486,13 @@ export const createActivities = (
   };
 
   // Heartbeats while `work` runs and reports Temporal cancellation through the signal.
-  const withHeartbeat = async <T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+  // `details` is what each heartbeat carries, for an attempt that follows this one.
+  const withHeartbeat = async <T>(
+    work: (signal: AbortSignal) => Promise<T>,
+    details?: () => unknown
+  ): Promise<T> => {
     const context = Context.current();
-    const timer = setInterval(() => context.heartbeat(), HEARTBEAT_MS);
+    const timer = setInterval(() => context.heartbeat(details?.()), HEARTBEAT_MS);
     try {
       return await work(context.cancellationSignal);
     } catch (error) {
@@ -474,21 +555,6 @@ export const createActivities = (
   const agentEnv = (project: Project): Record<string, string> => ({
     ...projectEnv(project, config.dataDir),
     CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-  });
-
-  // Shared by spec and build runs; only the model differs by run kind. settingSources keeps the owner's user-level settings, hooks, and
-  // plugins out; claudeMdExcludes keeps out the user CLAUDE.md, which loads regardless of sources.
-  const agentOptions = (cwd: string, env: Record<string, string>, model: string): Options => ({
-    cwd,
-    env,
-    model,
-    pathToClaudeCodeExecutable: config.claudeBin,
-    settingSources: ["project"],
-    settings: {
-      claudeMdExcludes: [join(homedir(), ".claude", "**")],
-      attribution: { commit: "", pr: "" },
-    },
-    permissionMode: "dontAsk",
   });
 
   const runAgentCmd = async (
@@ -688,6 +754,341 @@ export const createActivities = (
     await event(buildId, "deploy", `Live at ${url}`);
   };
 
+  // The template as one commit on `branch`, in `dir`, with no history of its own.
+  const commitTemplate = async (project: Project, buildId: number, dir: string, branch: string) => {
+    // From the data dir, where a template given as a relative path is found.
+    await mustRun(
+      project,
+      "git",
+      ["clone", "--depth", "1", config.template, dir],
+      config.dataDir,
+      buildId
+    );
+    await rm(join(dir, ".git"), { recursive: true, force: true });
+    await mustRun(project, "git", ["init", "-q", "-b", branch], dir);
+    await mustRun(project, "git", ["add", "-A"], dir);
+    await mustRun(project, "git", ["commit", "-q", "-m", "start from the schmeide template"], dir);
+  };
+
+  // The page title and icon, written into the app in `workspace` and committed there.
+  const writeSite = async (project: Project, buildId: number, workspace: string) => {
+    const frontend = join(workspace, "frontend");
+    const html = await readFile(join(frontend, "index.html"), "utf8").catch(() => undefined);
+    if (html === undefined) {
+      await event(buildId, "step", "No frontend/index.html; the page title and icon were not set");
+      return;
+    }
+    const [icon] = await db
+      .select()
+      .from(projectIcons)
+      .where(eq(projectIcons.projectId, project.id));
+    const bytes = icon && Buffer.from(icon.data, "base64");
+    const type = bytes && iconType(bytes);
+    await mkdir(join(frontend, "public"), { recursive: true });
+    for (const ext of ["png", "ico"]) {
+      await rm(join(frontend, "public", `${ICON_FILE}.${ext}`), { force: true });
+    }
+    if (bytes && type) await writeFile(join(frontend, "public", `${ICON_FILE}.${type}`), bytes);
+    await writeFile(
+      join(frontend, "index.html"),
+      withSite(html, project.pageTitle ?? project.name, type)
+    );
+    await mustRun(
+      project,
+      "git",
+      ["add", "-A", "--", "frontend/index.html", "frontend/public"],
+      workspace
+    );
+    const staged = await run("git", ["diff", "--cached", "--quiet"], {
+      cwd: workspace,
+      env: projectEnv(project, config.dataDir),
+    });
+    if (staged.code === 0) return;
+    await mustRun(project, "git", ["commit", "-q", "-m", "set the page title and icon"], workspace);
+    await event(buildId, "deploy", "Set the page title and icon");
+  };
+
+  // --- Kubernetes mode (SCHMEIDE_RUNNER=kubernetes): Forgejo repositories and build Jobs. ---
+
+  const repoOf = (project: Project) => ({ org: orgOf(project.tenantId), repo: project.slug });
+
+  const refuseAttachments = async (buildId: number) => {
+    const [attached] = await db
+      .select({ id: buildFiles.fileId })
+      .from(buildFiles)
+      .where(eq(buildFiles.buildId, buildId))
+      .limit(1);
+    if (attached) throw ApplicationFailure.nonRetryable(ATTACHMENTS_REFUSED);
+  };
+
+  // How far the follower of an earlier attempt got in its run's log, from its last heartbeat. The
+  // heartbeat can lag the last line handled by a few seconds, so a little may be handled twice.
+  const resumePosition = (): Position | undefined => {
+    const { attempt, heartbeatDetails } = Context.current().info;
+    const details: unknown = heartbeatDetails;
+    return attempt > 1 &&
+      typeof details === "object" &&
+      details !== null &&
+      "time" in details &&
+      typeof details.time === "string" &&
+      "count" in details &&
+      typeof details.count === "number"
+      ? { time: details.time, count: details.count }
+      : undefined;
+  };
+
+  const runRecorded = async (run: NewAgentRun): Promise<boolean> =>
+    (
+      await db
+        .select({ id: agentRuns.id })
+        .from(agentRuns)
+        .where(
+          and(
+            eq(agentRuns.buildId, run.buildId ?? -1),
+            eq(agentRuns.runKind, run.runKind),
+            eq(agentRuns.durationMs, run.durationMs)
+          )
+        )
+        .limit(1)
+    ).length > 0;
+
+  // A scratch clone of staging for `work`, pushed back after: the worker never keeps a workspace.
+  const onStaging = async (
+    runner: KubeRunner,
+    project: Project,
+    buildId: number,
+    work: (dir: string) => Promise<void>
+  ) => {
+    const { org, repo } = repoOf(project);
+    const remote = runner.forgejo.remote(org, repo);
+    const env = { ...projectEnv(project, config.dataDir), ...remote.env };
+    const dir = await mkdtemp(join(tmpdir(), `schmeide-${project.slug}-`));
+    try {
+      await mustRun(
+        project,
+        "git",
+        ["clone", "-q", "--branch", "staging", remote.url, dir],
+        tmpdir(),
+        buildId,
+        env
+      );
+      await work(dir);
+      await mustRun(
+        project,
+        "git",
+        ["push", "-q", "origin", "HEAD:refs/heads/staging"],
+        dir,
+        buildId,
+        env
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  // Starts the run's Job, or adopts it, with a fresh deploy key for the project's repository:
+  // read-only for the checks. The key is titled with the run's name, which is how it is deleted.
+  const startJob = (
+    runner: KubeRunner,
+    project: Project,
+    kind: RunKind,
+    buildId: number,
+    round: number,
+    env: Readonly<Record<string, string>>,
+    data: Readonly<Record<string, string>>
+  ) => {
+    const { org, repo } = repoOf(project);
+    const name = runName(kind, buildId, round);
+    const run: RunJob = {
+      kind,
+      buildId,
+      round,
+      tenantId: project.tenantId,
+      projectId: project.id,
+      image: runner.image,
+      postgresImage: runner.postgresImage,
+      repo: runner.forgejo.sshRemote(org, repo),
+      knownHosts: Boolean(runner.knownHosts),
+      env,
+    };
+    return startRun(runner.kube, run, async () => {
+      const key = deployKeyPair();
+      await runner.forgejo.deleteDeployKeys(org, repo, (title) => title === name);
+      await runner.forgejo.addDeployKey(org, repo, name, key.publicKey, kind === "checks");
+      return {
+        ...data,
+        "ssh-key": key.privateKey,
+        ...(runner.knownHosts && { known_hosts: `${runner.knownHosts.trim()}\n` }),
+      };
+    });
+  };
+
+  // Deletes a run's Job, Secret, and deploy key, waiting for its pod to go.
+  const endJob = async (runner: KubeRunner, project: Project, name: string) => {
+    const { org, repo } = repoOf(project);
+    await deleteRun(runner.kube, name);
+    await runner.forgejo.deleteDeployKeys(org, repo, (title) => title === name);
+  };
+
+  // The agent in a build pod (sandbox/agent.ts), its SDK messages read back from the pod's log.
+  const runAgentJob = (
+    runner: KubeRunner,
+    project: Project,
+    buildId: number,
+    round: number,
+    resumeAt: Position | undefined,
+    prompt: string,
+    model: string,
+    take: (message: SDKMessage, workspace: string, adopted: boolean) => Promise<string | undefined>
+  ): Promise<string> => {
+    const name = runName("agent", buildId, round);
+    const context = Context.current();
+    let position = resumeAt;
+    return withHeartbeat(
+      async (signal) => {
+        try {
+          const started = await startJob(
+            runner,
+            project,
+            "agent",
+            buildId,
+            round,
+            { SCHMEIDE_MODEL: model },
+            { prompt }
+          );
+          if (started === "adopted")
+            await event(buildId, "agent", "Following the agent that was already running");
+          let session: string | undefined;
+          let tail = "";
+          const adopted = started === "adopted";
+          const exit = await followRun(runner.kube, name, "agent", {
+            signal,
+            resumeAt: adopted ? resumeAt : undefined,
+            pollMs: runner.pollMs,
+            onWaiting: (why) =>
+              event(buildId, "step", `Waiting for the cluster to start the agent (${why})`),
+            onPosition: (at) => {
+              position = at;
+              context.heartbeat(at);
+            },
+            onLine: async (text, replayed) => {
+              // A dead follower already turned it into events and usage, or threw on it.
+              if (replayed) return;
+              const message = jsonLine(text);
+              if (message?.type === "schmeide" && typeof message.pushed === "string") {
+                await event(buildId, "agent", `Pushed ${message.pushed.slice(0, 12)} to staging`);
+              } else if (message) {
+                session = (await take(message as SDKMessage, WORK_DIR, adopted)) ?? session;
+              } else {
+                await log(buildId, text);
+                tail = `${tail}${text}\n`.slice(-2000);
+              }
+            },
+          });
+          if (exit !== 0)
+            throw ApplicationFailure.nonRetryable(`The agent's pod failed (exit ${exit}): ${tail}`);
+          // Nothing resumes a pod's session (a fix-up round starts a new one), and the pod's exit
+          // code already says whether the agent succeeded.
+          return session ?? "";
+        } finally {
+          await endJob(runner, project, name);
+        }
+      },
+      () => position
+    );
+  };
+
+  // `make check`, `make test`, and `make build` in a fresh pod on a fresh clone of the commit the
+  // agent pushed, with the same events and answer as on the host.
+  const runChecksJob = async (
+    runner: KubeRunner,
+    project: Project,
+    buildId: number,
+    round: number,
+    resumeAt: Position | undefined
+  ): Promise<{ ok: boolean; output: string }> => {
+    const { org, repo } = repoOf(project);
+    const commit = await runner.forgejo.branchCommit(org, repo, "staging");
+    if (commit === undefined || !isCommit(commit))
+      throw ApplicationFailure.nonRetryable(`The staging branch has no commit to check: ${commit}`);
+    const name = runName("checks", buildId, round);
+    const context = Context.current();
+    let position = resumeAt;
+    return withHeartbeat(
+      async (signal) => {
+        try {
+          const started = await startJob(
+            runner,
+            project,
+            "checks",
+            buildId,
+            round,
+            { SCHMEIDE_COMMIT: commit },
+            {}
+          );
+          await event(
+            buildId,
+            "check",
+            started === "adopted"
+              ? "Following the checks that were already running"
+              : `Checking ${commit.slice(0, 12)} in a fresh pod`
+          );
+          let output = "";
+          let failed: { ok: boolean; output: string } | undefined;
+          // The answer comes from every marker in the log, replayed ones too; only new lines make
+          // events, so an adopted run neither misses a failure nor repeats what was said.
+          const exit = await followRun(runner.kube, name, "checks", {
+            signal,
+            resumeAt: started === "adopted" ? resumeAt : undefined,
+            pollMs: runner.pollMs,
+            onWaiting: (why) =>
+              event(buildId, "step", `Waiting for the cluster to start the checks (${why})`),
+            onPosition: (at) => {
+              position = at;
+              context.heartbeat(at);
+            },
+            onLine: async (text, replayed) => {
+              const say = (message: string) =>
+                replayed ? Promise.resolve() : event(buildId, "check", message);
+              if (!replayed) await log(buildId, text);
+              const marker = parseChecksMarker(text);
+              if (!marker) {
+                output = `${output}${text}\n`.slice(-OUTPUT_TAIL);
+              } else if (marker.step === "start") {
+                output = "";
+                await say(`Running make ${marker.target}`);
+              } else if (marker.step === "passed") {
+                await say(`make ${marker.target} passed`);
+              } else {
+                await say(`make ${marker.target} failed (exit ${marker.code})`);
+                failed = { ok: false, output: `$ make ${marker.target}\n${output}` };
+              }
+            },
+          });
+          if (failed) return failed;
+          if (exit !== 0)
+            throw new Error(`The checks pod failed (exit ${exit}): ${output.slice(-2000)}`);
+          return { ok: true, output: "" };
+        } finally {
+          await endJob(runner, project, name);
+        }
+      },
+      () => position
+    );
+  };
+
+  // Every Job, Secret, and deploy key of the build, whatever happened to it.
+  const endBuildJobs = async (runner: KubeRunner, project: Project, buildId: number) => {
+    const { org, repo } = repoOf(project);
+    for (const job of await runner.kube.listJobs(buildSelector(buildId)))
+      await deleteRun(runner.kube, job.metadata.name);
+    await runner.forgejo.deleteDeployKeys(
+      org,
+      repo,
+      (title) => parseRunName(title)?.buildId === buildId
+    );
+  };
+
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
@@ -709,7 +1110,8 @@ export const createActivities = (
                   ...agentOptions(
                     config.dataDir,
                     agentEnv(project),
-                    pickModel(config.agentModels, "spec").model
+                    pickModel(config.agentModels, "spec").model,
+                    config.claudeBin
                   ),
                   settingSources: [],
                   tools: [],
@@ -736,32 +1138,53 @@ export const createActivities = (
 
     async prepareWorkspace(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
+      if (config.runner) {
+        // The repository starts as the template, one commit on both branches. main is protected
+        // first, so it is never without its rule.
+        const { forgejo } = config.runner;
+        const { org, repo } = repoOf(project);
+        if (await forgejo.branchCommit(org, repo, "staging")) {
+          await event(buildId, "step", "Reusing the project's repository");
+          return;
+        }
+        await event(buildId, "step", "Copying the template into a new repository");
+        await forgejo.ensureRepo(org, repo);
+        await forgejo.protectMain(org, repo);
+        const remote = forgejo.remote(org, repo);
+        const dir = await mkdtemp(join(tmpdir(), `schmeide-${project.slug}-`));
+        try {
+          await commitTemplate(project, buildId, dir, "staging");
+          await mustRun(
+            project,
+            "git",
+            [
+              "push",
+              "-q",
+              "--atomic",
+              remote.url,
+              "HEAD:refs/heads/staging",
+              "HEAD:refs/heads/main",
+            ],
+            dir,
+            buildId,
+            { ...projectEnv(project, config.dataDir), ...remote.env }
+          );
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+        await event(buildId, "step", "Repository ready");
+        return;
+      }
       const workspace = workspaceOf(project);
       if (await stat(join(workspace, ".git")).catch(() => undefined)) {
         await event(buildId, "step", "Reusing the project workspace");
         return;
       }
       await event(buildId, "step", "Copying the template into a fresh workspace");
-      // ponytail: a local git directory per project; a repository on self-hosted Forgejo in production
       await mkdir(join(config.dataDir, "projects"), { recursive: true });
       const staging = await mkdtemp(join(config.dataDir, "projects", `.${project.slug}-`));
       try {
-        await mustRun(
-          project,
-          "git",
-          ["clone", "--depth", "1", config.template, staging],
-          config.dataDir,
-          buildId
-        );
-        await rm(join(staging, ".git"), { recursive: true, force: true });
-        await mustRun(project, "git", ["init", "-q", "-b", "main"], staging);
-        await mustRun(project, "git", ["add", "-A"], staging);
-        await mustRun(
-          project,
-          "git",
-          ["commit", "-q", "-m", "start from the schmeide template"],
-          staging
-        );
+        await commitTemplate(project, buildId, staging, "main");
         await rename(staging, workspace);
       } finally {
         await rm(staging, { recursive: true, force: true });
@@ -770,28 +1193,38 @@ export const createActivities = (
     },
 
     // Returns the session id so a later fix-up run can resume the same conversation.
+    // In a pod (SCHMEIDE_RUNNER=kubernetes) the session dies with the pod, so a fix-up round
+    // starts a new one with the task and the checks' output instead of resuming.
     async runAgent(input: {
       buildId: number;
+      // Which run of the build this is, 0 for the first: it names the run's Job.
+      round?: number;
       resume?: string;
       feedback?: string;
     }): Promise<string> {
       const { build, project } = await stepOfBuild(input.buildId);
       const retried = Context.current().info.attempt > 1;
       const runKind: RoutedKind = build.kind === "initial" ? "initial" : "change";
-      const attachments = await stageAttachments(project, input.buildId);
+      if (config.runner) await refuseAttachments(input.buildId);
+      const attachments = config.runner ? [] : await stageAttachments(project, input.buildId);
+      const task = async () =>
+        buildPrompt(
+          runKind,
+          project.spec ?? "",
+          build.request,
+          runKind === "change"
+            ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
+            : []
+        );
       const prompt =
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
-        (input.feedback !== undefined
-          ? checksFeedbackPrompt(input.feedback)
-          : buildPrompt(
-              runKind,
-              project.spec ?? "",
-              build.request,
-              runKind === "change"
-                ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
-                : []
-            )) +
-        attachmentsNote(attachments);
+        (input.feedback === undefined
+          ? await task()
+          : config.runner
+            ? `${await task()}\n\n${checksFeedbackPrompt(input.feedback)}`
+            : checksFeedbackPrompt(input.feedback)) +
+        attachmentsNote(attachments) +
+        (config.runner ? `\n\n${POD_NOTE}` : "");
       await event(
         input.buildId,
         "step",
@@ -809,14 +1242,64 @@ export const createActivities = (
       }
       const { model, reason } = pickModel(config.agentModels, runKind);
       await event(input.buildId, "agent", `Model ${model} for this ${runKind} run (${reason})`);
+      // Turns each SDK message into the build's events and usage; answers the session at the end.
+      // `adopted`: a dead worker may have recorded this run's result already, before its heartbeat
+      // said so; the same run reports the same duration, so a match is that record.
+      const take = async (
+        message: SDKMessage,
+        workspace: string,
+        adopted = false
+      ): Promise<string | undefined> => {
+        await log(input.buildId, JSON.stringify(message));
+        if (message.type === "system" && message.subtype === "init") {
+          await event(input.buildId, "agent", `Agent started (${message.model})`);
+        } else if (message.type === "assistant") {
+          for (const block of message.message.content) {
+            const line =
+              block.type === "text"
+                ? block.text.trim() && truncate(block.text)
+                : block.type === "tool_use"
+                  ? describeToolUse(block.name, block.input as Record<string, unknown>, workspace)
+                  : undefined;
+            if (line) await event(input.buildId, "agent", line);
+          }
+        } else if (message.type === "result") {
+          const used = runUsage(message, project.id, input.buildId, runKind);
+          if (!(adopted && (await runRecorded(used.run)))) await recordUsage(db, used);
+          for (const denial of message.permission_denials) {
+            await event(
+              input.buildId,
+              "agent",
+              `Denied ${denial.tool_name}: ${JSON.stringify(denial.tool_input)}`
+            );
+          }
+          const summary = `Agent finished: ${message.subtype}, ${message.num_turns} turns, $${message.total_cost_usd.toFixed(2)}`;
+          await event(input.buildId, message.is_error ? "error" : "agent", summary);
+          if (message.subtype !== "success" || message.is_error) {
+            throw ApplicationFailure.nonRetryable(summary);
+          }
+          return message.session_id;
+        }
+        return undefined;
+      };
+      if (config.runner)
+        return runAgentJob(
+          config.runner,
+          project,
+          input.buildId,
+          input.round ?? 0,
+          resumePosition(),
+          prompt,
+          model,
+          take
+        );
       return withHeartbeat(async (signal) => {
         const abortController = new AbortController();
         signal.addEventListener("abort", () => abortController.abort(), { once: true });
-        // ponytail: the agent runs on the host in the workspace; a sandbox pod per job in production
         for await (const message of query({
           prompt,
           options: {
-            ...agentOptions(workspaceOf(project), agentEnv(project), model),
+            ...agentOptions(workspaceOf(project), agentEnv(project), model, config.claudeBin),
             tools: AGENT_TOOLS,
             allowedTools: AGENT_ALLOWED_TOOLS,
             ...(attachments.length > 0 && {
@@ -826,48 +1309,20 @@ export const createActivities = (
             abortController,
           },
         })) {
-          await log(input.buildId, JSON.stringify(message));
-          if (message.type === "system" && message.subtype === "init") {
-            await event(input.buildId, "agent", `Agent started (${message.model})`);
-          } else if (message.type === "assistant") {
-            for (const block of message.message.content) {
-              const line =
-                block.type === "text"
-                  ? block.text.trim() && truncate(block.text)
-                  : block.type === "tool_use"
-                    ? describeToolUse(
-                        block.name,
-                        block.input as Record<string, unknown>,
-                        workspaceOf(project)
-                      )
-                    : undefined;
-              if (line) await event(input.buildId, "agent", line);
-            }
-          } else if (message.type === "result") {
-            await recordUsage(db, runUsage(message, project.id, input.buildId, runKind));
-            for (const denial of message.permission_denials) {
-              await event(
-                input.buildId,
-                "agent",
-                `Denied ${denial.tool_name}: ${JSON.stringify(denial.tool_input)}`
-              );
-            }
-            const summary = `Agent finished: ${message.subtype}, ${message.num_turns} turns, $${message.total_cost_usd.toFixed(2)}`;
-            await event(input.buildId, message.is_error ? "error" : "agent", summary);
-            if (message.subtype !== "success" || message.is_error) {
-              throw ApplicationFailure.nonRetryable(summary);
-            }
-            await removeReferenceCopies(project, input.buildId, attachments);
-            return message.session_id;
-          }
+          const session = await take(message, workspaceOf(project));
+          if (session === undefined) continue;
+          await removeReferenceCopies(project, input.buildId, attachments);
+          return session;
         }
         throw ApplicationFailure.nonRetryable("Claude ended without a result");
       });
     },
 
-    // ponytail: checks run on the host via the project Makefile; a Kubernetes Job in production
-    async runChecks(buildId: number): Promise<{ ok: boolean; output: string }> {
+    // ponytail: checks run on the host via the project Makefile, or in a Job (runChecksJob)
+    async runChecks(buildId: number, round = 0): Promise<{ ok: boolean; output: string }> {
       const { project } = await stepOfBuild(buildId);
+      if (config.runner)
+        return runChecksJob(config.runner, project, buildId, round, resumePosition());
       for (const target of ["check", "test", "build"]) {
         await event(buildId, "check", `Running make ${target}`);
         const result = await run(config.makeBin, [target], {
@@ -886,52 +1341,12 @@ export const createActivities = (
 
     // Writes the page title and icon into the app and commits them, before every deploy, so they
     // cost no agent run and a change by the agent cannot drop them. `make up` builds the frontend.
+    // On the cluster it writes them on a scratch clone of staging and pushes.
     async applySite(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
-      const workspace = workspaceOf(project);
-      const frontend = join(workspace, "frontend");
-      const html = await readFile(join(frontend, "index.html"), "utf8").catch(() => undefined);
-      if (html === undefined) {
-        await event(
-          buildId,
-          "step",
-          "No frontend/index.html; the page title and icon were not set"
-        );
-        return;
-      }
-      const [icon] = await db
-        .select()
-        .from(projectIcons)
-        .where(eq(projectIcons.projectId, project.id));
-      const bytes = icon && Buffer.from(icon.data, "base64");
-      const type = bytes && iconType(bytes);
-      await mkdir(join(frontend, "public"), { recursive: true });
-      for (const ext of ["png", "ico"]) {
-        await rm(join(frontend, "public", `${ICON_FILE}.${ext}`), { force: true });
-      }
-      if (bytes && type) await writeFile(join(frontend, "public", `${ICON_FILE}.${type}`), bytes);
-      await writeFile(
-        join(frontend, "index.html"),
-        withSite(html, project.pageTitle ?? project.name, type)
-      );
-      await mustRun(
-        project,
-        "git",
-        ["add", "-A", "--", "frontend/index.html", "frontend/public"],
-        workspace
-      );
-      const staged = await run("git", ["diff", "--cached", "--quiet"], {
-        cwd: workspace,
-        env: projectEnv(project, config.dataDir),
-      });
-      if (staged.code === 0) return;
-      await mustRun(
-        project,
-        "git",
-        ["commit", "-q", "-m", "set the page title and icon"],
-        workspace
-      );
-      await event(buildId, "deploy", "Set the page title and icon");
+      if (config.runner)
+        await onStaging(config.runner, project, buildId, (dir) => writeSite(project, buildId, dir));
+      else await writeSite(project, buildId, workspaceOf(project));
     },
 
     // Deploys the build's commit to staging, from the workspace. Production changes only when a
@@ -939,6 +1354,7 @@ export const createActivities = (
     // live at once, as every build was before staging existed.
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
+      if (config.runner) throw ApplicationFailure.nonRetryable(DEPLOY_REFUSED);
       const commit = await commitAll(project, buildId);
       const url = await up(project, "staging", buildId);
       await db
@@ -959,6 +1375,7 @@ export const createActivities = (
     // commit, production's, with an empty database. Neither runs the builder.
     async release(buildId: number): Promise<void> {
       const { build, project } = await stepOfBuild(buildId);
+      if (config.runner) throw ApplicationFailure.nonRetryable(DEPLOY_REFUSED);
       const commit = assertCommit(build.commit);
       if (build.kind === "promote") {
         await promote(project, commit, buildId);
@@ -993,6 +1410,13 @@ export const createActivities = (
           )
         );
       }
+      // A failure here leaves the startup sweep, the Jobs' deadlines, and their TTL to clean up.
+      // Heartbeating: each Job can take a while to go.
+      const { runner } = config;
+      if (runner)
+        await withHeartbeat(() => endBuildJobs(runner, project, buildId)).catch((cause: unknown) =>
+          event(buildId, "error", `Could not remove the build's Jobs and keys: ${String(cause)}`)
+        );
       await clearAttachments(buildId);
       const build = await finishBuildRow(db, buildId, error);
       if (error) {
@@ -1059,6 +1483,8 @@ export const createActivities = (
       }
       for (const copy of ["production", "staging"] as const)
         await rm(dirOf(project, copy), { recursive: true, force: true });
+      if (config.runner)
+        await config.runner.forgejo.deleteRepo(repoOf(project).org, repoOf(project).repo);
       await store.removeProject({ tenantId: project.tenantId, projectId });
       await deleteProjectRows(db, projectId);
     },
@@ -1066,3 +1492,34 @@ export const createActivities = (
 };
 
 export type Activities = ReturnType<typeof createActivities>;
+
+// At worker startup, beside failOrphanedBuilds: deletes the Jobs, Secrets, and deploy keys of
+// every build that is not running, which a worker that died mid-run left behind.
+export const sweepLeftoverRuns = async (db: Db, runner: KubeRunner): Promise<number> => {
+  const running = new Set(
+    (await db.select({ id: builds.id }).from(builds).where(eq(builds.status, "running"))).map(
+      (build) => build.id
+    )
+  );
+  const swept = await sweepRuns(runner.kube, (buildId) => running.has(buildId));
+  // Keys outlive their Jobs when a worker died and the TTL took the Job, so they are swept by
+  // title in the repositories of builds that ended lately: failOrphanedBuilds has just ended those.
+  // ponytail: builds that ended in the last day; a Forgejo-wide key listing if keys still leak.
+  const recent = await db
+    .selectDistinct({ projectId: builds.projectId })
+    .from(builds)
+    .where(gt(builds.finishedAt, new Date(Date.now() - 86_400_000)));
+  const projectIds = new Set([
+    ...recent.map((row) => row.projectId),
+    ...swept.map((job) => Number(job.metadata.labels?.[LABELS.project])),
+  ]);
+  for (const projectId of projectIds) {
+    const project = await findProject(db, projectId).catch(() => undefined);
+    if (project)
+      await runner.forgejo.deleteDeployKeys(orgOf(project.tenantId), project.slug, (title) => {
+        const run = parseRunName(title);
+        return run !== undefined && !running.has(run.buildId);
+      });
+  }
+  return swept.length;
+};

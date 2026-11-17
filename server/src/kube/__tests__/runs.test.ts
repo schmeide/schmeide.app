@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KubeError, type Job, type Kube, type LogLine, type Pod } from "../client.ts";
 import type { RunJob } from "../jobs.ts";
-import { deleteRun, followRun, startRun, sweepRuns } from "../runs.ts";
+import { deleteRun, followRun, startRun, sweepRuns, type Position } from "../runs.ts";
 
 const run: RunJob = {
   kind: "agent",
@@ -21,8 +21,8 @@ type State = {
   secrets: Set<string>;
   // The pod each call to listPods sees, in turn; the last one stays.
   pods: Pod[][];
-  // The log each follow sees, in turn.
-  logs: LogLine[][];
+  // The log each follow sees, in turn; an Error breaks the stream there.
+  logs: (LogLine | Error)[][];
   sinceTimes: (string | undefined)[];
   deleted: string[];
 };
@@ -63,7 +63,10 @@ const fakeKube = (overrides: Partial<State> = {}) => {
     listPods: async () => (state.pods.length > 1 ? state.pods.shift() : state.pods[0]) ?? [],
     logLines: async function* (_pod: string, _container: string, options = {}) {
       state.sinceTimes.push((options as { sinceTime?: string }).sinceTime);
-      yield* state.logs.shift() ?? [];
+      for (const line of state.logs.shift() ?? []) {
+        if (line instanceof Error) throw line;
+        yield line;
+      }
     },
     canI: async () => true,
   } satisfies Kube;
@@ -117,21 +120,26 @@ describe("startRun", () => {
 });
 
 describe("followRun", () => {
-  const follow = (kube: Kube, sinceTime?: string) => {
+  const follow = (kube: Kube, resumeAt?: Position) => {
     const lines: string[] = [];
+    const replayed: string[] = [];
+    const positions: Position[] = [];
     const waiting: string[] = [];
     const exit = followRun(kube, "agent-12-0", "agent", {
       signal: new AbortController().signal,
-      sinceTime,
+      resumeAt,
       pollMs: 1,
-      onLine: async (text) => {
-        lines.push(text);
+      onLine: async (text, again) => {
+        (again ? replayed : lines).push(text);
+      },
+      onPosition: (position) => {
+        positions.push(position);
       },
       onWaiting: async (why) => {
         waiting.push(why);
       },
     });
-    return { exit, lines, waiting };
+    return { exit, lines, replayed, positions, waiting };
   };
 
   it("waits for the pod, follows its log, and answers its exit code", async () => {
@@ -175,11 +183,55 @@ describe("followRun", () => {
     });
     kube.getJob = async () => ({ metadata: { name: "agent-12-0" } });
 
-    const { exit, lines } = follow(kube, "2026-11-17T10:00:00Z");
+    const { exit, lines } = follow(kube);
 
     expect(await exit).toBe(3);
     expect(lines).toEqual(["one", "two", "three"]);
-    expect(state.sinceTimes).toEqual(["2026-11-17T10:00:00Z", "2026-11-17T10:00:01.25Z"]);
+    expect(state.sinceTimes).toEqual([undefined, "2026-11-17T10:00:01.25Z"]);
+  });
+
+  it("reconnects when the stream fails, as fetch does after five quiet minutes", async () => {
+    const { kube, state } = fakeKube({
+      pods: [[running], [running], [exited(0)]],
+      logs: [
+        [{ time: "2026-11-17T10:00:01Z", text: "one" }, new TypeError("terminated")],
+        [
+          { time: "2026-11-17T10:00:01Z", text: "one" },
+          { time: "2026-11-17T10:06:00Z", text: "two" },
+        ],
+      ],
+    });
+    kube.getJob = async () => ({ metadata: { name: "agent-12-0" } });
+
+    const { exit, lines } = follow(kube);
+
+    expect(await exit).toBe(0);
+    expect(lines).toEqual(["one", "two"]);
+    expect(state.sinceTimes).toEqual([undefined, "2026-11-17T10:00:01Z"]);
+  });
+
+  it("hands lines a dead follower already handled back as replayed, from the start of the log", async () => {
+    const at = "2026-11-17T10:00:01Z";
+    const { kube, state } = fakeKube({
+      pods: [[running], [exited(0)]],
+      logs: [
+        [
+          { time: "2026-11-17T10:00:00Z", text: "zero" },
+          { time: at, text: "one" },
+          { time: at, text: "two" },
+          { time: "2026-11-17T10:00:02Z", text: "three" },
+        ],
+      ],
+    });
+    kube.getJob = async () => ({ metadata: { name: "agent-12-0" } });
+
+    const { exit, lines, replayed, positions } = follow(kube, { time: at, count: 1 });
+
+    expect(await exit).toBe(0);
+    expect(replayed).toEqual(["zero", "one"]);
+    expect(lines).toEqual(["two", "three"]);
+    expect(state.sinceTimes).toEqual([undefined]);
+    expect(positions.at(-1)).toEqual({ time: "2026-11-17T10:00:02Z", count: 1 });
   });
 
   it("keeps lines that share a time, and skips only those already seen", async () => {
@@ -242,6 +294,15 @@ describe("deleteRun", () => {
     expect(state.jobs.size).toBe(0);
     expect(state.secrets.size).toBe(0);
     expect(state.deleted).toEqual(["agent-12-0 Foreground"]);
+  });
+});
+
+describe("deleteRun when the Job will not go", () => {
+  it("throws, so a retry backs off instead of adopting a Job that is terminating", async () => {
+    const { kube } = fakeKube();
+    kube.getJob = async () => ({ metadata: { name: "agent-12-0" } });
+
+    await expect(deleteRun(kube, "agent-12-0", 0)).rejects.toThrow(/agent-12-0 is still there/);
   });
 });
 
