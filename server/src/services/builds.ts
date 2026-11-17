@@ -1,5 +1,5 @@
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { and, asc, eq, gt, isNotNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
@@ -68,7 +68,13 @@ export const buildingTime = {
 };
 export const finishedBuild = isNotNull(builds.finishedAt);
 
-// Builder time is how long the model itself ran, over every recorded run.
+// A `summary` run is Schmeide's own account of a build (summaries.ts), not work for the customer:
+// it is left out of every sum the customer sees or is counted against (a project's usage and time,
+// a business's time), and kept in the admin area's tokens and cost, where it shows as its own kind.
+export const customerUsage = ne(usage.runKind, "summary");
+export const builderRun = ne(agentRuns.runKind, "summary");
+
+// Builder time is how long the model itself ran, over every recorded run but summaries.
 export const builderTime = {
   builderMs: sql<number>`coalesce(sum(${agentRuns.durationMs}), 0)`.mapWith(Number),
 };

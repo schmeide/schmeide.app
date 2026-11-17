@@ -212,13 +212,13 @@ describe("time spent", () => {
       // Finished after the period.
       aBuild(tia.project.id, "2006-04-01T00:00:00Z", 1000, "passed"),
     ]);
-    await db
-      .insert(agentRuns)
-      .values([
-        aRun(tia.project.id, "2006-03-05T12:00:00Z", 20_000),
-        aRun(ben.project.id, "2006-03-07T12:00:00Z", 5_000),
-        aRun(tia.project.id, "2006-04-02T00:00:00Z", 7_000),
-      ]);
+    await db.insert(agentRuns).values([
+      aRun(tia.project.id, "2006-03-05T12:00:00Z", 20_000),
+      aRun(ben.project.id, "2006-03-07T12:00:00Z", 5_000),
+      aRun(tia.project.id, "2006-04-02T00:00:00Z", 7_000),
+      // Schmeide's own summary of a build is not builder time.
+      { ...aRun(tia.project.id, "2006-03-05T12:00:00Z", 99_000), runKind: "summary" as const },
+    ]);
     return { tia, ben };
   };
   const MARCH = { from: "2006-03-01", to: "2006-03-31" };

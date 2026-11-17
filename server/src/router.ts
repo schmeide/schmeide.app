@@ -60,6 +60,7 @@ import {
   setBusinessState,
 } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
+import { listSummaries } from "./services/summaries.ts";
 import {
   getBusiness,
   hostedResources,
@@ -501,6 +502,10 @@ export const appRouter = t.router({
   builds: t.router({
     events: onBuild(eventsQuerySchema).query(({ ctx, input }) =>
       listEvents(ctx.db, input.buildId, input.afterId)
+    ),
+    // The plain-language account of the build so far, oldest first; services/summaries.ts.
+    summaries: onBuild(buildIdSchema).query(({ ctx, input }) =>
+      listSummaries(ctx.db, input.buildId)
     ),
     // A queued change only; CONFLICT once it has started.
     editQueued: onBuild(editChangeSchema).mutation(({ ctx, input }) =>

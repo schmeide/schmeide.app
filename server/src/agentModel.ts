@@ -1,9 +1,10 @@
 // Which model an agent run uses, decided by what the run is. Pure: main.ts reads the environment.
 import type { RunKind } from "./db/schema.ts";
 
-// The run kinds this table routes. An interview question, a website read and a file read are run
-// kinds too, for their usage rows, but their models are SCHMEIDE_INTERVIEW_MODEL (questions and file
-// reads) and SCHMEIDE_WEBSITE_MODEL and are not decided here.
+// The run kinds this table routes. An interview question, a website read, a file read and a build
+// summary are run kinds too, for their usage rows, but their models are SCHMEIDE_INTERVIEW_MODEL
+// (questions and file reads), SCHMEIDE_WEBSITE_MODEL and SCHMEIDE_SUMMARY_MODEL and are not decided
+// here.
 export const ROUTED_KINDS = ["spec", "initial", "change"] as const satisfies readonly RunKind[];
 export type RoutedKind = (typeof ROUTED_KINDS)[number];
 

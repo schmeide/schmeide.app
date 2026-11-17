@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { agentRuns, builds, projects, usage } from "../../db/schema.ts";
+import { agentRuns, buildSummaries, builds, projects, usage } from "../../db/schema.ts";
 import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../builds.ts";
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
@@ -600,7 +600,10 @@ describe("deleting a project", () => {
     const ready = await specReady();
     const { build } = await approveSpec(deps, ready.id);
     await finishBuild(db, build.id);
-    await appendEvent(db, build.id, "step", "hello");
+    const event = await appendEvent(db, build.id, "step", "hello");
+    await db
+      .insert(buildSummaries)
+      .values({ buildId: build.id, throughEventId: event.id, text: "Getting ready." });
     await recordUsage(db, {
       run: { projectId: ready.id, buildId: build.id, runKind: "initial", durationMs: 1000 },
       models: [
