@@ -67,7 +67,11 @@ describe("checkRunner", () => {
     forgejo: Partial<Forgejo>,
     hosting: {
       readonly armToken?: () => Promise<string>;
-      readonly rights?: () => Promise<{ createDb: boolean; createRole: boolean }>;
+      readonly rights?: () => Promise<{
+        createDb: boolean;
+        createRole: boolean;
+        template: boolean;
+      }>;
     } = {}
   ) => {
     const real = runnerFromEnv(cluster);
@@ -80,7 +84,8 @@ describe("checkRunner", () => {
         acr: { ...real.hosting.acr, armToken: hosting.armToken ?? (async () => "arm") },
         databases: {
           ...real.hosting.databases,
-          rights: hosting.rights ?? (async () => ({ createDb: true, createRole: true })),
+          rights:
+            hosting.rights ?? (async () => ({ createDb: true, createRole: true, template: true })),
         },
       },
     };
@@ -130,7 +135,7 @@ describe("checkRunner", () => {
           armToken: async () => {
             throw new Error("AADSTS70021");
           },
-          rights: async () => ({ createDb: true, createRole: false }),
+          rights: async () => ({ createDb: true, createRole: false, template: false }),
         }
       ),
       tokenFile()
@@ -139,6 +144,9 @@ describe("checkRunner", () => {
     expect(problems).toEqual([
       expect.stringMatching(/Cannot sign in to Azure \(Error: AADSTS70021\).*federated credential/),
       expect.stringMatching(/ALTER ROLE schmeide_provisioner CREATEDB CREATEROLE/),
+      expect.stringMatching(
+        /no schmeide_app_template database.*ALTER SCHEMA public OWNER TO pg_database_owner/
+      ),
     ]);
   });
 

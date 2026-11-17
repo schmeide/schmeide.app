@@ -226,7 +226,7 @@ const fakeHosting = (root: string) => {
         dropped.push(name);
         databases.delete(name);
       },
-      rights: async () => ({ createDb: true, createRole: true }),
+      rights: async () => ({ createDb: true, createRole: true, template: true }),
     } satisfies AppDatabases,
     domain: "apps.example",
     registry: "registry.example",
