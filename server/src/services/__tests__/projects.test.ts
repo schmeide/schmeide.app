@@ -27,6 +27,7 @@ import {
   transition,
   type Deps,
 } from "../projects.ts";
+import { planItemsOf } from "../interview.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 // Tests share one database, so they assert only on rows they created.
@@ -117,18 +118,53 @@ describe("createProject from a first answer", () => {
     expect(project.features).toBe("");
   });
 
-  it("uses a name that came with the answer, and notes what the app replaces", async () => {
+  it("uses a name that came with the answer", async () => {
     const project = await createProject(db, {
       need: "Send invoices and see who has paid",
       name: "Invoices",
-      replaces: "a spreadsheet",
       tenantId: DEMO_TENANT_ID,
     });
 
     expect(project.name).toBe("Invoices");
+    expect(project.need).toBe("Send invoices and see who has paid");
+  });
+});
+
+describe("createProject from what the person has today", () => {
+  it("writes the answers down for the interview and starts the plan with what it replaces", async () => {
+    const project = await createProject(db, {
+      name: "In place of a spreadsheet",
+      today: {
+        uses: ["A spreadsheet", "Paper"],
+        keep: "The monthly totals",
+        fix: "I can never see who has paid",
+      },
+      tenantId: DEMO_TENANT_ID,
+    });
+
     expect(project.need).toBe(
-      "Send invoices and see who has paid\n\nIt replaces something they use today: a spreadsheet"
+      [
+        "They already have something that does this job today. They want it kept, improved, or replaced without losing anything.",
+        "What they use today: A spreadsheet; Paper",
+        "What works well and must not change: The monthly totals",
+        "What gets in their way today: I can never see who has paid",
+      ].join("\n")
     );
+    const items = await planItemsOf(db, project.id);
+    expect(items.map((item) => [item.section, item.text, item.source, item.phase])).toEqual([
+      ["replaces", "A spreadsheet", "you", "day_one"],
+      ["replaces", "Paper", "you", "day_one"],
+    ]);
+  });
+
+  it("says when what must stay was left to Schmeide, and names the app from what gets in the way", async () => {
+    const project = await createProject(db, {
+      today: { uses: ["A product I pay for"], keepDecided: true, fix: "It costs too much" },
+      tenantId: DEMO_TENANT_ID,
+    });
+
+    expect(project.need).toContain("What must not change: left for you to decide");
+    expect(project.name).toBe("It costs too much");
   });
 });
 

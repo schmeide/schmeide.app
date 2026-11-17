@@ -88,6 +88,7 @@ describe("startInterview", () => {
       does: "sketched",
       screens: "not_started",
       keeps: "not_started",
+      replaces: "not_started",
     });
     expect(interview.finished).toBe(false);
     expect(await getInterview(db, project.id)).toEqual(interview);

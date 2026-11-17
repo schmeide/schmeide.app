@@ -91,7 +91,9 @@ an approved email (step 3 of the quick start).
 1. **Start an app**: the start page (`/new`, and the home page until there is a first app) asks "What do you
    need?". The answer is kept as the app's first answer (`projects.need`), the app is named from it (the name of a
    starting point, or the first few words), and the first interview question is asked before the project page
-   opens. "I'm replacing something I already use" adds what it replaces to that first answer.
+   opens. The page offers a second way in, "I already have something" (`/new/existing`): it asks what the person
+   uses today, what must not change, and what gets in their way. Those answers become the first answer, and each
+   thing they use starts the plan under "What it replaces".
 
 A project page has two phases. **Setup** lasts until the first build passes. It shows one step at a time, with a
 stepper (Describe, Spec, Build, Live) above it, and one main button per step:

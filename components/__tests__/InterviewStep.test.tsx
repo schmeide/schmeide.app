@@ -39,6 +39,31 @@ const plan = (items: number) =>
   screen.getByRole("region", { name: copy.interview.planTitle(items) });
 
 describe("InterviewStep", () => {
+  it("shows what the app replaces only when something was named, with no progress beside it", async () => {
+    const withReplaces = anInterview({
+      current: aQuestion(),
+      items: [anItem({ id: 30, section: "replaces", text: "A spreadsheet" })],
+    });
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject(), interview: withReplaces })
+    );
+
+    const heading = await screen.findByRole("heading", { name: copy.interview.sections.replaces });
+    expect(heading).toHaveTextContent(new RegExp(`^${copy.interview.sections.replaces}\\s*$`));
+    expect(screen.getByText("A spreadsheet")).toBeVisible();
+  });
+
+  it("leaves “What it replaces” out of a plan that started from an idea", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject(), interview: anInterview({ current: aQuestion() }) })
+    );
+
+    await screen.findByText(aQuestion().text);
+    expect(screen.queryByRole("heading", { name: copy.interview.sections.replaces })).toBeNull();
+  });
+
   it("offers the questions first, and asks one when started", async () => {
     const { calls } = setup(anInterview(), {
       "interview.start": () =>

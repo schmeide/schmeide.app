@@ -1,0 +1,35 @@
+.ways ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+  gap: var(--space-s);
+  max-width: var(--prose-width);
+  margin: 0 0 var(--space-l);
+  padding: 0;
+  list-style: none;
+}
+
+.ways a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit-target);
+  padding: var(--space-s) var(--space-m);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-button);
+  font-weight: 600;
+  text-align: center;
+  text-decoration-color: transparent;
+}
+
+.ways a[aria-current="page"] {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 700;
+  text-decoration-color: currentColor;
+}
+
+@media (hover: hover) {
+  .ways a:not([aria-current]):hover {
+    background: var(--color-hover);
+  }
+}

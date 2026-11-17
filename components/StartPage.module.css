@@ -50,14 +50,6 @@
   list-style: none;
 }
 
-.replacing {
-  display: grid;
-  gap: var(--space-s);
-  padding: var(--space-m) var(--space-gutter);
-  background: var(--color-surface);
-  border-radius: var(--radius-card);
-}
-
 .check {
   display: flex;
   gap: var(--space-m);
@@ -90,16 +82,28 @@
   font-weight: 700;
 }
 
-.name {
+.kinds > div {
   display: grid;
   gap: var(--space-xs);
-  font-weight: 500;
+}
+
+.field {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.field > label:first-child {
+  font-weight: 700;
+}
+
+.field textarea {
+  width: 100%;
 }
 
 .note {
   margin: 0;
   padding: 0.75rem var(--space-m);
-  background: var(--color-inset);
+  background: var(--color-surface);
   border-radius: var(--radius-input);
 }
 

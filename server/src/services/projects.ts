@@ -13,6 +13,7 @@ import {
   usage,
   type Build,
   type Project,
+  type Today,
 } from "../db/schema.ts";
 import type {
   buildWorkflow,
@@ -91,33 +92,56 @@ export const suggestName = (need: string): string => {
   return name ? name[0].toUpperCase() + name.slice(1) : "My app";
 };
 
-export const firstAnswer = (need: string, replaces?: string): string =>
-  replaces ? `${need}\n\nIt replaces something they use today: ${replaces}` : need;
+export const todayAnswer = (today: Today): string =>
+  [
+    "They already have something that does this job today. They want it kept, improved, or replaced without losing anything.",
+    `What they use today: ${today.uses.join("; ")}`,
+    ...(today.keep
+      ? [`What works well and must not change: ${today.keep}`]
+      : today.keepDecided
+        ? ["What must not change: left for you to decide"]
+        : []),
+    `What gets in their way today: ${today.fix}`,
+  ].join("\n");
 
 export type NewProject = {
   readonly tenantId: number;
   readonly name?: string;
   readonly need?: string;
-  readonly replaces?: string;
+  readonly today?: Today;
 };
 
 // Slug and port are picked by read-then-insert; a concurrent create can take them first, so a
 // unique violation (Postgres 23505) retries with fresh picks.
 export const createProject = async (db: Db, input: NewProject, attempts = 5): Promise<Project> => {
-  const name = input.name ?? suggestName(input.need ?? "");
+  const { today } = input;
+  const need = [input.need, today && todayAnswer(today)].filter(Boolean).join("\n\n");
+  const name = input.name ?? suggestName(input.need ?? today?.fix ?? "");
   try {
-    const slug = await uniqueSlug(db, slugify(name));
-    const [project] = await db
-      .insert(projects)
-      .values({
-        tenantId: input.tenantId,
-        slug,
-        name,
-        need: input.need ? firstAnswer(input.need, input.replaces) : "",
-        webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
-      })
-      .returning();
-    return project;
+    return await db.transaction(async (transaction) => {
+      const tx = transaction as unknown as Db;
+      const slug = await uniqueSlug(tx, slugify(name));
+      const [project] = await tx
+        .insert(projects)
+        .values({
+          tenantId: input.tenantId,
+          slug,
+          name,
+          need,
+          webPort: sql`(select coalesce(max(${projects.webPort}) + 1, ${FIRST_WEB_PORT}) from ${projects})`,
+        })
+        .returning();
+      if (today) {
+        await tx.insert(planItems).values(
+          today.uses.map((text) => ({
+            projectId: project.id,
+            section: "replaces" as const,
+            text,
+          }))
+        );
+      }
+      return project;
+    });
   } catch (error) {
     const code = (error as { cause?: { code?: string } }).cause?.code;
     if (code !== "23505" || attempts <= 1) throw error;
@@ -257,7 +281,7 @@ export const generateSpec = async (
   const [planned] = await db
     .select({ id: planItems.id })
     .from(planItems)
-    .where(eq(planItems.projectId, id))
+    .where(and(eq(planItems.projectId, id), ne(planItems.section, "replaces")))
     .limit(1);
   if (!current.features.trim() && !planned) {
     throw new ConflictError("Add at least one feature first");
