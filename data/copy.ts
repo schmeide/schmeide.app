@@ -400,6 +400,9 @@ export const copy = {
       widthLabel: "Width",
       width: { phone: "Phone", computer: "Computer" },
       reload: "Reload the app",
+      reloadOnBuild: "Reload when a change is built",
+      newVersion: "A new version of your app is ready. Reloading returns it to its first screen.",
+      reloadNew: "Reload",
       loading: "Loading your app…",
       frameHelp:
         "If your app does not appear here, open it in its own tab with “Open your app”. Some apps cannot be shown inside another page.",
