@@ -60,7 +60,7 @@ else
   if [[ "$reply" == *OK* ]]; then
     ok "claude $("$claude_bin" --version | cut -d' ' -f1) answers headless prompts"
   else
-    fail "claude did not answer a headless prompt: ${reply:0:200}" "run claude in a terminal and log in (/login)"
+    fail "claude did not answer a headless prompt: ${reply:0:200}" "run claude in a terminal and log in (/login), or set ANTHROPIC_API_KEY"
   fi
 fi
 

@@ -10,6 +10,7 @@ import { describeRouting, routingFromEnv } from "./agentModel.ts";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
 import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
+import { claudeEnv } from "./services/claudeEnv.ts";
 import { createFileReader } from "./services/fileReader.ts";
 import { createLocalFileStore } from "./services/fileStore.ts";
 import { createInterviewer } from "./services/interviewer.ts";
@@ -38,6 +39,18 @@ if (!claudeBin) {
     "claude is not on PATH. Install Claude Code and log in (`claude`), or set SCHMEIDE_CLAUDE_BIN."
   );
   process.exit(1);
+}
+// The model calls get only claudeEnv, so check the login with exactly that. `claude auth status`
+// is local, exits 1 when logged out, and counts ANTHROPIC_API_KEY (or Foundry settings) as a login.
+if (!env.SCHMEIDE_AGENT_CMD) {
+  try {
+    execFileSync(claudeBin, ["auth", "status"], { env: claudeEnv(env), stdio: "ignore" });
+  } catch {
+    console.error(
+      "claude has no login or API key. Set ANTHROPIC_API_KEY (or CLAUDE_CODE_USE_FOUNDRY and its ANTHROPIC_FOUNDRY_* settings), or run `claude` and log in (/login)."
+    );
+    process.exit(1);
+  }
 }
 
 const makeBin = [onPath("gmake"), onPath("make")].find((bin) => bin && isGnuMake4(bin));

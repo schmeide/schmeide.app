@@ -343,6 +343,7 @@ What the server does with a file:
 | `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for questions and for reading  |
 | `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website          |
 | `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
+| `ANTHROPIC_API_KEY`        | unset (uses the CLI login)                 | Model credential in a container      |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
 | `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
 
@@ -388,7 +389,9 @@ WEB_PORT=<port> gmake up`.
 
 ## How the agent runs
 
-The Claude Agent SDK runs the locally installed, logged-in `claude` binary (your subscription), with:
+The Claude Agent SDK runs the `claude` binary. Locally that is the logged-in CLI (your subscription); in a container it
+authenticates with `ANTHROPIC_API_KEY` (or `CLAUDE_CODE_USE_FOUNDRY=1` and the `ANTHROPIC_FOUNDRY_*` settings) from the
+environment. The server refuses to start when `claude auth status` reports neither. Every run gets:
 
 - `settingSources: ["project"]`: the project's `CLAUDE.md`/`AGENTS.md` load; your user settings,
   hooks, and plugins do not.
@@ -399,8 +402,12 @@ The Claude Agent SDK runs the locally installed, logged-in `claude` binary (your
   inside the workspace, `Skill` for the design skills the template vendors in `.claude/skills/`, and
   Bash limited to `make`, `npm`, `npx`, `node`, `git`, and basic file commands. Anything else is
   denied without a prompt and logged as a `Denied ...` event.
-- The project environment: `COMPOSE_PROJECT_NAME`, `WEB_PORT`, `TEST_DB_PORT`, GNU make first on
-  `PATH`, and the server's own variables (`DATABASE_URL`, `MAKEFLAGS`, ...) removed.
+- An allow-listed environment (`server/src/services/claudeEnv.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
+  `TMPDIR`, `TERM`, `TZ`, locale (`LANG`, `LC_*`), proxies and `NODE_EXTRA_CA_CERTS`, `ANTHROPIC_*`, `CLAUDE_CODE_*`,
+  `CLAUDE_CONFIG_DIR`, and `DOCKER_HOST`/`DOCKER_CONTEXT`/`DOCKER_CONFIG`. Nothing else of the server's, so
+  `DATABASE_URL`, `SCHMEIDE_*` and the OAuth secrets never reach it. The interview and the file and website readers get
+  the same list. macOS keeps the CLI login in the keychain, found by `USER`.
+- The project environment on top: `COMPOSE_PROJECT_NAME`, `WEB_PORT`, `TEST_DB_PORT`, GNU make first on `PATH`.
 
 ## Dev-mode substitutions
 

@@ -7,6 +7,7 @@ import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import type { NewUsage } from "../db/schema.ts";
 import { usageRows, type Query } from "./builds.ts";
+import { claudeEnv } from "./claudeEnv.ts";
 import { ReaderUnavailableError } from "./errors.ts";
 import type { PageDigest } from "./htmlText.ts";
 import type { Whose } from "./siteFetcher.ts";
@@ -123,7 +124,7 @@ export const createWebsiteReader = (
 ): WebsiteReader => {
   const viaCommand = async (command: string, whose: Whose, prompt: string): Promise<Reading> => {
     const { stdout } = await promisify(execFile)(command, ["website", whose], {
-      env: { ...process.env, AGENT_PROMPT: prompt },
+      env: { ...claudeEnv(), AGENT_PROMPT: prompt },
       timeout: TIMEOUT_MS,
     });
     return parseReading(whose, parseJson(stdout));
@@ -145,7 +146,7 @@ export const createWebsiteReader = (
           pathToClaudeCodeExecutable: config.claudeBin,
           settingSources: [],
           settings: { claudeMdExcludes: [join(homedir(), ".claude", "**")] },
-          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+          env: { ...claudeEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
           permissionMode: "dontAsk",
           tools: [],
           maxTurns: 3,

@@ -210,6 +210,8 @@ describe("build activities", () => {
   });
 
   it("runs the agent in the workspace with the allowlist and records its usage", async () => {
+    vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
+    vi.stubEnv("ADDED_TO_THE_POD_LATER", "secret");
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
     const calls: { prompt: string; options: Options }[] = [];
@@ -237,6 +239,8 @@ describe("build activities", () => {
     });
     expect(AGENT_ALLOWED_TOOLS).toContain("Skill");
     expect(calls[0].options.env?.DATABASE_URL).toBeUndefined();
+    expect(calls[0].options.env?.SCHMEIDE_AUTH_SECRET).toBeUndefined();
+    expect(calls[0].options.env?.ADDED_TO_THE_POD_LATER).toBeUndefined();
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining([
         "Model opus for this initial run (SCHMEIDE_AGENT_MODEL fallback, SCHMEIDE_AGENT_MODEL_INITIAL is not set)",

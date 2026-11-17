@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Query } from "../builds.ts";
 import { ReaderUnavailableError } from "../errors.ts";
 import type { PageDigest } from "../htmlText.ts";
@@ -96,6 +96,7 @@ describe("websitePrompt", () => {
 
 describe("createWebsiteReader", () => {
   it("asks the model with no tools and a fixed answer shape, and records the usage", async () => {
+    vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
     const calls: Call[] = [];
     const reader = createWebsiteReader(config, fakeQuery(calls, { structured_output: MINE }));
 
@@ -125,6 +126,8 @@ describe("createWebsiteReader", () => {
         schema: expect.objectContaining({ type: "object", additionalProperties: false }),
       },
     });
+    expect(options.env?.SCHMEIDE_AUTH_SECRET).toBeUndefined();
+    expect(options.env?.DATABASE_URL).toBeUndefined();
     expect(options.outputFormat?.schema).not.toHaveProperty("$schema");
     expect(Object.keys(options.outputFormat?.schema.properties ?? {})).toEqual([
       "businessName",

@@ -14,6 +14,7 @@ import {
   type Project,
 } from "../db/schema.ts";
 import { usageRows, type Query } from "./builds.ts";
+import { claudeEnv } from "./claudeEnv.ts";
 import { ReadUnavailableError } from "./errors.ts";
 import { isPicture } from "./fileTypes.ts";
 
@@ -153,7 +154,7 @@ const asMessages = (prompt: string, attachment: Content[number]): AsyncIterable<
 export const createFileReader = (config: FileReaderConfig, query: Query = sdkQuery): FileReader => {
   const viaCommand = async (command: string, prompt: string): Promise<Reading> => {
     const { stdout } = await promisify(execFile)(command, ["read"], {
-      env: { ...process.env, AGENT_PROMPT: prompt },
+      env: { ...claudeEnv(), AGENT_PROMPT: prompt },
       timeout: TIMEOUT_MS,
     });
     return parseReading(parseJson(stdout));
@@ -171,7 +172,7 @@ export const createFileReader = (config: FileReaderConfig, query: Query = sdkQue
           pathToClaudeCodeExecutable: config.claudeBin,
           settingSources: [],
           settings: { claudeMdExcludes: [join(homedir(), ".claude", "**")] },
-          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+          env: { ...claudeEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
           permissionMode: "dontAsk",
           tools: [],
           maxTurns: 3,

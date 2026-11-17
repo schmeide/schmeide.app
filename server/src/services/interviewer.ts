@@ -6,6 +6,7 @@ import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { PLAN_SECTIONS, type Answer, type PlanItem } from "../db/schema.ts";
 import { usageRows, type Query } from "./builds.ts";
+import { claudeEnv } from "./claudeEnv.ts";
 import { InterviewUnavailableError } from "./errors.ts";
 import { turnSchema, type AnsweredQuestion, type Interviewer, type Turn } from "./interview.ts";
 
@@ -141,7 +142,7 @@ export const createInterviewer = (
 ): Interviewer => {
   const viaCommand = async (command: string, prompt: string): Promise<Turn> => {
     const { stdout } = await promisify(execFile)(command, ["interview"], {
-      env: { ...process.env, AGENT_PROMPT: prompt },
+      env: { ...claudeEnv(), AGENT_PROMPT: prompt },
       timeout: TIMEOUT_MS,
     });
     return parseTurn(parseJson(stdout));
@@ -160,7 +161,7 @@ export const createInterviewer = (
           // Nothing of the owner's (settings, hooks, plugins, CLAUDE.md, memory) reaches the call.
           settingSources: [],
           settings: { claudeMdExcludes: [join(homedir(), ".claude", "**")] },
-          env: { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
+          env: { ...claudeEnv(), CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" },
           permissionMode: "dontAsk",
           tools: [],
           // Structured output takes a turn of its own on top of the answer.

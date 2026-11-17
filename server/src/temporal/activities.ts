@@ -38,6 +38,7 @@ import {
   type Query,
 } from "../services/builds.ts";
 import { businessSuspended } from "../services/businesses.ts";
+import { claudeEnv } from "../services/claudeEnv.ts";
 import { BUSINESS_SUSPENDED } from "../services/errors.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
@@ -219,18 +220,11 @@ const truncate = (text: string, max = MAX_EVENT): string => {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 };
 
-// Strip variables meant for this server so they never reach a project's make or agent.
-// MAKEFLAGS and friends leak in when the server itself runs under make. The owner's global git
-// config (signing, hooks templates) is replaced so project commits never need their keys.
-export const projectEnv = (project: Project, dataDir: string): NodeJS.ProcessEnv => {
-  const env = Object.fromEntries(
-    Object.entries(process.env).filter(
-      ([key]) =>
-        !/^(DATABASE_URL|TEST_DATABASE_URL|PORT|MAKEFLAGS|MFLAGS|MAKELEVEL|MAKEOVERRIDES|MAKE_TERMOUT|MAKE_TERMERR|SCHMEIDE_.*|TEMPORAL_.*)$/.test(
-          key
-        )
-    )
-  );
+// A project's make and agent get the claude allow list plus the project's own values, so nothing
+// meant for this server (its secrets, MAKEFLAGS when it runs under make) reaches them. The owner's
+// global git config (signing, hooks templates) is replaced so project commits never need their keys.
+export const projectEnv = (project: Project, dataDir: string): Record<string, string> => {
+  const env = claudeEnv();
   return {
     ...env,
     PATH: `${shimDir(dataDir)}:${env.PATH ?? ""}`,
@@ -449,13 +443,10 @@ export const createActivities = (
     }
   };
 
-  const agentEnv = (project: Project): Record<string, string> =>
-    Object.fromEntries(
-      Object.entries({
-        ...projectEnv(project, config.dataDir),
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-      }).filter((entry): entry is [string, string] => entry[1] !== undefined)
-    );
+  const agentEnv = (project: Project): Record<string, string> => ({
+    ...projectEnv(project, config.dataDir),
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+  });
 
   // Shared by spec and build runs; only the model differs by run kind. settingSources keeps the owner's user-level settings, hooks, and
   // plugins out; claudeMdExcludes keeps out the user CLAUDE.md, which loads regardless of sources.

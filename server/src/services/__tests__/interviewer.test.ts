@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Query } from "../builds.ts";
 import { InterviewUnavailableError } from "../errors.ts";
 import type { Interviewer } from "../interview.ts";
@@ -84,6 +84,7 @@ describe("interviewPrompt", () => {
 
 describe("createInterviewer", () => {
   it("gives the model the project, the plan with its ids, and the answers so far", async () => {
+    vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
     const calls: Call[] = [];
     const interviewer = createInterviewer(config, fakeQuery(calls, { structured_output: TURN }));
 
@@ -115,6 +116,9 @@ describe("createInterviewer", () => {
     });
     // Claude Code refuses a schema that carries "$schema".
     expect(options.outputFormat?.schema).not.toHaveProperty("$schema");
+    expect(options.env?.SCHMEIDE_AUTH_SECRET).toBeUndefined();
+    expect(options.env?.DATABASE_URL).toBeUndefined();
+    expect(options.env?.PATH).toBe(process.env.PATH);
   });
 
   it("reads the turn from the reply text when there is no structured output", async () => {
