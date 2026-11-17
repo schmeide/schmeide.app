@@ -450,7 +450,8 @@ export const approveSpec = (deps: Deps, id: number) =>
     )
   );
 
-// Starts the build now, or queues it behind the project's running build.
+// Starts the build now, or queues it behind the project's running build. Neither with builds off:
+// with builds for admins only, another's build can be running (router.ts).
 const startOrQueue = async (
   deps: Deps,
   tx: Db,
@@ -458,6 +459,7 @@ const startOrQueue = async (
   kind: Build["kind"],
   request: string
 ): Promise<{ project: Project; build: Build }> => {
+  assertBuildsOn(deps);
   if (project.status === "building" || (await hasRunningBuild(tx, project.id))) {
     const [build] = await tx
       .insert(builds)

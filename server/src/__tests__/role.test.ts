@@ -1,6 +1,6 @@
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { createHealthServer, parseRole } from "../role.ts";
+import { createHealthServer, parseBuilds, parseRole } from "../role.ts";
 
 describe("SCHMEIDE_ROLE", () => {
   it("runs the API and the worker in one process by default, as make serve does", () => {
@@ -16,6 +16,20 @@ describe("SCHMEIDE_ROLE", () => {
   it("refuses anything else, naming the valid roles", () => {
     expect(() => parseRole("API")).toThrow(
       'SCHMEIDE_ROLE is "API"; set it to all (the default), api, or worker.'
+    );
+  });
+});
+
+describe("SCHMEIDE_BUILDS", () => {
+  it("builds for everyone by default, and takes off and admins", () => {
+    expect(parseBuilds(undefined)).toBe("on");
+    expect(parseBuilds("off")).toBe("off");
+    expect(parseBuilds("admins")).toBe("admins");
+  });
+
+  it("refuses anything else, naming the valid values", () => {
+    expect(() => parseBuilds("admin")).toThrow(
+      'SCHMEIDE_BUILDS is "admin"; set it to on (the default), off, or admins.'
     );
   });
 });

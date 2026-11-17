@@ -40,7 +40,7 @@ describe("with builds off", () => {
   it("tells the client so with the session", async () => {
     const owner = await aSignedInPerson(app, deps);
     const { data } = await callApi(app, "session.get", undefined, owner.cookie);
-    expect(data.buildsOff).toBe(true);
+    expect(data).toMatchObject({ buildsOff: true, canBuild: false });
   });
 
   it("refuses to build an approved spec and starts nothing", async () => {

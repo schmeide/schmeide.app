@@ -12,6 +12,18 @@ export const parseRole = (value: string | undefined): RolePlan => {
   return { serveApi: role !== "worker", runWorker: role !== "api" };
 };
 
+// SCHMEIDE_BUILDS: `on` builds for everyone, `off` (Stage 1 on AKS) builds and hosts nothing, and
+// `admins` (Stage 2's rollout, docs/stage2.md) is `on` for platform admins and `off` for the rest.
+export type Builds = "on" | "off" | "admins";
+
+export const parseBuilds = (value: string | undefined): Builds => {
+  const builds = value ?? "on";
+  if (builds !== "on" && builds !== "off" && builds !== "admins") {
+    throw new Error(`SCHMEIDE_BUILDS is "${builds}"; set it to on (the default), off, or admins.`);
+  }
+  return builds;
+};
+
 // The worker's only HTTP surface, for Kubernetes probes.
 export const createHealthServer = (isLive: () => boolean): Server =>
   createServer((request, response) => {
