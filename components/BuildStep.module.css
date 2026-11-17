@@ -86,3 +86,17 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.summaries {
+  margin: 0;
+  padding-left: var(--space-m);
+  line-height: 1.5;
+}
+
+.summaries li + li {
+  margin-top: var(--space-s);
+}
+
+.summaries li[data-final="true"] {
+  font-weight: 700;
+}

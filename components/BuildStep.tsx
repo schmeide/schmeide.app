@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { copy } from "../data/copy";
-import { POLL_MS, useTRPCClient, type Build, type BuildEvent } from "../trpc";
+import {
+  POLL_MS,
+  useTRPC,
+  useTRPCClient,
+  type Build,
+  type BuildEvent,
+  type BuildSummary,
+} from "../trpc";
 import { formatDuration } from "../utils/usage";
 import { useNow } from "./useNow";
 
@@ -49,18 +57,39 @@ function useBuildEvents(build: Build): readonly BuildEvent[] {
   return events;
 }
 
+// The last summary is written just after the build ends; the page keeps asking for it this long.
+const FINAL_SUMMARY_WAIT_MS = 2 * 60_000;
+
+// The plain-language account of the build, every POLL_MS until its last summary is in.
+function useBuildSummaries(build: Build): readonly BuildSummary[] {
+  const trpc = useTRPC();
+  const { data } = useQuery({
+    ...trpc.builds.summaries.queryOptions({ buildId: build.id }),
+    refetchInterval: (query) =>
+      !query.state.data?.some((summary) => summary.final) &&
+      (build.finishedAt === null || Date.now() - build.finishedAt.getTime() < FINAL_SUMMARY_WAIT_MS)
+        ? POLL_MS
+        : false,
+  });
+  return data ?? [];
+}
+
 // `title` differs by place: a numbered setup step, or the latest change of a running app.
 export function BuildStep({ build, title }: { readonly build: Build; readonly title: string }) {
   const events = useBuildEvents(build);
+  const summaries = useBuildSummaries(build);
   const running = build.status === "running";
   const now = useNow(running);
   const log = useRef<HTMLDivElement>(null);
   const last = events.at(-1);
+  const logId = useId();
+  // Kept here, so it stays as the person left it while polling re-renders the step.
+  const [showLog, setShowLog] = useState(false);
 
   // Keep the newest event in view inside the log, without scrolling the page.
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight;
-  }, [events]);
+  }, [events, showLog]);
 
   const end = build.finishedAt?.getTime() ?? now;
   return (
@@ -87,32 +116,58 @@ export function BuildStep({ build, title }: { readonly build: Build; readonly ti
         </div>
       )}
 
-      <h3 id="build-log">{copy.project.logTitle}</h3>
-      <p className={stepStyles.muted}>{copy.project.logHint}</p>
-      {/* aria-live off: the status line above announces progress; every line would be noise. */}
-      <div
-        role="log"
-        aria-labelledby="build-log"
-        aria-live="off"
-        tabIndex={0}
-        ref={log}
-        className={styles.log}
+      <h3 id="build-summary">{copy.project.summaryTitle}</h3>
+      {summaries.length === 0 ? (
+        <p className={stepStyles.muted}>
+          {running ? copy.project.summaryWaiting : copy.project.summaryNone}
+        </p>
+      ) : (
+        // Text only: what the summarizer wrote is never read as markup.
+        <ol aria-labelledby="build-summary" aria-live="polite" className={styles.summaries}>
+          {summaries.map((summary) => (
+            <li key={summary.id} data-final={summary.final}>
+              {summary.text}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <button
+        type="button"
+        aria-expanded={showLog}
+        aria-controls={logId}
+        onClick={() => setShowLog((open) => !open)}
       >
-        {events.length === 0 ? (
-          <p className={stepStyles.muted}>{copy.project.logEmpty}</p>
-        ) : (
-          <ol className={styles.events}>
-            {events.map((event) => (
-              <li key={event.id} className={styles.event} data-kind={event.kind}>
-                <span className={styles.kind}>{copy.project.eventKind[event.kind]}</span>
-                <time dateTime={event.at.toISOString()} className={styles.time}>
-                  {event.at.toLocaleTimeString()}
-                </time>
-                <span className={styles.message}>{event.message}</span>
-              </li>
-            ))}
-          </ol>
-        )}
+        {copy.project.behindTheScenes}
+      </button>
+      <div id={logId} hidden={!showLog}>
+        <h3 id="build-log">{copy.project.logTitle}</h3>
+        <p className={stepStyles.muted}>{copy.project.logHint}</p>
+        {/* aria-live off: the status line above announces progress; every line would be noise. */}
+        <div
+          role="log"
+          aria-labelledby="build-log"
+          aria-live="off"
+          tabIndex={0}
+          ref={log}
+          className={styles.log}
+        >
+          {events.length === 0 ? (
+            <p className={stepStyles.muted}>{copy.project.logEmpty}</p>
+          ) : (
+            <ol className={styles.events}>
+              {events.map((event) => (
+                <li key={event.id} className={styles.event} data-kind={event.kind}>
+                  <span className={styles.kind}>{copy.project.eventKind[event.kind]}</span>
+                  <time dateTime={event.at.toISOString()} className={styles.time}>
+                    {event.at.toLocaleTimeString()}
+                  </time>
+                  <span className={styles.message}>{event.message}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
       </div>
     </section>
   );
