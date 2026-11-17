@@ -499,6 +499,19 @@ export const adminListSchema = z.object({
 
 export const tenantIdSchema = z.object({ id: createSelectSchema(tenants).shape.id });
 
+// A period of whole days, both ends included, in UTC (services/usageSummary.ts); either end left
+// out is open. `tenantId` narrows it to one business.
+export const usageQuerySchema = z
+  .object({
+    from: z.iso.date().optional(),
+    to: z.iso.date().optional(),
+    tenantId: createSelectSchema(tenants).shape.id.optional(),
+  })
+  .refine(({ from, to }) => from === undefined || to === undefined || from <= to, {
+    message: "The period ends before it starts",
+    path: ["to"],
+  });
+
 // Projects to read what they take up, at most a page of them at a time.
 export const projectIdsSchema = z.object({ ids: z.array(projectId).max(100) });
 

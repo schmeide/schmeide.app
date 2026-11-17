@@ -9,8 +9,10 @@ import {
   formatPercent,
   sumResources,
 } from "../utils/resources";
+import { NO_USAGE } from "../utils/usage";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
+import { UsageSummary } from "./UsageSummary";
 import { ViewAsDisclosure } from "./ViewAsDisclosure";
 
 import styles from "./AdminTable.module.css";
@@ -26,6 +28,8 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
   const resources = useQuery(
     trpc.admin.projects.resources.queryOptions({ ids }, { enabled: ids.length > 0 })
   );
+  // Over all time; the usage page narrows to a period.
+  const usage = useQuery(trpc.admin.usage.summary.queryOptions({ tenantId: id }));
 
   if (!query.data)
     return (
@@ -118,6 +122,9 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
           ))}
         </dl>
       </section>
+
+      <ErrorNote error={usage.error} />
+      {usage.data && <UsageSummary usage={usage.data.businesses[0] ?? NO_USAGE} />}
     </>
   );
 }

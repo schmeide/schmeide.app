@@ -63,6 +63,9 @@ procedure that does not exist.
 - `/admin/projects` lists every hosted app with what it takes up: containers running, memory and CPU from `docker ps`
   and `docker stats`, and its workspace on disk from `du`. They are read when the page asks and never stored; a read
   that fails or takes over five seconds shows as unknown.
+- `/admin/usage` sums tokens and cost from `usage` per business, app, model, and kind of run, for a period of whole
+  days in UTC (the current month unless chosen). A business's page shows its totals over all time. Deleting an app
+  deletes its usage rows with it, so the sums leave deleted apps out.
 - The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
 

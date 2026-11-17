@@ -22,6 +22,7 @@ export type BusinessEntry = Outputs["admin"]["businesses"]["list"]["entries"][nu
 export type PersonEntry = Outputs["admin"]["people"]["list"]["entries"][number];
 export type HostedProject = Outputs["admin"]["projects"]["list"]["entries"][number];
 export type ProjectResources = Outputs["admin"]["projects"]["resources"][number];
+export type UsageSummaryData = Outputs["admin"]["usage"]["summary"];
 
 // How often a spec in progress, a running build, or its log is checked.
 export const POLL_MS = 2000;
