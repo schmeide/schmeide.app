@@ -124,6 +124,21 @@ describe("ProjectPage", () => {
     expect(await screen.findByText(copy.project.specWriting)).toBeInTheDocument();
   });
 
+  it.each(["spec_ready", "live"] as const)(
+    "shows the prompt the project was started with next to the spec (%s)",
+    async (status) => {
+      const need = "Track my clients\nand their invoices";
+      renderWithApi(
+        <ProjectPage id={7} />,
+        projectServer({ project: aProject({ status, need, spec: SPEC }) })
+      );
+      await userEvent.click(await screen.findByText(copy.project.showNeed));
+      expect(
+        screen.getByText((_, el) => el?.tagName === "P" && el.textContent === need)
+      ).toBeVisible();
+    }
+  );
+
   it("warns that changing the features discards the spec", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
