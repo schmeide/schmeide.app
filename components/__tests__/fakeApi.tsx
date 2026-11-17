@@ -110,6 +110,7 @@ export const aProject = (overrides: Partial<Project> = {}): Project => ({
   productionCommit: null,
   stagingUrl: null,
   stagingCommit: null,
+  host: null,
   pageTitle: null,
   createdAt: at,
   updatedAt: at,

@@ -395,8 +395,9 @@ What the server does with a file:
 
 `SCHMEIDE_RUNNER=kubernetes` (default `host`) makes the worker keep each project in a Forgejo repository and run the
 agent and the checks as Jobs in `schmeide-builds` (`docs/stage2.md`, slice 1 step 2). Only the worker reads these; it
-checks at startup that it can use Forgejo and the Kubernetes API and refuses to start with what to fix. Builds stop
-before deploying until #194, and files attached to a change are refused until slice 2.
+checks at startup that it can use Forgejo, the Kubernetes API, Azure and the provisioner database, and refuses to
+start with what to fix. It deploys as [Production](#production) says. Files attached to a change are refused until
+slice 2.
 
 - `SCHMEIDE_BUILD_IMAGE` (required): the server's own image, which build pods run.
 - `SCHMEIDE_FORGEJO_TOKEN` (required): an API token of the `schmeide-platform` Forgejo user.
@@ -481,19 +482,64 @@ environment. The server refuses to start when `claude auth status` reports neith
   a build's running summary get the same list. macOS keeps the CLI login in the keychain, found by `USER`.
 - The project environment on top: `COMPOSE_PROJECT_NAME`, `WEB_PORT`, `TEST_DB_PORT`, GNU make first on `PATH`.
 
+## Production
+
+With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `make up` to AKS instead
+(`docs/stage2.md`, "Deploy and hosting"); the flow, statuses and copies are the same.
+
+- **Images**: a deploy clones staging's head, resets `frontend/Dockerfile`, `backend/Dockerfile`,
+  `frontend/nginx.conf` and `.dockerignore` to the template's (in that clone only, never committed), uploads it to
+  ACR, and runs one ACR quick run that builds the frontend and pushes `apps/t<tenant>/<slug>/web` and `.../api`
+  tagged with the commit. A failed run's event carries the end of its log and a link to all of it.
+- **Namespace**: `tenant-<tenant id>`, applied on every deploy (server-side apply, so it is idempotent) with the
+  worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and a NetworkPolicy that lets
+  in only Traefik on 8080 and out only DNS and Postgres on 5432.
+- **Each copy** (`app-<id>` for production, `app-<id>-staging`): a Deployment (nginx `web` on 8080 and Node `api` on
+  3000, a `migrate` init container, restricted pod security with a read-only root and an `emptyDir` `/tmp`), a
+  Service, an Ingress for its host, and a Secret with `DATABASE_URL` for its own database and role (`app_<id>`,
+  `app_<id>_staging`), made through `SCHMEIDE_PROVISIONER_URL`.
+- **Addresses**: `https://<slug>-<6 random>.apps.schmeide.com` for production and `...--staging` for staging; the
+  first label is `projects.host`, chosen on the first deploy. The wildcard certificate serves both.
+- **Deploy** waits for the rollout and for `/` and `/api/healthz` to answer 200 over https (five minutes). A promote
+  runs staging's images on production and then fast-forwards `main`; a discard force-pushes `staging` back,
+  scales staging to zero, drops and recreates its database, and starts it again.
+- **Stop** scales both copies to zero. **Delete** removes both copies' objects, databases and roles, the Forgejo
+  repository, and both ACR repositories; the namespace stays for the business's other apps.
+
+What the worker needs, besides the Forgejo settings above:
+
+| Variable                         | Meaning                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------- |
+| `AZURE_CLIENT_ID`                | The worker's workload identity (injected by Azure Workload Identity)      |
+| `AZURE_TENANT_ID`                | Injected with it                                                          |
+| `AZURE_FEDERATED_TOKEN_FILE`     | Injected with it                                                          |
+| `AZURE_AUTHORITY_HOST`           | Injected with it                                                          |
+| `SCHMEIDE_AZURE_SUBSCRIPTION_ID` | The registry's subscription                                               |
+| `SCHMEIDE_ACR_RESOURCE_GROUP`    | The registry's resource group                                             |
+| `SCHMEIDE_ACR_NAME`              | The registry, such as `schmeide`                                          |
+| `SCHMEIDE_ACR_LOGIN_SERVER`      | Its login server, such as `schmeide.azurecr.io`                           |
+| `SCHMEIDE_APPS_DOMAIN`           | `apps.schmeide.com`                                                       |
+| `SCHMEIDE_PROVISIONER_URL`       | `postgres://` URL of a role with `CREATEDB` and `CREATEROLE` only         |
+| `SCHMEIDE_APP_DATABASE_HOST`     | The shared Postgres server's host name, as app pods reach it (TLS needed) |
+
+The worker's identity needs, on the registry, `listBuildSourceUploadUrl/action`, `scheduleRun/action`,
+`runs/read` and `runs/listLogSasUrl/action`, plus Container Registry Repository Contributor limited to `apps/`: a
+quick run in ABAC mode pushes as its caller, and a delete removes the repositories. The cluster's kubelet identity
+needs Container Registry Repository Reader on `apps/` to pull.
+
 ## Dev-mode substitutions
 
 Each is marked in code with a `ponytail:` comment.
 
-| Dev mode                                          | Production target                             |
-| ------------------------------------------------- | --------------------------------------------- |
-| Sign-in limited to approved emails, set by hand   | Open sign-up, invitations, emailed codes      |
-| Local git directory per project                   | Self-hosted Forgejo repository                |
-| Agent runs on the host in the workspace           | Sandbox pod per job                           |
-| Checks run on the host via the project Makefile   | Kubernetes Job                                |
-| `make up` with Docker Compose, `localhost:<port>` | AKS namespace per tenant, object storage, CDN |
-| Builds of all projects share one worker           | Task queue per tenant                         |
-| Temporal dev server, in memory                    | A real Temporal cluster                       |
+| Dev mode                                          | Production target                            |
+| ------------------------------------------------- | -------------------------------------------- |
+| Sign-in limited to approved emails, set by hand   | Open sign-up, invitations, emailed codes     |
+| Local git directory per project                   | Self-hosted Forgejo repository               |
+| Agent runs on the host in the workspace           | Sandbox pod per job                          |
+| Checks run on the host via the project Makefile   | Kubernetes Job                               |
+| `make up` with Docker Compose, `localhost:<port>` | AKS namespace per tenant (`SCHMEIDE_RUNNER`) |
+| Builds of all projects share one worker           | Task queue per tenant                        |
+| Temporal dev server, in memory                    | A real Temporal cluster                      |
 
 ## Known gaps
 
