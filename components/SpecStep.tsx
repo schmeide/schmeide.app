@@ -27,9 +27,9 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
         <>
           <p className={styles.muted}>{copy.project.specIntro}</p>
           <Spec source={project.spec} />
-          {session.buildsOff && <p>{copy.project.buildsOff}</p>}
+          {!session.canBuild && <p>{copy.project.buildsOff}</p>}
           <div className={styles.actions}>
-            {!session.buildsOff && (
+            {session.canBuild && (
               <button
                 type="button"
                 data-variant="primary"

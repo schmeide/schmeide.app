@@ -388,7 +388,7 @@ What the server does with a file:
 | `ANTHROPIC_API_KEY`        | unset (uses the CLI login)                 | Model credential in a container      |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
 | `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
-| `SCHMEIDE_BUILDS`          | `on`                                       | `off`: no builds, deploys, or Docker |
+| `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only   |
 | `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only     |
 
 ### Model per run kind

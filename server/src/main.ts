@@ -25,7 +25,7 @@ import { createSiteFetcher } from "./services/siteFetcher.ts";
 import { createSummaries } from "./services/summaries.ts";
 import { createSummarizer } from "./services/summarizer.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
-import { createHealthServer, parseRole } from "./role.ts";
+import { createHealthServer, parseBuilds, parseRole } from "./role.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
@@ -70,12 +70,15 @@ if (!env.SCHMEIDE_AGENT_CMD) {
 }
 
 // SCHMEIDE_BUILDS=off (Stage 1 on AKS): people plan apps and get proposals, but nothing builds,
-// deploys, or is hosted, so neither GNU make nor Docker is needed.
-const builds = env.SCHMEIDE_BUILDS ?? "on";
-if (builds !== "on" && builds !== "off") {
-  console.error(`SCHMEIDE_BUILDS is "${builds}"; set it to on (the default) or off.`);
-  process.exit(1);
-}
+// deploys, or is hosted, so neither GNU make nor Docker is needed. `admins` needs what `on` does.
+const builds = (() => {
+  try {
+    return parseBuilds(env.SCHMEIDE_BUILDS);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+})();
 const buildsOff = builds === "off";
 
 const makeBin = [onPath("gmake"), onPath("make")].find((bin) => bin && isGnuMake4(bin));
@@ -168,6 +171,7 @@ const startApi = (authConfig: AuthConfig) => {
       resources: createResourceReader(config.dataDir),
       auth: createAuth(db, authConfig),
       providers,
+      buildsAdminsOnly: builds === "admins",
     },
     { logger: true, allowOrigin: authConfig.publicUrl }
   );
@@ -196,7 +200,7 @@ console.log(
 console.log(
   buildsOff
     ? "Builds are off (SCHMEIDE_BUILDS=off): nothing is built, deployed, or hosted, and no docker command runs."
-    : "Builds are on: apps build with GNU make and Docker on this host."
+    : `Builds are on${builds === "admins" ? " for admins only (SCHMEIDE_BUILDS=admins)" : ""}: apps build with GNU make and Docker on this host.`
 );
 console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}`

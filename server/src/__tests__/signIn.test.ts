@@ -174,6 +174,7 @@ describe("a session", () => {
       businesses: [],
       providers: ["google"],
       buildsOff: false,
+      canBuild: false,
     });
   });
 

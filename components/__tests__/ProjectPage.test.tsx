@@ -161,14 +161,35 @@ describe("ProjectPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent(copy.status.building.label);
   });
 
-  it("says building is not open yet in place of approving, when the server has builds off", async () => {
+  // Builds off, or builds for admins only and this person is not one.
+  it("says building is not open yet in place of approving, when the server says this person may not build", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
-      projectServer({ project: aProject({ status: "spec_ready", features: "a", spec: SPEC }) }),
-      { ...demoOwner, buildsOff: true }
+      {
+        ...projectServer({
+          project: aProject({ status: "spec_ready", features: "a", spec: SPEC }),
+        }),
+        "session.get": () => ({ ...demoOwner, providers: [], buildsOff: false, canBuild: false }),
+      },
+      "server"
     );
     expect(await screen.findByText(copy.project.buildsOff)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: copy.project.approve })).toBeNull();
+  });
+
+  it("offers to approve when the server says this person may build", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      {
+        ...projectServer({
+          project: aProject({ status: "spec_ready", features: "a", spec: SPEC }),
+        }),
+        "session.get": () => ({ ...demoOwner, providers: [], buildsOff: false, canBuild: true }),
+      },
+      "server"
+    );
+    expect(await screen.findByRole("button", { name: copy.project.approve })).toBeInTheDocument();
+    expect(screen.queryByText(copy.project.buildsOff)).toBeNull();
   });
 
   it("lets a change be requested while a build runs, and lists the waiting changes", async () => {

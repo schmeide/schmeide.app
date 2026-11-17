@@ -69,6 +69,7 @@ import {
   listPeople,
 } from "./services/directory.ts";
 import {
+  BUILDS_OFF,
   BUSINESS_SUSPENDED,
   BusinessSuspendedError,
   ConflictError,
@@ -122,7 +123,14 @@ export type AppContext = Deps &
     readonly auth: Auth;
     // The sign-in providers that have credentials, for the sign-in page.
     readonly providers: readonly Provider[];
+    // SCHMEIDE_BUILDS=admins: builds are on for platform admins and off for everyone else.
+    readonly buildsAdminsOnly?: boolean;
   };
+
+// Whether this caller may build: never with builds off, and with builds for admins only, only a
+// platform admin. An admin viewing as a customer is not one then (auth.ts), so builds nothing.
+const canBuild = (ctx: AppContext, person: Person): boolean =>
+  !ctx.buildsOff && (!ctx.buildsAdminsOnly || person.admin);
 
 export type Context = AppContext & {
   readonly headers: Headers;
@@ -259,6 +267,12 @@ const onProject = <Schema extends z.ZodType<{ readonly id: number }>>(schema: Sc
     await assertProjectIn(ctx.db, ctx.tenantId, input.id);
     return next();
   });
+// A procedure about one project that builds, deploys, or stops it. A caller who may not build gets
+// the services as with builds off, so exactly what builds off answers.
+const building = <Schema extends z.ZodType<{ readonly id: number }>>(schema: Schema) =>
+  onProject(schema).use(({ ctx, next }) =>
+    next({ ctx: { ...ctx, buildsOff: !canBuild(ctx, ctx.person) } })
+  );
 const onBuild = <Schema extends z.ZodType<{ readonly buildId: number }>>(schema: Schema) =>
   signedIn.input(schema).use(async ({ ctx, input, next }) => {
     await assertBuildIn(ctx.db, ctx.tenantId, input.buildId);
@@ -282,8 +296,10 @@ export const appRouter = t.router({
           : null,
         businesses: person ? await businessesOf(ctx.db, person) : [],
         providers: ctx.providers,
-        // SCHMEIDE_BUILDS=off: the client offers no build, and says why.
+        // SCHMEIDE_BUILDS=off: the server hosts nothing, for the admin resources pages.
         buildsOff: ctx.buildsOff ?? false,
+        // When false, the client offers this caller no build, and says why.
+        canBuild: person !== null && canBuild(ctx, person),
       };
     }),
   }),
@@ -456,23 +472,21 @@ export const appRouter = t.router({
     generateSpec: onProject(projectIdSchema).mutation(({ ctx, input }) =>
       generateSpec(ctx, input.id)
     ),
-    approveSpec: onProject(projectIdSchema).mutation(({ ctx, input }) =>
-      approveSpec(ctx, input.id)
-    ),
-    requestChange: onProject(changeRequestSchema).mutation(({ ctx, input }) =>
+    approveSpec: building(projectIdSchema).mutation(({ ctx, input }) => approveSpec(ctx, input.id)),
+    requestChange: building(changeRequestSchema).mutation(({ ctx, input }) =>
       requestChange(ctx, input)
     ),
     // The deployed app's page title and icon (base64 PNG or ICO); see services/site.ts.
-    setSite: onProject(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
+    setSite: building(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),
     // Production runs what staging runs; or staging goes back to what production runs. Each is a
     // build of its own, recorded with who asked.
-    promote: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+    promote: building(projectIdSchema).mutation(({ ctx, input }) =>
       promoteStaging(ctx, { id: input.id, byUserId: ctx.person.id })
     ),
-    discard: onProject(projectIdSchema).mutation(({ ctx, input }) =>
+    discard: building(projectIdSchema).mutation(({ ctx, input }) =>
       discardStaging(ctx, { id: input.id, byUserId: ctx.person.id })
     ),
-    stop: onProject(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
+    stop: building(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
     delete: onProject(projectIdSchema).mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
   }),
   // The guided questions that build a project's plan; see services/interview.ts.
@@ -518,9 +532,11 @@ export const appRouter = t.router({
       listSummaries(ctx.db, input.buildId)
     ),
     // A queued change only; CONFLICT once it has started.
-    editQueued: onBuild(editChangeSchema).mutation(({ ctx, input }) =>
-      editQueuedChange(ctx.db, input)
-    ),
+    // Rewriting a queued change is requesting one, so only for a caller who may build.
+    editQueued: onBuild(editChangeSchema).mutation(({ ctx, input }) => {
+      if (!canBuild(ctx, ctx.person)) throw new ConflictError(BUILDS_OFF);
+      return editQueuedChange(ctx.db, input);
+    }),
     removeQueued: onBuild(buildIdSchema).mutation(({ ctx, input }) =>
       removeQueuedChange(ctx.db, input.buildId)
     ),

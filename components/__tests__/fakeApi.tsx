@@ -71,6 +71,7 @@ const fakeLink =
 export const demoOwner: Session = {
   person: { name: "Demo owner", email: "owner@demo.example" },
   businesses: [{ id: 1, name: "Demo business" }],
+  canBuild: true,
 };
 
 // `session` is who is signed in; left out, it is an owner with one business. "server" asks the
