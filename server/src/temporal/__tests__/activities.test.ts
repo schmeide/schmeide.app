@@ -1,12 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -40,6 +42,7 @@ import {
   buildPrompt,
   createActivities,
   gitConfigFile,
+  isCommit,
   specPrompt,
   type Config,
   type Query,
@@ -59,8 +62,11 @@ const git = (cwd: string, ...args: string[]) =>
 
 // A data dir plus a one-commit template repository beside it.
 const setup = () => {
-  const root = mkdtempSync(join(tmpdir(), "schmeide-test-"));
+  // Real, so paths match what a command run there prints as its working directory.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "schmeide-test-")));
   const dataDir = join(root, "data");
+  // Every `make up`, `make down`, and docker command a test's project runs, one per line.
+  const calls = join(root, "calls");
   mkdirSync(join(dataDir, "bin"), { recursive: true });
   writeFileSync(gitConfigFile(dataDir), GIT_CONFIG);
   writeFileSync(gitConfigFile(root), GIT_CONFIG);
@@ -78,10 +84,14 @@ const setup = () => {
       "check:\n\t@echo checking on $$WEB_PORT",
       "test:\n\t@echo test db $$TEST_DB_PORT; test ! -f broken",
       "build:\n\t@echo building",
-      "up:\n\t@echo up $$COMPOSE_PROJECT_NAME",
+      `up:\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
+      `down:\n\t@echo down $$COMPOSE_PROJECT_NAME $$(pwd) >> ${calls}`,
       "",
     ].join("\n")
   );
+  // Docker, found first on the PATH the server gives a project's commands, only notes its call.
+  writeFileSync(join(dataDir, "bin", "docker"), `#!/bin/sh\necho "docker $* $(pwd)" >> ${calls}\n`);
+  chmodSync(join(dataDir, "bin", "docker"), 0o755);
   git(template, "init", "-q");
   git(template, "add", "-A");
   git(template, "commit", "-q", "-m", "template");
@@ -91,8 +101,11 @@ const setup = () => {
     agentModels: { fallback: "opus", byKind: {} },
     claudeBin: undefined,
     makeBin: "make",
+    fetch: answering,
   };
-  return { config, dataDir };
+  const ran = () =>
+    existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n").filter(Boolean) : [];
+  return { config, dataDir, ran };
 };
 
 const newBuild = async (kind: "initial" | "change" = "initial") => {
@@ -418,7 +431,7 @@ describe("build activities", () => {
   it("deploys the workspace as one commit, and records that commit on the build", async () => {
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
-    const activities = createActivities(deps, { ...config, fetch: answering });
+    const activities = createActivities(deps, config);
     const env = new MockActivityEnvironment();
     await env.run(activities.prepareWorkspace, build.id);
     const workspace = join(dataDir, "projects", project.slug);
@@ -728,5 +741,120 @@ describe("removing a project", () => {
     expect(existsSync(folder)).toBe(false);
     expect(await db.select().from(files).where(eq(files.projectId, project.id))).toEqual([]);
     expect(await db.select().from(projects).where(eq(projects.id, project.id))).toEqual([]);
+  });
+});
+
+describe("production", () => {
+  // A project whose workspace holds one more commit than the template, deployed by `build`.
+  const deployed = async () => {
+    const setUp = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, setUp.config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const workspace = join(setUp.dataDir, "projects", project.slug);
+    const production = join(setUp.dataDir, "production", project.slug);
+    return { ...setUp, project, build, activities, env, workspace, production };
+  };
+  const commitOf = async (buildId: number) =>
+    (await db.select().from(builds).where(eq(builds.id, buildId)))[0].commit;
+  const projectRow = async (id: number) =>
+    (await db.select().from(projects).where(eq(projects.id, id)))[0];
+
+  it("runs a passed build's commit from its own checkout, under the project's Compose name", async () => {
+    const { project, build, activities, env, workspace, production, ran } = await deployed();
+    writeFileSync(join(workspace, "first.ts"), "export const first = 1;\n");
+
+    await env.run(activities.deploy, build.id);
+
+    const first = await commitOf(build.id);
+    expect(git(production, "rev-parse", "HEAD").trim()).toBe(first);
+    expect(ran()).toEqual([
+      `up schmeide-${project.slug} ${project.webPort} ${first} ${production}`,
+    ]);
+    expect(await projectRow(project.id)).toMatchObject({
+      productionCommit: first,
+      previewUrl: `http://localhost:${project.webPort}`,
+      status: "live",
+    });
+
+    // The next build moves production to its commit, with its own dependencies installed afresh.
+    mkdirSync(join(production, "node_modules"));
+    writeFileSync(join(workspace, "second.ts"), "export const second = 2;\n");
+    const [next] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "change", request: "second", status: "running" })
+      .returning();
+    await env.run(activities.deploy, next.id);
+
+    const second = await commitOf(next.id);
+    expect(second).not.toBe(first);
+    expect(git(production, "rev-parse", "HEAD").trim()).toBe(second);
+    expect(existsSync(join(production, "second.ts"))).toBe(true);
+    expect(existsSync(join(production, "node_modules"))).toBe(false);
+    expect((await projectRow(project.id)).productionCommit).toBe(second);
+  });
+
+  it("is taken offline from its checkout, and from the workspace for an app deployed before it had one", async () => {
+    const { project, build, activities, env, production, ran } = await deployed();
+    const older = await deployed();
+
+    await env.run(activities.deploy, build.id);
+    await env.run(activities.stopDeployment, project.id);
+    await older.env.run(older.activities.stopDeployment, older.project.id);
+
+    expect(ran().at(-1)).toBe(`down schmeide-${project.slug} ${production}`);
+    expect(older.ran()).toEqual([`down schmeide-${older.project.slug} ${older.workspace}`]);
+    expect(await projectRow(project.id)).toMatchObject({ status: "stopped", previewUrl: null });
+  });
+
+  it("is removed with its volumes, its checkout, and the workspace when the project is deleted", async () => {
+    const { project, build, activities, env, workspace, production, ran } = await deployed();
+    await env.run(activities.deploy, build.id);
+
+    await env.run(activities.removeProject, project.id);
+
+    expect(ran().at(-1)).toBe(
+      `docker compose -p schmeide-${project.slug} --profile * down --volumes --remove-orphans ${production}`
+    );
+    expect(existsSync(production)).toBe(false);
+    expect(existsSync(workspace)).toBe(false);
+  });
+
+  it("starts and stops the app with neither the server's secrets nor the model's credentials", async () => {
+    vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");
+    vi.stubEnv("DATABASE_URL", "postgres://secret");
+    vi.stubEnv("ANTHROPIC_API_KEY", "sk-ant-secret");
+    vi.stubEnv("CLAUDE_CODE_USE_FOUNDRY", "1");
+    const { project, build, env, workspace, config, dataDir } = await deployed();
+    // A make that writes down the environment it was given, per target.
+    const make = join(dataDir, "env-make");
+    writeFileSync(make, `#!/bin/sh\nenv > "${dataDir}/env-$1"\n`);
+    chmodSync(make, 0o755);
+    const activities = createActivities(deps, { ...config, makeBin: make });
+    writeFileSync(join(workspace, "first.ts"), "export const first = 1;\n");
+
+    await env.run(activities.deploy, build.id);
+    await env.run(activities.stopDeployment, project.id);
+
+    for (const target of ["up", "down"]) {
+      const given = readFileSync(join(dataDir, `env-${target}`), "utf8");
+      expect(given).toContain(`COMPOSE_PROJECT_NAME=schmeide-${project.slug}`);
+      expect(given).not.toContain("secret");
+      expect(given).not.toMatch(/^(ANTHROPIC|CLAUDE)_/m);
+    }
+  });
+
+  it("takes only a full commit id as one", () => {
+    expect(isCommit("0123456789abcdef0123456789abcdef01234567")).toBe(true);
+    for (const text of [
+      "HEAD",
+      "main",
+      "0123456",
+      "0123456789ABCDEF0123456789ABCDEF01234567",
+      "--force",
+    ])
+      expect(isCommit(text)).toBe(false);
+    expect(isCommit("0123456789abcdef0123456789abcdef01234567; rm -rf /")).toBe(false);
   });
 });

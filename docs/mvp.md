@@ -214,9 +214,14 @@ Print an invoice as a clean page I can save as a PDF
       `make test`, and `make build` pass, then commits.
    3. `runChecks`: the server runs the three targets itself. On failure the output goes back to the
       same agent session, up to 3 fix rounds, then the build fails with the last output.
-   4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, then
-      `make up`, then waits for `/` and `/api/healthz` on the web port to answer 200. Status `live`
-      with `previewUrl`; the build records the commit it deployed (`builds.commit`).
+   4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, and
+      records it (`builds.commit`). The app runs from its own checkout of the workspace,
+      `~/.schmeide/production/<slug>`, moved to that commit with `git fetch` and
+      `git checkout --detach`, and cleaned of every untracked and ignored file. Then `make up` there,
+      under the project's Compose name and web port, which runs the app's migrations forward, and a
+      wait for `/` and `/api/healthz` to answer 200. Status `live` with `previewUrl` and
+      `productionCommit`. That checkout's `git`, `make up`, and `make down` get the project environment without the
+      model's credentials (`ANTHROPIC_*`, `CLAUDE_*`).
 5. `projects.requestChange({ id, request })` on a `live`, `failed`, or `stopped` project runs the
    same workflow as a change build. On a `building` project it is queued instead (build status
    `queued`). When a build passes, its last step starts the oldest queued change of the project. A
@@ -232,7 +237,7 @@ Print an invoice as a clean page I can save as a PDF
    (or removes them), and commits if anything changed, so an agent change cannot drop them.
 7. `projects.stop({ id })` cancels a running build (it ends `failed`, error `Build canceled`), or
    runs `make down` (status `stopped`, volumes kept).
-8. `projects.delete({ id })` removes the deployment and its volumes, the workspace, and every row.
+8. `projects.delete({ id })` removes the deployment and its volumes, the workspace, the app's checkout, and every row.
    Refused while a spec or build is running; returns once everything is gone.
 
 `builds.events({ buildId, afterId })` is the live log: pass the last id seen to page forward.
@@ -383,7 +388,9 @@ decides, and the run kind is its only input.
 
 ## Where things live
 
-- `~/.schmeide/projects/<slug>/`: one git working directory per project.
+- `~/.schmeide/projects/<slug>/`: one git working directory per project, where the builder works.
+- `~/.schmeide/production/<slug>/`: the app's own checkout of that repository, at the commit it runs. An app
+  deployed before this existed runs from images built in the workspace until its next build.
 - `~/.schmeide/files/<business id>/<project id>/<file id>`: uploaded files, removed with the file or the project.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
   Kept after a project is deleted. `e2e-fake-server.log` is the `make e2e/fake` server's output.
@@ -392,8 +399,8 @@ decides, and the run kind is its only input.
 - Each deployed project is a Compose project named `schmeide-<slug>` on `http://localhost:<web port>`;
   its `make test` database uses port `5600 + n` for web port `8100 + n`.
 
-To bring a stopped app back by hand: `cd ~/.schmeide/projects/<slug> && COMPOSE_PROJECT_NAME=schmeide-<slug>
-WEB_PORT=<port> gmake up`.
+To bring a stopped app back by hand: `cd ~/.schmeide/production/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug>
+WEB_PORT=<port>` (from `~/.schmeide/projects/<slug>` for an app not built since its checkout existed).
 
 ## How the agent runs
 

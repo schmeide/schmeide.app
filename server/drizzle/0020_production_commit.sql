@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "production_commit" varchar(40);
