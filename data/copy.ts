@@ -570,6 +570,7 @@ export const copy = {
     behindTheScenes: "Look behind the scenes",
     logTitle: "Every step, as the builder logged it",
     logHint: "The newest step is at the bottom.",
+    jumpToNewest: "Jump to the newest step",
     logEmpty: "Waiting for the first step…",
     eventKind: {
       step: "Progress",
