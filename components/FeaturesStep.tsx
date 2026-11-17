@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import {
   useEffect,
+  useId,
   useRef,
   useState,
   type ClipboardEvent,
@@ -40,6 +41,7 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
   const refresh = useRefreshProjects();
   const [requests, setRequests] = useState(() => boxes(project.features));
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
+  const errorId = useId();
   // The box to focus once the boxes have rendered: a new one, or the one before a removed one.
   const focusNext = useRef<number | null>(null);
   useEffect(() => {
@@ -78,8 +80,12 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
   const onSave = () => void run(saveIfChanged);
   const onWriteSpec = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setEmpty(!text);
-    if (!text) return;
+    const blank = text === "";
+    setEmpty(blank);
+    if (blank) {
+      inputs.current[0]?.focus();
+      return;
+    }
     void run(async () => {
       await saveIfChanged();
       await generate.mutateAsync({ id: project.id });
@@ -128,11 +134,14 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
                   aria-label={copy.project.requestLabel(index + 1)}
                   maxLength={1000}
                   value={request}
-                  onChange={(event) =>
+                  aria-invalid={index === 0 && empty ? true : undefined}
+                  aria-describedby={index === 0 && empty ? errorId : undefined}
+                  onChange={(event) => {
+                    setEmpty(false);
                     setRequests(
                       requests.map((old, at) => (at === index ? event.target.value : old))
-                    )
-                  }
+                    );
+                  }}
                   onKeyDown={onKeyDown(index)}
                   onPaste={onPaste(index)}
                   placeholder={copy.project.requestPlaceholders[index]}
@@ -151,6 +160,11 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
               </li>
             ))}
           </ol>
+          {empty && (
+            <p id={errorId} className={stepStyles.fieldError}>
+              {copy.project.needFeatures}
+            </p>
+          )}
           <button
             type="button"
             className={styles.add}
@@ -188,7 +202,6 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
             <span className={stepStyles.muted}>{copy.project.saved}</span>
           )}
         </div>
-        {empty && <p role="alert">{copy.project.needFeatures}</p>}
         <ErrorNote error={save.error ?? generate.error} />
       </form>
     </section>

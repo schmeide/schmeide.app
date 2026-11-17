@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import type { FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
@@ -20,6 +20,8 @@ type Props = {
 export function ChangeForm({ project, request, onRequestChange, note }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const [missing, setMissing] = useState(false);
   const change = useMutation(
     trpc.projects.requestChange.mutationOptions({
       onSuccess: () => onRequestChange(""),
@@ -28,11 +30,20 @@ export function ChangeForm({ project, request, onRequestChange, note }: Props) {
   );
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const text = request.trim();
+    setMissing(text === "");
+    if (text === "") {
+      field.current?.focus();
+      return;
+    }
     change.mutate({ id: project.id, request });
   };
+  const describedBy = [missing ? "change-request-error" : "", note ? "change-note" : ""]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <form onSubmit={onSubmit} className={stepStyles.form}>
+    <form onSubmit={onSubmit} className={stepStyles.form} noValidate>
       <p className={stepStyles.muted}>
         {project.status === "failed"
           ? copy.project.changeRetryIntro
@@ -42,18 +53,28 @@ export function ChangeForm({ project, request, onRequestChange, note }: Props) {
       </p>
       <label htmlFor="change-request">{copy.project.changeLabel}</label>
       <textarea
+        ref={field}
         id="change-request"
         rows={3}
         required
         maxLength={5000}
         value={request}
-        onChange={(event) => onRequestChange(event.target.value)}
+        onChange={(event) => {
+          onRequestChange(event.target.value);
+          setMissing(false);
+        }}
         placeholder={copy.project.changePlaceholder}
-        aria-describedby={note ? "change-note" : undefined}
+        aria-invalid={missing || undefined}
+        aria-describedby={describedBy || undefined}
       />
+      {missing && (
+        <p id="change-request-error" className={stepStyles.fieldError}>
+          {copy.project.changeMissing}
+        </p>
+      )}
       {note && <p id="change-note">{note}</p>}
       <div className={stepStyles.actions}>
-        <button type="submit" data-variant="primary" disabled={change.isPending || !request.trim()}>
+        <button type="submit" data-variant="primary" disabled={change.isPending}>
           {change.isPending ? copy.project.requesting : copy.project.requestChange}
         </button>
       </div>

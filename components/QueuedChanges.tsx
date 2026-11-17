@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Build } from "../trpc";
@@ -13,6 +13,8 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const [draft, setDraft] = useState<string | null>(null);
+  const [missing, setMissing] = useState(false);
+  const field = useRef<HTMLTextAreaElement>(null);
   const edit = useMutation(
     trpc.builds.editQueued.mutationOptions({
       onSuccess: () => setDraft(null),
@@ -26,7 +28,13 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
   const fieldId = `queued-${build.id}`;
   const onSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (draft !== null) edit.mutate({ buildId: build.id, request: draft });
+    const text = draft?.trim() ?? "";
+    setMissing(text === "");
+    if (text === "") {
+      field.current?.focus();
+      return;
+    }
+    edit.mutate({ buildId: build.id, request: draft ?? "" });
   };
 
   return (
@@ -40,7 +48,10 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
             {build.kind === "change" && (
               <button
                 type="button"
-                onClick={() => setDraft(build.request)}
+                onClick={() => {
+                  setMissing(false);
+                  setDraft(build.request);
+                }}
                 disabled={pending}
                 aria-label={copy.project.queueEditLabel(position)}
               >
@@ -59,22 +70,40 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
           </div>
         </>
       ) : (
-        <form onSubmit={onSave} className={stepStyles.form}>
+        <form onSubmit={onSave} className={stepStyles.form} noValidate>
           <label htmlFor={fieldId}>{copy.project.queueEditFieldLabel(position)}</label>
           <textarea
+            ref={field}
             id={fieldId}
             rows={3}
             required
             maxLength={5000}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => {
+              setDraft(event.target.value);
+              setMissing(false);
+            }}
             autoFocus
+            aria-invalid={missing || undefined}
+            aria-describedby={missing ? `${fieldId}-error` : undefined}
           />
+          {missing && (
+            <p id={`${fieldId}-error`} className={stepStyles.fieldError}>
+              {copy.project.queueMissing}
+            </p>
+          )}
           <div className={stepStyles.actions}>
-            <button type="submit" disabled={pending || !draft.trim()}>
+            <button type="submit" disabled={pending}>
               {edit.isPending ? copy.project.saving : copy.project.queueSave}
             </button>
-            <button type="button" onClick={() => setDraft(null)} disabled={pending}>
+            <button
+              type="button"
+              onClick={() => {
+                setMissing(false);
+                setDraft(null);
+              }}
+              disabled={pending}
+            >
               {copy.project.queueCancelEdit}
             </button>
           </div>
