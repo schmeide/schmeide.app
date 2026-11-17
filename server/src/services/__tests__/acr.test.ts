@@ -82,9 +82,10 @@ describe("tokenRequest", () => {
 });
 
 describe("taskYaml and runRequest", () => {
-  it("builds the frontend, then pushes both images tagged with the commit", () => {
+  it("only builds and pushes both images tagged with the commit", () => {
     const yaml = taskYaml(3, "notes", commit);
-    expect(yaml).toContain("npm run build -w frontend");
+    // A cmd step runs next to the run's registry token and Docker socket (#214); a build does not.
+    expect(yaml).not.toContain("cmd:");
     expect(yaml).toContain(
       `- build: -t {{.Run.Registry}}/apps/t3/notes/web:${commit} -f frontend/Dockerfile .`
     );

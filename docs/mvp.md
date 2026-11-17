@@ -495,8 +495,9 @@ With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `
 
 - **Images**: a deploy clones staging's head, resets `frontend/Dockerfile`, `backend/Dockerfile`,
   `frontend/nginx.conf` and `.dockerignore` to the template's (in that clone only, never committed), uploads it to
-  ACR, and runs one ACR quick run that builds the frontend and pushes `apps/t<tenant>/<slug>/web` and `.../api`
-  tagged with the commit. A failed run's event carries the end of its log and a link to all of it.
+  ACR, and runs one ACR quick run that builds and pushes `apps/t<tenant>/<slug>/web` and `.../api` tagged with the
+  commit; the frontend bundle is built inside `frontend/Dockerfile`, never in a `cmd` step (#214). A failed
+  run's event carries the end of its log and a link to all of it.
 - **Namespace**: `tenant-<tenant id>`, applied on every deploy (server-side apply, so it is idempotent) with the
   worker's RoleBinding to `schmeide-tenant-deployer`, a ResourceQuota, a LimitRange, and NetworkPolicies that let
   in only Traefik on 8080 and out only DNS and Postgres on 5432.
