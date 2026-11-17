@@ -14,8 +14,8 @@ leaves two approved logins, both with the password `schmeide-local-only`, and pr
 - `admin@schmeide.localhost`: the platform admin role, in no business. Its grant is in the audit log like any other.
 - `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role.
 
-To work on customer screens, sign in as the admin and view as `owner@schmeide.localhost`
-([Viewing as a customer](#viewing-as-a-customer)).
+To work on customer screens, sign in as the admin, open Admin, then Businesses, then "Demo business" (`demo`), and
+press "View as Local Owner" on `owner@schmeide.localhost`'s row ([Viewing as a customer](#viewing-as-a-customer)).
 
 Running it again adds only what is missing: it does not reset a changed password or sign anyone out. It refuses, and
 writes nothing, unless `SCHMEIDE_PUBLIC_URL` is localhost, so a known password never reaches a deployed database. For
@@ -58,16 +58,18 @@ procedure that does not exist.
   one.
 - `access/remove` takes an admin's access away like anyone else's: the role is kept but does nothing while the address
   is off the list.
+- `/admin/businesses` lists every business and its members and apps, and `/admin/people` every person with an
+  account. Both are read-only, and no admin procedure answers a password hash, session, provider, or invite token.
 - The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
 
 ## Viewing as a customer
 
 An admin can see and use the app exactly as a person does, to reproduce what they report: their businesses, their
-projects, and the same guards. There is no page of its own: the control sits on a person's row in the admin area, on
-the people screen and on a business's page (#132). The admin gives a reason, and the browser switches to a session
-as that person (`admin.impersonation.start`, built on Better Auth's admin plugin, which records the admin on the
-session as `sessions.impersonated_by`).
+projects, and the same guards. From a person's row at `/admin/people`, or a member's row on a business's page
+(`/admin/businesses/<id>`), the admin gives a reason, and the browser switches to a session as that person
+(`admin.impersonation.start`, built on Better Auth's admin plugin, which records the admin on the session as
+`sessions.impersonated_by`).
 
 - Every page shows a banner naming the person, which cannot be dismissed. Its Stop button
   (`impersonation.stop`) returns the admin to their own session at `/admin`. Signing out from the account menu

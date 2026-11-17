@@ -34,6 +34,9 @@ export const copy = {
     account: "Account",
     welcome: "Your business",
     admin: "Admin",
+    adminBusinesses: "Businesses",
+    adminBusiness: "Business",
+    adminPeople: "People",
     adminAudit: "Audit log",
     help: "Help",
     signIn: "Sign in",
@@ -65,6 +68,42 @@ export const copy = {
     reasonNeeded: "Give a reason before viewing as someone.",
     action: "View as this person",
     starting: "Starting…",
+  },
+  // The search box and paging every admin list shares.
+  adminSearch: {
+    label: "Search",
+    action: "Search",
+    more: "Show more",
+  },
+  businesses: {
+    intro: "Every business, newest first.",
+    searchHint: "A business name, or the email of someone in it.",
+    caption: "Businesses",
+    columns: ["Business", "Slug", "Members", "Apps", "Created"],
+    empty: "No business matches.",
+  },
+  // One business, in the admin area.
+  business: {
+    slug: "Slug",
+    created: "Created",
+    membersTitle: "Members",
+    memberColumns: ["Name", "Email", "Role", "View as"],
+    roles: { owner: "Owner", editor: "Editor" },
+    noMembers: "Nobody is in this business.",
+    projectsTitle: "Apps",
+    projectColumns: ["App", "State"],
+    noProjects: "This business has no apps.",
+  },
+  people: {
+    intro:
+      "Everyone with an account, newest first. An approved email that has never signed in is not listed here; make access/list shows those.",
+    searchHint: "A name or an email.",
+    caption: "People",
+    columns: ["Name", "Email", "Businesses", "Approved", "Admin", "View as"],
+    yes: "Yes",
+    no: "No",
+    empty: "Nobody matches.",
+    viewAs: (name: string) => `View as ${name}`,
   },
   audit: {
     intro: "What admins did, newest first. Nothing here is ever edited or removed.",

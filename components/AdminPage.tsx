@@ -5,7 +5,7 @@ import { Link } from "./Link";
 import styles from "./AdminPage.module.css";
 
 // The admin area's sections, in the order they are offered. A new admin screen adds its route here.
-const SECTIONS: readonly RouteName[] = ["adminAudit"];
+const SECTIONS: readonly RouteName[] = ["adminBusinesses", "adminPeople", "adminAudit"];
 
 export function AdminPage() {
   return (

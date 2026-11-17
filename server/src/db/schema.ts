@@ -489,6 +489,16 @@ export const auditQuerySchema = z.object({
   limit: z.number().int().min(1).max(100).default(50),
 });
 
+// A page of an admin list, newest first, narrowed by a search. `cursor` is how many rows were
+// already shown; the answer's `nextCursor` is passed back for the next page.
+export const adminListSchema = z.object({
+  search: z.string().trim().max(254).optional(),
+  cursor: z.number().int().min(0).nullish(),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const tenantIdSchema = z.object({ id: createSelectSchema(tenants).shape.id });
+
 // Prelaunch: only these addresses (lowercase) may have an account or a session. Delete the table
 // and its checks (services/access.ts) to open sign-up to everyone.
 export const approvedEmails = pgTable("approved_emails", {
