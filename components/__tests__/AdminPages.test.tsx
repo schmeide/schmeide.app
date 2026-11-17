@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -8,6 +8,7 @@ import type {
   HostedProject,
   PersonEntry,
   ProjectResources,
+  UsageSummaryData,
 } from "../../trpc";
 import type { Session } from "../../utils/session";
 import { AdminAuditPage } from "../AdminAuditPage";
@@ -16,6 +17,7 @@ import { AdminBusinessesPage } from "../AdminBusinessesPage";
 import { AdminPage } from "../AdminPage";
 import { AdminPeoplePage } from "../AdminPeoplePage";
 import { AdminProjectsPage } from "../AdminProjectsPage";
+import { AdminUsagePage } from "../AdminUsagePage";
 import { ViewAsForm } from "../ViewAsForm";
 import { renderWithApi } from "./fakeApi";
 
@@ -36,6 +38,13 @@ const anEntry = (overrides: Partial<AuditEntry> = {}): AuditEntry => ({
   ...overrides,
 });
 
+const noSummary = (): UsageSummaryData => ({
+  businesses: [],
+  projects: [],
+  models: [],
+  runKinds: [],
+});
+
 const filters = () => ({
   admins: ["command line", "grace@example.com"],
   businesses: [{ id: 4, name: "Ada's bakery", slug: "ada" }],
@@ -53,6 +62,7 @@ describe("AdminPage", () => {
       [copy.routes.adminBusinesses, "/admin/businesses"],
       [copy.routes.adminPeople, "/admin/people"],
       [copy.routes.adminProjects, "/admin/projects"],
+      [copy.routes.adminUsage, "/admin/usage"],
       [copy.routes.adminAudit, "/admin/audit"],
     ]);
     expect(
@@ -274,6 +284,7 @@ describe("AdminBusinessPage", () => {
           projects: [{ id: 7, name: "Invoices", status: "live" }],
         }),
         "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
       },
       admin
     );
@@ -302,6 +313,7 @@ describe("AdminBusinessPage", () => {
           members: [],
           projects: [],
         }),
+        "admin.usage.summary": noSummary,
       },
       admin
     );
@@ -559,6 +571,7 @@ describe("AdminBusinessPage's resources", () => {
       {
         "admin.businesses.get": business([{ id: 7 }, { id: 8 }]),
         "admin.projects.resources": () => [figures(), figures({ id: 8, containers: 1 })],
+        "admin.usage.summary": noSummary,
       },
       admin
     );
@@ -574,11 +587,101 @@ describe("AdminBusinessPage's resources", () => {
       {
         "admin.businesses.get": business([{ id: 7 }, { id: 8 }]),
         "admin.projects.resources": () => [figures(), figures({ id: 8, memoryBytes: null })],
+        "admin.usage.summary": noSummary,
       },
       admin
     );
     const region = await totals();
     expect(await region.findByText(copy.resources.unknown)).toBeInTheDocument();
     expect(region.getByText("4")).toBeInTheDocument();
+  });
+});
+
+const spent = {
+  inputTokens: 1200,
+  outputTokens: 340,
+  cacheReadTokens: 5000,
+  cacheCreationTokens: 60,
+  costUsd: 2.5,
+};
+
+const aSummary = (): UsageSummaryData => ({
+  businesses: [
+    { id: 4, name: "Ada's bakery", ...spent },
+    { id: 5, name: "Bea's books", ...spent, costUsd: 0.25 },
+  ],
+  projects: [{ id: 7, name: "Invoices", business: { id: 4, name: "Ada's bakery" }, ...spent }],
+  models: [{ model: "claude-opus", ...spent }],
+  runKinds: [{ runKind: "change", ...spent }],
+});
+
+describe("AdminUsagePage", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("asks for the current month in UTC, and shows businesses as the server orders them", async () => {
+    const calls = renderWithApi(<AdminUsagePage />, { "admin.usage.summary": aSummary }, admin);
+    const table = await screen.findByRole("table", { name: copy.usage.businessesCaption });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(cellsOf(rows[0])).toEqual(["Ada's bakery", "1,200", "340", "5,000", "60", "$2.50"]);
+    expect(cellsOf(rows[1])[0]).toBe("Bea's books");
+    expect(within(rows[0]).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
+      "href",
+      "/admin/businesses/4"
+    );
+    expect(calls[0].input).toEqual({ from: "2026-11-01", to: "2026-11-30" });
+    expect(screen.getByLabelText(copy.usage.from)).toHaveValue("2026-11-01");
+    expect(screen.getByRole("table", { name: copy.usage.projectsCaption })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: copy.usage.modelsCaption })).toHaveTextContent(
+      "claude-opus"
+    );
+    expect(screen.getByRole("table", { name: copy.usage.runKindsCaption })).toHaveTextContent(
+      "change"
+    );
+    // The timezone, and what happens to a deleted app's usage, are said on the page.
+    expect(screen.getByText(copy.usage.timezone)).toBeInTheDocument();
+    expect(screen.getByText(copy.usage.deletedProjects)).toBeInTheDocument();
+  });
+
+  it("asks again for the period chosen", async () => {
+    const calls = renderWithApi(<AdminUsagePage />, { "admin.usage.summary": aSummary }, admin);
+    await screen.findByRole("table", { name: copy.usage.businessesCaption });
+    fireEvent.change(screen.getByLabelText(copy.usage.from), { target: { value: "2026-10-01" } });
+    fireEvent.change(screen.getByLabelText(copy.usage.to), { target: { value: "2026-10-15" } });
+    await waitFor(() =>
+      expect(calls.at(-1)?.input).toEqual({ from: "2026-10-01", to: "2026-10-15" })
+    );
+  });
+
+  it("says when nothing was used in the period", async () => {
+    renderWithApi(<AdminUsagePage />, { "admin.usage.summary": noSummary }, admin);
+    expect(await screen.findByText(copy.usage.empty)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+});
+
+describe("AdminBusinessPage's usage", () => {
+  it("shows the business's totals over all time", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => ({
+          business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+          members: [],
+          projects: [],
+        }),
+        "admin.usage.summary": () => ({ ...noSummary(), businesses: [aSummary().businesses[0]] }),
+      },
+      admin
+    );
+    const region = within(await screen.findByRole("region", { name: copy.project.usageTitle }));
+    expect(await region.findByText("$2.50")).toBeInTheDocument();
+    expect(region.getByText("1,200")).toBeInTheDocument();
+    expect(calls.find(({ path }) => path === "admin.usage.summary")?.input).toEqual({
+      tenantId: 4,
+    });
   });
 });

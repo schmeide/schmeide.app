@@ -8,6 +8,7 @@ import { AdminBusinessesPage } from "./AdminBusinessesPage";
 import { AdminPage } from "./AdminPage";
 import { AdminPeoplePage } from "./AdminPeoplePage";
 import { AdminProjectsPage } from "./AdminProjectsPage";
+import { AdminUsagePage } from "./AdminUsagePage";
 import { PlaceholderPage } from "./PlaceholderPage";
 import { ProjectList } from "./ProjectList";
 import { ProjectPage } from "./ProjectPage";
@@ -37,6 +38,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   adminBusiness: ({ id }) => <AdminBusinessPage key={id} id={id} />,
   adminPeople: () => <AdminPeoplePage />,
   adminProjects: () => <AdminProjectsPage />,
+  adminUsage: () => <AdminUsagePage />,
   adminAudit: () => <AdminAuditPage />,
   help: placeholder("help"),
   signIn: () => <SignInPage />,

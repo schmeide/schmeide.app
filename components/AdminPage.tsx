@@ -9,6 +9,7 @@ const SECTIONS: readonly RouteName[] = [
   "adminBusinesses",
   "adminPeople",
   "adminProjects",
+  "adminUsage",
   "adminAudit",
 ];
 

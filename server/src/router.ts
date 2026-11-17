@@ -26,6 +26,7 @@ import {
   setFeaturesSchema,
   sessions,
   tenantIdSchema,
+  usageQuerySchema,
   users,
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
@@ -55,6 +56,7 @@ import {
 import type { FileReader } from "./services/fileReader.ts";
 import type { FileStore } from "./services/fileStore.ts";
 import type { ResourceReader } from "./services/resources.ts";
+import { usageSummary } from "./services/usageSummary.ts";
 import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
   addPlanItem,
@@ -270,6 +272,10 @@ export const appRouter = t.router({
       resources: admin
         .input(projectIdsSchema)
         .query(({ ctx, input }) => hostedResources(ctx, input.ids)),
+    }),
+    // Tokens and cost per business, project, model, and kind of run; see services/usageSummary.ts.
+    usage: t.router({
+      summary: admin.input(usageQuerySchema).query(({ ctx, input }) => usageSummary(ctx.db, input)),
     }),
     impersonation: t.router({
       // Switches the caller to a session as the person, for an hour at most (services/auth.ts).
