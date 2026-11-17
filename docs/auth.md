@@ -12,7 +12,8 @@ On localhost, `make serve` runs `make db/seed` after the migrations, so there is
 leaves two approved logins, both with the password `schmeide-local-only`, and prints them:
 
 - `admin@schmeide.localhost`: the platform admin role, in no business. Its grant is in the audit log like any other.
-- `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role.
+- `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role. The seed makes `demo` too: the
+  migrations leave no `demo` business in a fresh database, so a deployed one never has it.
 
 To work on customer screens, sign in as the admin, open Admin, then Businesses, then "Demo business" (`demo`), and
 press "View as Local Owner" on `owner@schmeide.localhost`'s row ([Viewing as a customer](#viewing-as-a-customer)).
@@ -241,7 +242,9 @@ schmeide.app is static files on GitHub Pages. Until it is built with an API addr
    `X-Forwarded-For` (sign-in attempts are limited per address).
 3. Set on the server: `SCHMEIDE_PUBLIC_URL=https://schmeide.app`, `SCHMEIDE_API_URL=https://api.schmeide.app`,
    `SCHMEIDE_AUTH_SECRET`, and the provider values. Use the `api.schmeide.app` return addresses with each provider.
-4. Run the migrations against its database (`make db/migrate`), and approve yourself.
+4. Run the migrations against its database, and approve yourself. `node src/migrate.ts` (in `server/`, with
+   `DATABASE_URL` set) needs only the runtime dependencies, so the production image runs it before each deploy and
+   stops the deploy when it fails; `make db/migrate` runs the same file.
 5. In the GitHub repository, set the Actions variable `VITE_API_URL` to `https://api.schmeide.app`, and run the
    Continuous Deployment workflow. Removing the variable and deploying again turns the hosted app back off.
 
