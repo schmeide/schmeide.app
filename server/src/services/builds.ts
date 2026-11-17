@@ -46,10 +46,21 @@ export const getBuild = async (db: Db, buildId: number): Promise<Build> => {
   return build;
 };
 
-export const finishBuild = async (db: Db, buildId: number, error?: string): Promise<Build> => {
+// `canceled` records that the person stopped the build. It stores no error: nothing went wrong.
+export const finishBuild = async (
+  db: Db,
+  buildId: number,
+  error?: string,
+  outcome: "failed" | "canceled" = "failed"
+): Promise<Build> => {
+  const canceled = outcome === "canceled";
   const [build] = await db
     .update(builds)
-    .set({ status: error ? "failed" : "passed", error: error ?? null, finishedAt: new Date() })
+    .set({
+      status: canceled ? "canceled" : error ? "failed" : "passed",
+      error: canceled ? null : (error ?? null),
+      finishedAt: new Date(),
+    })
     .where(eq(builds.id, buildId))
     .returning();
   return build;
@@ -63,7 +74,7 @@ const buildMs = sql`extract(epoch from ${builds.finishedAt} - ${builds.startedAt
 export const buildingTime = {
   buildingMs: sql<number>`coalesce(round(sum(${buildMs})), 0)`.mapWith(Number),
   failedBuildingMs:
-    sql<number>`coalesce(round(sum(${buildMs}) filter (where ${builds.status} = 'failed')), 0)`.mapWith(
+    sql<number>`coalesce(round(sum(${buildMs}) filter (where ${builds.status} in ('failed', 'canceled'))), 0)`.mapWith(
       Number
     ),
 };

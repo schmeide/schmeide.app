@@ -24,6 +24,7 @@ import {
   findProject,
   getProject,
   generateSpec,
+  listProjects,
   promoteStaging,
   removeQueuedChange,
   requestChange,
@@ -229,6 +230,14 @@ describe("getProject time", () => {
         {
           projectId: project.id,
           kind: "change",
+          request: "stopped",
+          status: "canceled",
+          startedAt: at(300),
+          finishedAt: at(310),
+        },
+        {
+          projectId: project.id,
+          kind: "change",
           request: "y",
           status: "running",
           startedAt: at(200),
@@ -245,8 +254,8 @@ describe("getProject time", () => {
     const { time } = await getProject(db, project.id);
 
     expect(time).toEqual({
-      buildingMs: 150_000,
-      failedBuildingMs: 60_000,
+      buildingMs: 160_000,
+      failedBuildingMs: 70_000,
       builderMs: 54_000,
       builderUnrecorded: false,
     });
@@ -322,6 +331,37 @@ describe("getProject time", () => {
       builderMs: 0,
       builderUnrecorded: false,
     });
+  });
+});
+
+describe("listProjects", () => {
+  it("reports a canceled build apart from a failed one, ignoring a change that is still waiting", async () => {
+    const canceled = await createProject(db, {
+      name: `c ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    const failed = await createProject(db, {
+      name: `f ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await db.insert(builds).values([
+      { projectId: canceled.id, kind: "initial", request: "spec", status: "canceled" },
+      { projectId: canceled.id, kind: "change", request: "later", status: "queued" },
+      {
+        projectId: failed.id,
+        kind: "initial",
+        request: "spec",
+        status: "failed",
+        error: "boom",
+      },
+    ]);
+
+    const listed = await listProjects(db, DEMO_TENANT_ID);
+
+    expect(listed.find((project) => project.id === canceled.id)?.latestBuildStatus).toBe(
+      "canceled"
+    );
+    expect(listed.find((project) => project.id === failed.id)?.latestBuildStatus).toBe("failed");
   });
 });
 
@@ -515,9 +555,10 @@ describe("the change queue", () => {
   it("leaves the queue waiting after a failed or canceled build", async () => {
     const { deps, project, build } = await building();
     const queued = await requestChange(deps, { id: project.id, request: "later" });
-    await finishBuild(db, build.id, "Build canceled");
+    await finishBuild(db, build.id, undefined, "canceled");
     await transition(db, project.id, ["building"], { status: "failed" });
 
+    expect(await getBuild(db, build.id)).toMatchObject({ status: "canceled", error: null });
     expect(await startNextChange(deps, project.id)).toBeUndefined();
     expect((await getBuild(db, queued.build.id)).status).toBe("queued");
 

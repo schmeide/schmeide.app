@@ -137,7 +137,7 @@ export const followRun = async (
 };
 
 // Deletes the run's Job, its pod first (Foreground), and its Secret, and waits until the Job is
-// gone, so a canceled build is only recorded as failed once nothing of it runs. Throws when it is
+// gone, so a canceled build is only recorded once nothing of it runs. Throws when it is
 // still there after `timeoutMs`, so a retry backs off rather than adopt a Job that is terminating.
 export const deleteRun = async (kube: Kube, name: string, timeoutMs = 120_000): Promise<void> => {
   await kube.deleteJob(name, "Foreground");

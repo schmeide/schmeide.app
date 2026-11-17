@@ -1970,7 +1970,11 @@ export const createActivities = (
       await db.update(projects).set({ status: "live" }).where(eq(projects.id, project.id));
     },
 
-    async finishBuild(buildId: number, error?: string): Promise<void> {
+    async finishBuild(
+      buildId: number,
+      error?: string,
+      outcome: "failed" | "canceled" = "failed"
+    ): Promise<void> {
       const { project } = await projectOfBuild(buildId);
       if (await stat(workspaceOf(project)).catch(() => undefined)) {
         await removeReferenceCopies(
@@ -1993,8 +1997,12 @@ export const createActivities = (
           event(buildId, "error", `Could not remove the build's Jobs and keys: ${String(cause)}`)
         );
       await clearAttachments(buildId);
-      const build = await finishBuildRow(db, buildId, error);
-      if (error) {
+      const build = await finishBuildRow(db, buildId, error, outcome);
+      if (outcome === "canceled") {
+        // A step, not an error: the person stopped it, and the page must not say something went wrong.
+        await event(buildId, "step", "Build canceled");
+        await db.update(projects).set({ status: "failed" }).where(eq(projects.id, build.projectId));
+      } else if (error) {
         await event(buildId, "error", error);
         await db.update(projects).set({ status: "failed" }).where(eq(projects.id, build.projectId));
       } else {

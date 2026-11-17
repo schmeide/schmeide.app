@@ -57,7 +57,9 @@ const task = ({ outcome }: SummaryInput): string =>
     ? "Write one or two short sentences: what the builder is doing now, and what it has finished since your last update."
     : outcome.status === "passed"
       ? "The build finished and passed. Write two or three sentences on what changed in their app."
-      : "The build failed. Write two or three sentences: what was done, and what went wrong, in plain words. Say only what the events show, and do not guess at a cause the events do not show.";
+      : outcome.status === "canceled"
+        ? "The person canceled this build. Write one or two sentences saying they stopped it and that nothing is wrong with the app. Do not say the build failed."
+        : "The build failed. Write two or three sentences: what was done, and what went wrong, in plain words. Say only what the events show, and do not guess at a cause the events do not show.";
 
 export const summaryPrompt = (input: SummaryInput, marker: string = randomUUID()): string => {
   const failed = input.outcome?.status === "failed";

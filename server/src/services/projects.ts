@@ -171,8 +171,30 @@ export const createProject = async (db: Db, input: NewProject, attempts = 5): Pr
   }
 };
 
-export const listProjects = (db: Db, tenantId: number): Promise<readonly Project[]> =>
-  db.select().from(projects).where(eq(projects.tenantId, tenantId)).orderBy(desc(projects.id));
+export type ListedProject = Project & {
+  // The latest build that ran, so a canceled one is not shown as a failure. Null before any build.
+  readonly latestBuildStatus: Build["status"] | null;
+};
+
+export const listProjects = async (db: Db, tenantId: number): Promise<readonly ListedProject[]> => {
+  // A waiting change has not run, so it does not decide what the list says about the project.
+  const last = db
+    .selectDistinctOn([builds.projectId], {
+      projectId: builds.projectId,
+      status: builds.status,
+    })
+    .from(builds)
+    .where(ne(builds.status, "queued"))
+    .orderBy(builds.projectId, desc(builds.id))
+    .as("last_build");
+  const rows = await db
+    .select({ project: projects, latestBuildStatus: last.status })
+    .from(projects)
+    .leftJoin(last, eq(last.projectId, projects.id))
+    .where(eq(projects.tenantId, tenantId))
+    .orderBy(desc(projects.id));
+  return rows.map(({ project, latestBuildStatus }) => ({ ...project, latestBuildStatus }));
+};
 
 export const findProject = async (db: Db, id: number): Promise<Project> => {
   const [project] = await db.select().from(projects).where(eq(projects.id, id));

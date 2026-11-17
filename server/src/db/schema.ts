@@ -100,7 +100,14 @@ export const buildKind = pgEnum("build_kind", ["initial", "change", "site", "pro
 // Null while it is on staging only.
 export const buildRelease = pgEnum("build_release", ["promoted", "discarded"]);
 // `queued`: a change waiting for the project's running build; it starts once that one passes.
-export const buildStatus = pgEnum("build_status", ["queued", "running", "passed", "failed"]);
+// `canceled`: the person stopped the build. Nothing failed, so there is no error message.
+export const buildStatus = pgEnum("build_status", [
+  "queued",
+  "running",
+  "passed",
+  "failed",
+  "canceled",
+]);
 
 export const builds = pgTable("builds", {
   id: serial("id").primaryKey(),

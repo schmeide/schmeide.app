@@ -713,7 +713,7 @@ describe("a suspended business", () => {
     ])
       await expect(step()).rejects.toThrow("This business is suspended");
     expect(calls).toEqual([]);
-    // Recording how the build ended still works, so it ends as failed, like a cancel.
+    // Recording how the build ended still works, so it ends as failed. A cancel is its own status.
     await env.run(activities.finishBuild, build.id, "This business is suspended");
     const [after] = await db.select().from(builds).where(eq(builds.id, build.id));
     expect(after.status).toBe("failed");
