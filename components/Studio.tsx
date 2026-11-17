@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { copy } from "../data/copy";
+import { serverDownText } from "./ErrorNote";
 import { Routes } from "./Routes";
 import { useSession } from "./SessionProvider";
 
@@ -29,7 +30,7 @@ export function Studio({
       ) : (
         <>
           <h1>{copy.errors.serverDownTitle}</h1>
-          <p>{copy.errors.serverDown}</p>
+          <p>{serverDownText}</p>
           <button type="button" onClick={() => void refresh()}>
             {copy.errors.retry}
           </button>

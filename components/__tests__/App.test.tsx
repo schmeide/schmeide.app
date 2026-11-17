@@ -44,7 +44,7 @@ describe("App", () => {
   it("tells a developer how to start the server when it is down", async () => {
     renderWithApi(<App isPublicSite={false} />, unreachable, "server");
     expect(await screen.findByText(copy.errors.serverDownTitle)).toBeInTheDocument();
-    expect(screen.getByText(copy.errors.serverDown)).toHaveTextContent("make serve");
+    expect(screen.getByText(copy.errors.serverDownLocal)).toHaveTextContent("make serve");
   });
 
   it("sends a signed-out visitor to sign in once the API answers", async () => {

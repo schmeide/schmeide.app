@@ -669,8 +669,10 @@ export const copy = {
     },
   },
   errors: {
-    serverDownTitle: "Cannot reach the Schmeide server",
-    serverDown:
+    serverDownTitle: "Schmeide is not answering",
+    serverDown: "Schmeide is not answering right now. Wait a moment, then press “Try again”.",
+    // For a developer running the site locally, where no hosted API is set.
+    serverDownLocal:
       "The server is not running. In a terminal, from the schmeide.app folder, run “make serve” (or “gmake serve”), wait until it prints the App address, then press “Try again”.",
     retry: "Try again",
     signedOut: "You are signed out. Sign in again to continue.",
