@@ -1,5 +1,5 @@
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
@@ -53,6 +53,24 @@ export const finishBuild = async (db: Db, buildId: number, error?: string): Prom
     .where(eq(builds.id, buildId))
     .returning();
   return build;
+};
+
+// Building time is each finished build's start to finish: what a person waited, checks and publishing
+// included. A queued change's start is set when it actually starts (startNextChange), so its wait
+// is not counted. Failed builds, canceled ones among them, are summed apart as well.
+const buildMs = sql`extract(epoch from ${builds.finishedAt} - ${builds.startedAt}) * 1000`;
+export const buildingTime = {
+  buildingMs: sql<number>`coalesce(round(sum(${buildMs})), 0)`.mapWith(Number),
+  failedBuildingMs:
+    sql<number>`coalesce(round(sum(${buildMs}) filter (where ${builds.status} = 'failed')), 0)`.mapWith(
+      Number
+    ),
+};
+export const finishedBuild = isNotNull(builds.finishedAt);
+
+// Builder time is how long the model itself ran, over every recorded run.
+export const builderTime = {
+  builderMs: sql<number>`coalesce(sum(${agentRuns.durationMs}), 0)`.mapWith(Number),
 };
 
 // One agent run as its SDK result reports it: the run with its time, and one usage row per model.

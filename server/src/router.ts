@@ -21,6 +21,7 @@ import {
   newBusinessSchema,
   newPlanItemSchema,
   newProjectSchema,
+  periodSchema,
   planItemIdSchema,
   projectIdSchema,
   projectIdsSchema,
@@ -78,7 +79,7 @@ import {
 import type { FileReader } from "./services/fileReader.ts";
 import type { FileStore } from "./services/fileStore.ts";
 import type { ResourceReader } from "./services/resources.ts";
-import { usageSummary } from "./services/usageSummary.ts";
+import { businessTime, usageSummary } from "./services/usageSummary.ts";
 import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
   addPlanItem,
@@ -489,6 +490,13 @@ export const appRouter = t.router({
     rename: onProject(renameFileSchema).mutation(({ ctx, input }) => renameFile(ctx.db, input)),
     delete: onProject(fileIdSchema).mutation(({ ctx, input }) => deleteFile(ctx, input)),
     read: onProject(fileIdSchema).mutation(({ ctx, input }) => readFileIntoProposals(ctx, input)),
+  }),
+  // The caller's business's building and builder time for a period (all time when none is given),
+  // for the usage page.
+  usage: t.router({
+    time: signedIn
+      .input(periodSchema.default({}))
+      .query(({ ctx, input }) => businessTime(ctx.db, ctx.tenantId, input)),
   }),
   builds: t.router({
     events: onBuild(eventsQuerySchema).query(({ ctx, input }) =>

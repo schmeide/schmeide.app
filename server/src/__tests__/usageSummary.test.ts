@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
-import { usage, type NewUsage } from "../db/schema.ts";
+import { agentRuns, builds, usage, type NewUsage } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { createProject, deleteProjectRows } from "../services/projects.ts";
 import { aSignedInAdmin, aSignedInPerson, adminPaths, callApi, testAuth } from "./testAuth.ts";
@@ -41,6 +41,12 @@ type Summary = {
   })[];
   readonly models: readonly (Totals & { readonly model: string })[];
   readonly runKinds: readonly (Totals & { readonly runKind: string })[];
+  readonly times: readonly (Time & { readonly id: number; readonly name: string })[];
+};
+type Time = {
+  readonly buildingMs: number;
+  readonly failedBuildingMs: number;
+  readonly builderMs: number;
 };
 
 // Each test reads its own month of an otherwise empty year, so tests running alongside cannot
@@ -61,7 +67,7 @@ const row = (projectId: number, at: string, overrides: Partial<NewUsage> = {}): 
 const aBusinessWithAProject = async (name: string) => {
   const owner = await aSignedInPerson(app, deps, { name });
   const project = await createProject(db, { name: `${name}'s app`, tenantId: owner.tenantId });
-  return { tenantId: owner.tenantId, project };
+  return { tenantId: owner.tenantId, cookie: owner.cookie, project };
 };
 
 const summary = async (cookie: string, input: object) => {
@@ -176,5 +182,94 @@ describe("the usage summary", () => {
       const { code } = await callApi(app, "admin.usage.summary", input, admin.cookie);
       expect([input, code]).toEqual([input, "BAD_REQUEST"]);
     }
+  });
+});
+
+describe("time spent", () => {
+  // A build of `seconds` that finished at `at`, and model runs of `ms` each recorded at `at`.
+  const aBuild = (projectId: number, at: string, seconds: number, status: "passed" | "failed") => ({
+    projectId,
+    kind: "change" as const,
+    request: "x",
+    status,
+    startedAt: new Date(Date.parse(at) - seconds * 1000),
+    finishedAt: new Date(at),
+  });
+  const aRun = (projectId: number, at: string, durationMs: number) => ({
+    projectId,
+    runKind: "change" as const,
+    durationMs,
+    at: new Date(at),
+  });
+
+  const twoBusinesses = async () => {
+    const tia = await aBusinessWithAProject("Tia");
+    const ben = await aBusinessWithAProject("Ben");
+    await db.insert(builds).values([
+      aBuild(tia.project.id, "2006-03-05T12:00:00Z", 90, "passed"),
+      aBuild(tia.project.id, "2006-03-06T12:00:00Z", 60, "failed"),
+      aBuild(ben.project.id, "2006-03-07T12:00:00Z", 30, "passed"),
+      // Finished after the period.
+      aBuild(tia.project.id, "2006-04-01T00:00:00Z", 1000, "passed"),
+    ]);
+    await db
+      .insert(agentRuns)
+      .values([
+        aRun(tia.project.id, "2006-03-05T12:00:00Z", 20_000),
+        aRun(ben.project.id, "2006-03-07T12:00:00Z", 5_000),
+        aRun(tia.project.id, "2006-04-02T00:00:00Z", 7_000),
+      ]);
+    return { tia, ben };
+  };
+  const MARCH = { from: "2006-03-01", to: "2006-03-31" };
+
+  it("sums building and builder time per business for the period, failed apart, without mixing", async () => {
+    const admin = await aSignedInAdmin(app, deps);
+    const { tia, ben } = await twoBusinesses();
+
+    const result = await summary(admin.cookie, MARCH);
+
+    const ours = new Set([tia.tenantId, ben.tenantId]);
+    expect(result.times.filter(({ id }) => ours.has(id))).toEqual([
+      {
+        id: tia.tenantId,
+        name: "Tia’s business",
+        buildingMs: 150_000,
+        failedBuildingMs: 60_000,
+        builderMs: 20_000,
+      },
+      {
+        id: ben.tenantId,
+        name: "Ben’s business",
+        buildingMs: 30_000,
+        failedBuildingMs: 0,
+        builderMs: 5_000,
+      },
+    ]);
+  });
+
+  it("answers a person their own business's time only, whatever business they name", async () => {
+    const { tia, ben } = await twoBusinesses();
+
+    const own = await callApi(app, "usage.time", MARCH, tia.cookie);
+    const named = await callApi(
+      app,
+      "usage.time",
+      { ...MARCH, tenantId: ben.tenantId },
+      tia.cookie
+    );
+    const none = await callApi(
+      app,
+      "usage.time",
+      { from: "1990-01-01", to: "1990-01-31" },
+      tia.cookie
+    );
+
+    expect(own.data).toEqual({ buildingMs: 150_000, failedBuildingMs: 60_000, builderMs: 20_000 });
+    expect(named.data).toEqual(own.data);
+    expect(none.data).toEqual({ buildingMs: 0, failedBuildingMs: 0, builderMs: 0 });
+    const allTime = await callApi(app, "usage.time", undefined, tia.cookie);
+    expect(allTime.data).toMatchObject({ buildingMs: 1_150_000, builderMs: 27_000 });
+    expect((await callApi(app, "usage.time", MARCH)).code).toBe("UNAUTHORIZED");
   });
 });

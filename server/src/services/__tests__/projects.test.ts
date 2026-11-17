@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { builds, projects } from "../../db/schema.ts";
+import { agentRuns, builds, projects, usage } from "../../db/schema.ts";
 import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../builds.ts";
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
@@ -185,6 +185,98 @@ describe("getProject", () => {
       cacheReadTokens: 0,
       cacheCreationTokens: 0,
       costUsd: 0,
+    });
+  });
+});
+
+describe("getProject time", () => {
+  const at = (seconds: number) => new Date(Date.UTC(2020, 0, 1, 12, 0, seconds));
+
+  it("sums building time per finished build, failed apart, and builder time per run", async () => {
+    const project = await createProject(db, {
+      name: `t ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    const [passed, failed] = await db
+      .insert(builds)
+      .values([
+        {
+          projectId: project.id,
+          kind: "initial",
+          request: "spec",
+          status: "passed",
+          startedAt: at(0),
+          finishedAt: at(90),
+        },
+        {
+          projectId: project.id,
+          kind: "change",
+          request: "x",
+          status: "failed",
+          startedAt: at(100),
+          finishedAt: at(160),
+        },
+        {
+          projectId: project.id,
+          kind: "change",
+          request: "y",
+          status: "running",
+          startedAt: at(200),
+        },
+        { projectId: project.id, kind: "change", request: "z", status: "queued", startedAt: at(0) },
+      ])
+      .returning();
+    await db.insert(agentRuns).values([
+      { projectId: project.id, buildId: passed.id, runKind: "initial", durationMs: 30_000 },
+      { projectId: project.id, buildId: failed.id, runKind: "change", durationMs: 20_000 },
+      { projectId: project.id, runKind: "spec", durationMs: 4_000 },
+    ]);
+
+    const { time } = await getProject(db, project.id);
+
+    expect(time).toEqual({
+      buildingMs: 150_000,
+      failedBuildingMs: 60_000,
+      builderMs: 54_000,
+      builderUnrecorded: false,
+    });
+  });
+
+  it("says builder time is not recorded for runs from before it was, and still times their builds", async () => {
+    const project = await createProject(db, {
+      name: `t ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    const [build] = await db
+      .insert(builds)
+      .values({
+        projectId: project.id,
+        kind: "initial",
+        request: "spec",
+        status: "passed",
+        startedAt: at(0),
+        finishedAt: at(42),
+      })
+      .returning();
+    await db.insert(usage).values({
+      projectId: project.id,
+      buildId: build.id,
+      runKind: "initial",
+      model: "m",
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
+      costUsd: 0,
+    });
+
+    const { time } = await getProject(db, project.id);
+
+    expect(time).toEqual({
+      buildingMs: 42_000,
+      failedBuildingMs: 0,
+      builderMs: 0,
+      builderUnrecorded: true,
     });
   });
 });
@@ -413,6 +505,30 @@ describe("the change queue", () => {
     await expect(removeQueuedChange(db, dropped.build.id)).rejects.toBeInstanceOf(NotFoundError);
     expect((await getBuild(db, build.id)).request).toBe("## Features");
     await finishBuild(db, build.id);
+  });
+});
+
+describe("building time of a queued change", () => {
+  it("counts from when the change started, not from when it was asked for", async () => {
+    const fake = fakeWorkflows();
+    const { project, build } = await approveSpec(fake.deps, (await specReady()).id);
+    const change = await requestChange(fake.deps, { id: project.id, request: "later" });
+    // It waited an hour behind the running build.
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    await db.update(builds).set({ startedAt: hourAgo }).where(eq(builds.id, change.build.id));
+    await db.update(builds).set({ startedAt: hourAgo }).where(eq(builds.id, build.id));
+    await finishBuild(db, build.id);
+    await db.update(projects).set({ status: "live" }).where(eq(projects.id, project.id));
+    const before = (await getProject(db, project.id)).time.buildingMs;
+
+    await startNextChange(fake.deps, project.id);
+    // A finished build's time does not grow while the next one runs.
+    expect((await getProject(db, project.id)).time.buildingMs).toBe(before);
+    await finishBuild(db, change.build.id);
+
+    const added = (await getProject(db, project.id)).time.buildingMs - before;
+    expect(added).toBeGreaterThanOrEqual(0);
+    expect(added).toBeLessThan(60_000);
   });
 });
 

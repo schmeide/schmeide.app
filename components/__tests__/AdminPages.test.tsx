@@ -45,6 +45,7 @@ const noSummary = (): UsageSummaryData => ({
   projects: [],
   models: [],
   runKinds: [],
+  times: [],
 });
 
 const filters = () => ({
@@ -666,6 +667,7 @@ const aSummary = (): UsageSummaryData => ({
   projects: [{ id: 7, name: "Invoices", business: { id: 4, name: "Ada's bakery" }, ...spent }],
   models: [{ model: "claude-opus", ...spent }],
   runKinds: [{ runKind: "change", ...spent }],
+  times: [],
 });
 
 describe("AdminUsagePage", () => {
