@@ -203,6 +203,7 @@ export type DeploymentStatus = {
     readonly replicas?: number;
     readonly updatedReplicas?: number;
     readonly availableReplicas?: number;
+    readonly conditions?: readonly JobCondition[];
   };
 };
 

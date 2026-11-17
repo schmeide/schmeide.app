@@ -8,10 +8,12 @@ import {
   databaseSecret,
   imageRepos,
   objectPath,
+  rolloutProblem,
   tenantNamespace,
   tenantObjects,
   type AppCopy,
 } from "../apps.ts";
+import type { JobCondition } from "../client.ts";
 
 const app: AppCopy = {
   tenantId: 3,
@@ -34,6 +36,7 @@ type Container = {
   env?: { name: string; value?: string; valueFrom?: unknown }[];
   securityContext: Record<string, unknown>;
   volumeMounts?: { mountPath: string }[];
+  resources: Record<"requests" | "limits", Record<string, string>>;
 };
 type DeploymentShape = Obj & {
   spec: {
@@ -102,6 +105,32 @@ describe("tenantObjects", () => {
       roleRef: { kind: "ClusterRole", name: "schmeide-tenant-deployer" },
       subjects: [{ kind: "ServiceAccount", name: "schmeide-worker", namespace: "schmeide-app" }],
     });
+  });
+
+  it("fits about eight apps at two copies each, plus a rolling update's surge pod", () => {
+    // Memory in Mi and CPU in millicores, for the quantities these objects use.
+    const amount = (quantity: string): number => {
+      const [, value, unit] = /^(\d+)(Mi|Gi|m)?$/.exec(quantity) ?? [];
+      return Number(value) * (unit === "Gi" ? 1024 : unit === undefined ? 1000 : 1);
+    };
+    const { spec } = byKind(appObjects(app)).Deployment as DeploymentShape;
+    // What the quota charges a pod: its containers' sum, or its largest init container if more.
+    const perPod = (kind: "requests" | "limits", resource: string) =>
+      Math.max(
+        ...spec.template.spec.initContainers.map(({ resources }) =>
+          amount(resources[kind][resource])
+        ),
+        spec.template.spec.containers.reduce(
+          (sum, { resources }) => sum + amount(resources[kind][resource]),
+          0
+        )
+      );
+    const pods = 8 * 2 + 1;
+    const { hard } = objects.ResourceQuota.spec as { hard: Record<string, string> };
+    expect(Number(hard.pods)).toBeGreaterThanOrEqual(pods);
+    expect(amount(hard["requests.cpu"])).toBeGreaterThanOrEqual(pods * perPod("requests", "cpu"));
+    for (const kind of ["requests", "limits"] as const)
+      expect(amount(hard[`${kind}.memory`])).toBeGreaterThanOrEqual(pods * perPod(kind, "memory"));
   });
 
   it("caps the tenant and allows only Traefik in and DNS and Postgres out", () => {
@@ -235,5 +264,45 @@ describe("objectPath", () => {
     expect(objectPath(objects.RoleBinding)).toBe(
       "/apis/rbac.authorization.k8s.io/v1/namespaces/tenant-3/rolebindings/schmeide-tenant-deployer"
     );
+  });
+});
+
+describe("rolloutProblem", () => {
+  const deployment = (conditions: readonly JobCondition[]) => ({
+    metadata: { name: "app-7" },
+    status: { conditions },
+  });
+
+  it("names why a Deployment's pods are not being made, or why it stopped progressing", () => {
+    expect(
+      rolloutProblem(
+        deployment([
+          { type: "Available", status: "False", reason: "MinimumReplicasUnavailable" },
+          {
+            type: "ReplicaFailure",
+            status: "True",
+            reason: "FailedCreate",
+            message: 'pods "app-7-x" is forbidden: exceeded quota: tenant',
+          },
+          {
+            type: "Progressing",
+            status: "False",
+            reason: "ProgressDeadlineExceeded",
+            message: 'ReplicaSet "app-7-x" has timed out progressing.',
+          },
+        ])
+      )
+    ).toBe(
+      'pods "app-7-x" is forbidden: exceeded quota: tenant; ReplicaSet "app-7-x" has timed out progressing.'
+    );
+  });
+
+  it("has nothing to say about a Deployment that is still progressing", () => {
+    expect(
+      rolloutProblem(
+        deployment([{ type: "Progressing", status: "True", reason: "ReplicaSetUpdated" }])
+      )
+    ).toBeUndefined();
+    expect(rolloutProblem(undefined)).toBeUndefined();
   });
 });

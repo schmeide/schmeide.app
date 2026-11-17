@@ -47,6 +47,16 @@ export const tokenRequest = (
   }),
 });
 
+// tar's flags for a build context ACR can read: no pax or extended-attribute headers, which fail
+// with "failed to download context". `version` is what `tar --version` printed: GNU tar in the
+// worker's image, bsdtar on a Mac.
+export const contextTarFlags = (version: string): readonly string[] => [
+  ...(version.includes("GNU tar")
+    ? ["--format=gnu", "--no-xattrs", "--no-acls", "--no-selinux"]
+    : ["--no-xattrs", "--no-mac-metadata"]),
+  "--exclude=.git",
+];
+
 // One run that builds the frontend, then both images from the platform-owned Dockerfiles, and
 // pushes them tagged with the commit. The registry is the run's own ({{.Run.Registry}}), signed in
 // to as the caller: in ABAC mode a quick run has no other way to push.

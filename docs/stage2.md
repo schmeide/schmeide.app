@@ -294,9 +294,9 @@ settles it before slice 1 starts.
 **Per business**: namespace `tenant-<tenant id>`, created by the worker on the first deploy, with
 
 - labels `schmeide.app/tenant=<id>` and `pod-security.kubernetes.io/enforce=restricted`;
-- a ResourceQuota (to start: `requests.cpu: 1`, `requests.memory: 2Gi`, `limits.memory: 4Gi`, `pods: 20`, no
-  LoadBalancer or NodePort Services), which fits about eight apps at two copies each, and a LimitRange with
-  defaults;
+- a ResourceQuota (to start: `requests.cpu: 1100m`, `requests.memory: 3Gi`, `limits.memory: 9Gi`, `pods: 20`, no
+  LoadBalancer or NodePort Services), which fits about eight apps at two copies each plus a rolling update's surge
+  pod (a pod asks for 60m and 160Mi and may use 512Mi), and a LimitRange with defaults;
 - NetworkPolicy: deny all; allow ingress from the `traefik` namespace on port 8080; allow egress to kube-dns and to
   the Postgres subnet on 5432. **No internet egress for apps** in Stage 2 (#74 decides integrations).
 

@@ -506,9 +506,11 @@ With `SCHMEIDE_RUNNER=kubernetes` the worker deploys what dev mode starts with `
   `app_<id>_staging`), made through `SCHMEIDE_PROVISIONER_URL`.
 - **Addresses**: `https://<slug>-<6 random>.apps.schmeide.com` for production and `...--staging` for staging; the
   first label is `projects.host`, chosen on the first deploy. The wildcard certificate serves both.
-- **Deploy** waits for the rollout and for `/` and `/api/healthz` to answer 200 over https (five minutes). A promote
-  runs staging's images on production and then fast-forwards `main`; a discard force-pushes `staging` back,
-  scales staging to zero, drops and recreates its database, and starts it again.
+- **Deploy** waits for the rollout and for `/` and `/api/healthz` to answer 200 over https (five minutes). A rollout
+  that times out fails with the Deployment's own reason (an exceeded quota, say); a staging copy that did is scaled
+  to zero, production is left as it is. A promote runs staging's images on production, records its commit, and then
+  fast-forwards `main`; a discard force-pushes `staging` back, scales staging to zero, drops and recreates its
+  database, and starts it again.
 - **Stop** scales both copies to zero. **Delete** removes both copies' objects, databases and roles, the Forgejo
   repository, and both ACR repositories; the namespace stays for the business's other apps.
 

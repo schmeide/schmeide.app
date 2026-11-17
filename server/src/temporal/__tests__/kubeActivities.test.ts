@@ -646,6 +646,10 @@ describe("kubernetes mode", () => {
     });
     const ns = `/api/v1/namespaces/tenant-${project.tenantId}`;
     expect(hosting.objects.has(ns)).toBe(true);
+    // The single policy namespaces had before the four that replaced it.
+    expect(hosting.removed).toContain(
+      `/apis/networking.k8s.io/v1/namespaces/tenant-${project.tenantId}/networkpolicies/tenant`
+    );
     const deployment = hosting.objects.get(
       `/apis/apps/v1/namespaces/tenant-${project.tenantId}/deployments/app-${project.id}`
     ) as { spec: { template: { spec: { containers: { image: string }[] } } } };
@@ -667,6 +671,69 @@ describe("kubernetes mode", () => {
     const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
     expect(after).toMatchObject({ host: row.host, stagingCommit: next, productionCommit: commit });
     expect(hosting.databases.get(`app_${project.id}_staging`)).toBe(password);
+  });
+
+  it("records production's commit before moving main, so a failed push cannot hide what is live", async () => {
+    const { config, forgejo, root } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const repo = forgejo.bare(`t${project.tenantId}`, project.slug);
+    const commit = builderCommit(root, repo);
+    writeFileSync(join(repo, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+
+    await expect(env.run(activities.deploy, build.id)).rejects.toThrow();
+
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row).toMatchObject({
+      productionCommit: commit,
+      previewUrl: `https://${row.host}.apps.example`,
+    });
+  });
+
+  it("stops a staging copy that does not roll out and says why", async () => {
+    const { config, runner, forgejo, hosting, root } = setup();
+    const { project, build } = await newBuild();
+    const staging = `/apis/apps/v1/namespaces/tenant-${project.tenantId}/deployments/app-${project.id}-staging`;
+    const { cluster } = hosting.hosting;
+    const stuck: KubeRunner = {
+      ...runner,
+      rolloutMs: 10,
+      hosting: {
+        ...hosting.hosting,
+        cluster: {
+          ...cluster,
+          get: async <T>(path: string) =>
+            path === staging
+              ? ({
+                  metadata: { name: `app-${project.id}-staging`, generation: 1 },
+                  spec: { replicas: 1 },
+                  status: {
+                    observedGeneration: 1,
+                    conditions: [
+                      {
+                        type: "ReplicaFailure",
+                        status: "True",
+                        reason: "FailedCreate",
+                        message: "exceeded quota: tenant",
+                      },
+                    ],
+                  },
+                } as T)
+              : cluster.get<T>(path),
+        },
+      },
+    };
+    const activities = createActivities(deps, { ...config, runner: stuck });
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    builderCommit(root, forgejo.bare(`t${project.tenantId}`, project.slug));
+
+    await expect(env.run(activities.deploy, build.id)).rejects.toThrow(
+      `app-${project.id}-staging did not roll out within 5 minutes: exceeded quota: tenant`
+    );
+    expect(hosting.scaled).toEqual([[staging, 0]]);
   });
 
   it("discards staging back to production's commit with an empty database", async () => {

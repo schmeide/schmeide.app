@@ -2,7 +2,14 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createAcr, runRequest, taskYaml, tokenRequest, TASKS_API_VERSION } from "../acr.ts";
+import {
+  contextTarFlags,
+  createAcr,
+  runRequest,
+  taskYaml,
+  tokenRequest,
+  TASKS_API_VERSION,
+} from "../acr.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "acr-"));
 const tokenFile = join(dir, "token");
@@ -178,6 +185,26 @@ describe("createAcr", () => {
         "https://schmeide.azurecr.io/acr/v1/apps/t3/notes/api",
         "Bearer repository:apps/t3/notes/api:delete",
       ],
+    ]);
+  });
+});
+
+describe("contextTarFlags", () => {
+  it("writes GNU tar's own format without extended attributes, which ACR cannot read", () => {
+    expect(contextTarFlags("tar (GNU tar) 1.35\nCopyright (C) 2023")).toEqual([
+      "--format=gnu",
+      "--no-xattrs",
+      "--no-acls",
+      "--no-selinux",
+      "--exclude=.git",
+    ]);
+  });
+
+  it("keeps bsdtar's default format and leaves out macOS metadata", () => {
+    expect(contextTarFlags("bsdtar 3.5.3 - libarchive 3.7.4")).toEqual([
+      "--no-xattrs",
+      "--no-mac-metadata",
+      "--exclude=.git",
     ]);
   });
 });

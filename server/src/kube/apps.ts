@@ -4,6 +4,7 @@
 // to apply, never how.
 import { randomInt } from "node:crypto";
 import type { Copy } from "../services/resources.ts";
+import type { DeploymentStatus } from "./client.ts";
 import { LABELS, restricted } from "./jobs.ts";
 
 export const COPY_LABEL = "schmeide.app/copy";
@@ -103,12 +104,13 @@ export const tenantObjects = (tenantId: number): readonly object[] => {
       apiVersion: "v1",
       kind: "ResourceQuota",
       metadata: metadata("tenant"),
-      // About eight apps at two copies each.
+      // About eight apps at two copies each, plus the surge pod of a rolling update. A pod asks
+      // for 60m and 160Mi and may use 512Mi.
       spec: {
         hard: {
-          "requests.cpu": "1",
-          "requests.memory": "2Gi",
-          "limits.memory": "4Gi",
+          "requests.cpu": "1100m",
+          "requests.memory": "3Gi",
+          "limits.memory": "9Gi",
           pods: "20",
           "services.loadbalancers": "0",
           "services.nodeports": "0",
@@ -329,3 +331,15 @@ export const objectPath = (object: object): string => {
     encodeURIComponent(metadata.name),
   ].join("/");
 };
+
+// Why a Deployment's rollout is stuck, from its own conditions: the ReplicaSet could not make a
+// pod (an exceeded quota, say), or the rollout passed its progress deadline. Undefined if neither.
+export const rolloutProblem = (deployment: DeploymentStatus | undefined): string | undefined =>
+  (deployment?.status?.conditions ?? [])
+    .filter(
+      ({ type, status }) =>
+        (type === "ReplicaFailure" && status === "True") ||
+        (type === "Progressing" && status === "False")
+    )
+    .map(({ message, reason }) => message ?? reason)
+    .join("; ") || undefined;
