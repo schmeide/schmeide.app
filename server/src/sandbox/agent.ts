@@ -7,7 +7,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { claudeEnv } from "../services/claudeEnv.ts";
-import { AGENT_ALLOWED_TOOLS, AGENT_TOOLS, agentOptions } from "../temporal/activities.ts";
+import {
+  AGENT_ALLOWED_TOOLS,
+  AGENT_TOOLS,
+  BUILDER_PLUGIN,
+  agentOptions,
+} from "../temporal/activities.ts";
 
 const cwd = process.cwd();
 const prompt = readFileSync("/run/schmeide/prompt", "utf8");
@@ -34,6 +39,7 @@ try {
       ),
       tools: AGENT_TOOLS,
       allowedTools: AGENT_ALLOWED_TOOLS,
+      plugins: [{ type: "local", path: BUILDER_PLUGIN }],
       abortController,
     },
   })) {

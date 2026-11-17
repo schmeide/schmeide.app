@@ -99,7 +99,13 @@ import {
 } from "../services/designReview.ts";
 import { THEMES, styleById } from "../services/designStyles.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
-import { NARROWEST_PHONE_PX, mobileProblems, type BuiltApp } from "../services/mobileCheck.ts";
+import {
+  NARROWEST_PHONE_PX,
+  builtApp,
+  mobileProblems,
+  notReadyForPhones,
+  phonesReport,
+} from "../services/mobileCheck.ts";
 import {
   builtChanges,
   deleteProjectRows,
@@ -360,20 +366,6 @@ ${features}
 
 ${SPEC_FORMAT}`;
 
-// What `make build` left in frontend/dist. A missing page reads as an empty one, which the check reports.
-const builtApp = async (workspace: string): Promise<BuiltApp> => {
-  const dist = join(workspace, "frontend", "dist");
-  const names = await readdir(dist, { recursive: true }).catch(() => []);
-  return {
-    html: await readFile(join(dist, "index.html"), "utf8").catch(() => ""),
-    css: await Promise.all(
-      names
-        .filter((name) => name.endsWith(".css"))
-        .map((name) => readFile(join(dist, name), "utf8"))
-    ),
-  };
-};
-
 const styleName = (id: string): string => styleById(id)?.name ?? id;
 
 // A model's answer as JSON, or undefined when it is not JSON at all.
@@ -450,6 +442,9 @@ export const describeToolUse = (
 // Shared by spec and build runs, here and in a build pod (sandbox/agent.ts); only the model differs
 // by run kind. settingSources keeps the owner's user-level settings, hooks, and plugins out;
 // claudeMdExcludes keeps out the user CLAUDE.md, which loads regardless of sources.
+// The Claude Code plugin every build run loads: server/builder-plugin, here and in the image.
+export const BUILDER_PLUGIN = join(import.meta.dirname, "..", "..", "builder-plugin");
+
 export const agentOptions = (
   cwd: string,
   env: Record<string, string>,
@@ -1382,6 +1377,17 @@ export const createActivities = (
               const marker = parseChecksMarker(text);
               if (!marker) {
                 output = `${output}${text}\n`.slice(-OUTPUT_TAIL);
+              } else if (marker.target === "phones") {
+                // sandbox/phones.ts prints phonesReport and exits with the number of problems.
+                if (marker.step === "start") output = "";
+                await say(
+                  marker.step === "start"
+                    ? "Checking the built app for phones"
+                    : marker.step === "passed"
+                      ? "The built app is ready for phones"
+                      : notReadyForPhones(marker.code ?? 0)
+                );
+                if (marker.step === "failed") failed = { ok: false, output };
               } else if (marker.step === "start") {
                 output = "";
                 await say(`Running make ${marker.target}`);
@@ -1892,15 +1898,8 @@ export const createActivities = (
       await event(buildId, "check", "Checking the built app for phones");
       const problems = mobileProblems(await builtApp(workspaceOf(project)));
       if (problems.length > 0) {
-        await event(
-          buildId,
-          "check",
-          `The built app is not ready for phones (${problems.length} ${problems.length === 1 ? "problem" : "problems"})`
-        );
-        return {
-          ok: false,
-          output: `Schmeide's check of the built app (frontend/dist) for phones found:\n${problems.map((problem) => `- ${problem}`).join("\n")}`,
-        };
+        await event(buildId, "check", notReadyForPhones(problems.length));
+        return { ok: false, output: phonesReport(problems) };
       }
       await event(buildId, "check", "The built app is ready for phones");
       return { ok: true, output: "" };

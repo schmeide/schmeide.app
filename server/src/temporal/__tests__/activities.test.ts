@@ -42,6 +42,7 @@ import { createLocalFileStore } from "../../services/fileStore.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import {
   AGENT_ALLOWED_TOOLS,
+  BUILDER_PLUGIN,
   GIT_CONFIG,
   buildPrompt,
   createActivities,
@@ -57,9 +58,6 @@ const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
 // These activities never start a workflow.
 const deps = { db, workflows: {} as never, taskQueue: "test" };
-
-// The plugin the server gives every build run.
-const BUILDER_PLUGIN = join(import.meta.dirname, "..", "..", "..", "builder-plugin");
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, {
@@ -180,6 +178,13 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
       } as unknown as SDKMessage;
     })();
   }) as unknown as Query;
+
+describe("BUILDER_PLUGIN", () => {
+  // main.ts on the host and sandbox/agent.ts in a build pod both load it from here (#219).
+  it("is server/builder-plugin, with the mobile-first skill", () => {
+    expect(existsSync(join(BUILDER_PLUGIN, "skills", "mobile-first", "SKILL.md"))).toBe(true);
+  });
+});
 
 describe("specPrompt", () => {
   it("writes from the typed requests when there is no plan", () => {

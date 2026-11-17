@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { KubeError, type Kube } from "../kube/client.ts";
 import type { Forgejo } from "../services/forgejo.ts";
-import { checkRunner, parseRunner, runnerFromEnv } from "../runner.ts";
+import { checkRunner, parseRunner, refuseDesignTeam, runnerFromEnv } from "../runner.ts";
 
 const cluster = {
   KUBERNETES_SERVICE_HOST: "10.0.0.1",
@@ -29,6 +29,16 @@ describe("parseRunner", () => {
     expect(parseRunner(undefined)).toBe("host");
     expect(parseRunner("kubernetes")).toBe("kubernetes");
     expect(() => parseRunner("docker")).toThrow(/set it to host \(the default\) or kubernetes/);
+  });
+});
+
+describe("refuseDesignTeam", () => {
+  it("refuses the design team on the kubernetes runner, which cannot run it yet (#219)", () => {
+    expect(() =>
+      refuseDesignTeam({ SCHMEIDE_RUNNER: "kubernetes", SCHMEIDE_DESIGN_TEAM: "1" })
+    ).toThrow(/SCHMEIDE_DESIGN_TEAM=1 does not work with SCHMEIDE_RUNNER=kubernetes yet/);
+    expect(() => refuseDesignTeam({ SCHMEIDE_RUNNER: "kubernetes" })).not.toThrow();
+    expect(() => refuseDesignTeam({ SCHMEIDE_DESIGN_TEAM: "1" })).not.toThrow();
   });
 });
 

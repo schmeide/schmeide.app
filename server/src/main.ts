@@ -26,8 +26,9 @@ import { createSummaries } from "./services/summaries.ts";
 import { createSummarizer } from "./services/summarizer.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
 import { createHealthServer, parseBuilds, parseRole } from "./role.ts";
-import { checkRunner, parseRunner, runnerFromEnv } from "./runner.ts";
+import { checkRunner, parseRunner, refuseDesignTeam, runnerFromEnv } from "./runner.ts";
 import {
+  BUILDER_PLUGIN,
   createActivities,
   GIT_CONFIG,
   gitConfigFile,
@@ -51,6 +52,7 @@ const role = (() => {
 // Only the worker builds, so only it reads the Kubernetes settings (runner.ts).
 const runner = (() => {
   try {
+    refuseDesignTeam(env);
     return parseRunner(env.SCHMEIDE_RUNNER) === "kubernetes" && role.runWorker
       ? runnerFromEnv(env)
       : undefined;
@@ -132,7 +134,7 @@ const config = {
   summaryModel: env.SCHMEIDE_SUMMARY_MODEL ?? "haiku",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
-  builderPlugin: join(import.meta.dirname, "..", "builder-plugin"),
+  builderPlugin: BUILDER_PLUGIN,
   // ponytail: off until the design team is measured on the to-do fixture (#159, #83).
   designTeam: env.SCHMEIDE_DESIGN_TEAM === "1",
 } as const;
