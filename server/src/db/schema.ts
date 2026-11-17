@@ -105,14 +105,15 @@ export const buildEvents = pgTable("build_events", {
   message: text("message").notNull(),
 });
 
-// What a model run is for. It labels the run's usage, and for every kind but `interview` and
-// `website` it decides the run's model (agentModel.ts).
+// What a model run is for. It labels the run's usage, and for every kind but `interview`,
+// `website` and `read` it decides the run's model (agentModel.ts).
 export const agentRunKind = pgEnum("agent_run_kind", [
   "spec",
   "initial",
   "change",
   "interview",
   "website",
+  "read",
 ]);
 
 // One row per model per agent run. buildId is null for spec generation and interview questions. model is what the run
@@ -193,6 +194,63 @@ export const interviews = pgTable("interviews", {
 
 const projectId = createSelectSchema(projects).shape.id;
 
+export const FILE_TYPES = ["png", "jpeg", "webp", "pdf", "csv", "xlsx"] as const;
+export const fileType = pgEnum("file_type", FILE_TYPES);
+export const FILE_OWNERS = ["mine", "someone_else"] as const;
+export const fileOwner = pgEnum("file_owner", FILE_OWNERS);
+export const FILE_PURPOSES = ["reference", "in_app"] as const;
+export const filePurpose = pgEnum("file_purpose", FILE_PURPOSES);
+
+export const FILE_NAME_MAX = 200;
+
+export const files = pgTable(
+  "files",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id),
+    uploadedBy: text("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+    owner: fileOwner("owner").notNull(),
+    purpose: filePurpose("purpose").notNull().default("reference"),
+    type: fileType("type").notNull(),
+    size: integer("size").notNull(),
+    originalName: varchar("original_name", { length: FILE_NAME_MAX }).notNull(),
+    displayName: varchar("display_name", { length: FILE_NAME_MAX }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [index("files_project_id_idx").on(table.projectId)]
+);
+
+export const buildFiles = pgTable(
+  "build_files",
+  {
+    buildId: integer("build_id")
+      .notNull()
+      .references(() => builds.id, { onDelete: "cascade" }),
+    fileId: integer("file_id")
+      .notNull()
+      .references(() => files.id, { onDelete: "cascade" }),
+  },
+  (table) => [primaryKey({ columns: [table.buildId, table.fileId] })]
+);
+
+const fileId = createSelectSchema(files).shape.id;
+
+export const MAX_ATTACHED_FILES = 10;
+
+export const fileIdSchema = z.object({ id: projectId, fileId });
+
+export const renameFileSchema = createInsertSchema(files, {
+  displayName: (schema) => schema.trim().min(1).max(FILE_NAME_MAX),
+})
+  .pick({ displayName: true })
+  .extend({ id: projectId, fileId });
+
 export const projectIdSchema = z.object({ id: projectId });
 
 export const NEED_MAX = 2000;
@@ -227,13 +285,15 @@ export const changeRequestSchema = createInsertSchema(builds, {
   request: (schema) => schema.trim().min(1).max(5000),
 })
   .pick({ request: true })
-  .extend({ id: projectId });
+  .extend({ id: projectId, fileIds: z.array(fileId).max(MAX_ATTACHED_FILES).optional() });
 
 const buildId = createSelectSchema(builds).shape.id;
 
 export const buildIdSchema = z.object({ buildId });
 
-export const editChangeSchema = changeRequestSchema.omit({ id: true }).extend({ buildId });
+export const editChangeSchema = changeRequestSchema
+  .omit({ id: true, fileIds: true })
+  .extend({ buildId });
 
 export const eventsQuerySchema = z.object({
   buildId,
@@ -272,6 +332,10 @@ export type NewUsage = typeof usage.$inferInsert;
 export type PlanSection = (typeof PLAN_SECTIONS)[number];
 export type PlanItem = typeof planItems.$inferSelect;
 export type Question = typeof interviewQuestions.$inferSelect;
+export type FileRow = typeof files.$inferSelect;
+export type FileType = (typeof FILE_TYPES)[number];
+export type FileOwner = (typeof FILE_OWNERS)[number];
+export type FilePurpose = (typeof FILE_PURPOSES)[number];
 
 // Sign-in. `users`, `sessions`, `accounts`, `verifications`, and `rateLimits` are Better Auth's
 // tables (services/auth.ts): it reads and writes them by these property names, so the names are

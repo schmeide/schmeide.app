@@ -26,6 +26,8 @@ const context: AppContext = {
   interviewer: vi.fn(),
   siteFetcher: vi.fn(),
   websiteReader: vi.fn(),
+  files: {} as never,
+  reader: vi.fn(),
   auth,
   providers: ["google"],
 };

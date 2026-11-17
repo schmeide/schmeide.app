@@ -36,6 +36,8 @@ const deps: AppContext = {
   interviewer: vi.fn(),
   siteFetcher,
   websiteReader,
+  files: {} as never,
+  reader: vi.fn(),
   websiteLimits: { ...READ_LIMITS, perAccount: 3 },
   auth: testAuth(db),
   providers: [],

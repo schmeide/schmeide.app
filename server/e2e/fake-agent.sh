@@ -3,6 +3,7 @@
 # `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green;
 # `interview` prints one turn that adds a plan item and asks nothing further;
 # `website mine|someone_else` prints one reading of a website.
+# `read` prints one reading of an uploaded picture, with one proposed plan item.
 set -euo pipefail
 
 case "${1:-}" in
@@ -28,8 +29,11 @@ case "${1:-}" in
       printf '%s\n' '{"features":[{"section":"does","text":"Fake feature read from a website"}]}'
     fi
     ;;
+  read)
+    printf '%s\n' '{"outcome":"read","items":[{"section":"keeps","text":"Fake item read from the picture"}]}'
+    ;;
   *)
-    echo "usage: $0 spec|build|interview|website (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview|website|read (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac

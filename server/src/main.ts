@@ -10,6 +10,8 @@ import { describeRouting, routingFromEnv } from "./agentModel.ts";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
 import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
+import { createFileReader } from "./services/fileReader.ts";
+import { createLocalFileStore } from "./services/fileStore.ts";
 import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createSiteFetcher } from "./services/siteFetcher.ts";
@@ -94,6 +96,8 @@ const worker = await Worker.create({
 
 await failOrphanedBuilds(deps);
 const interviewer = createInterviewer({ ...config, model: config.interviewModel });
+const reader = createFileReader({ ...config, model: config.interviewModel });
+const files = createLocalFileStore(config.dataDir);
 const websiteReader = createWebsiteReader({ ...config, model: config.websiteModel });
 const siteFetcher = createSiteFetcher();
 const providers = enabledProviders(authConfig);
@@ -102,6 +106,8 @@ const app = buildApp(
     ...deps,
     interviewer,
     siteFetcher,
+    reader,
+    files,
     websiteReader,
     auth: createAuth(db, authConfig),
     providers,

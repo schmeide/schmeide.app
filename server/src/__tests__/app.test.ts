@@ -20,6 +20,8 @@ const deps: AppContext = {
   interviewer,
   siteFetcher: vi.fn(),
   websiteReader: vi.fn(),
+  files: {} as never,
+  reader: vi.fn(),
   auth: testAuth(db),
   providers: [],
 };

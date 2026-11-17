@@ -4,7 +4,9 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
   buildEvents,
+  buildFiles,
   builds,
+  files,
   interviewQuestions,
   interviews,
   planItems,
@@ -383,11 +385,27 @@ const startOrQueue = async (
 // and the queue follows it.
 export const requestChange = (
   deps: Deps,
-  input: { readonly id: number; readonly request: string }
+  input: { readonly id: number; readonly request: string; readonly fileIds?: readonly number[] }
 ): Promise<{ project: Project; build: Build }> =>
   deps.db.transaction(async (raw) => {
     const tx = raw as unknown as Db;
-    return startOrQueue(deps, tx, await lockProject(tx, input.id), "change", input.request);
+    const project = await lockProject(tx, input.id);
+    const fileIds = [...new Set(input.fileIds ?? [])];
+    const attached = fileIds.length
+      ? await tx
+          .select({ id: files.id })
+          .from(files)
+          .where(and(eq(files.projectId, input.id), inArray(files.id, fileIds)))
+      : [];
+    const unknown = fileIds.find((fileId) => !attached.some(({ id }) => id === fileId));
+    if (unknown !== undefined) throw new NotFoundError(`File ${unknown} not found`);
+    const started = await startOrQueue(deps, tx, project, "change", input.request);
+    if (attached.length) {
+      await tx
+        .insert(buildFiles)
+        .values(attached.map(({ id }) => ({ buildId: started.build.id, fileId: id })));
+    }
+    return started;
   });
 
 export const SITE_REQUEST = "Apply the page title and icon";
@@ -543,6 +561,8 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
     await tx.delete(interviews).where(eq(interviews.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
+    await tx.delete(buildFiles).where(inArray(buildFiles.buildId, ids));
+    await tx.delete(files).where(eq(files.projectId, id));
     await tx.delete(builds).where(eq(builds.projectId, id));
     await tx.delete(projects).where(eq(projects.id, id));
   });
