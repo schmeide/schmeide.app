@@ -144,9 +144,9 @@ taken offline. It has three views, each with its own address:
 
 Every page sits in the app shell: the logo (back to the list), the business name, the navigation (Apps, Usage,
 Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal links in the footer. The
-pages other than the project list and a project say "This page is not built yet". There are no accounts, so everyone
-is the "Demo owner" of the "Demo business"; "Sign out" in the account menu shows the signed-out state until "Sign in"
-or a reload.
+pages other than the project list and a project say "This page is not built yet". People sign in with an approved email
+address ([docs/auth.md](auth.md)); the shell shows their business, and "Sign out" in the account menu ends the
+session.
 
 The address is the view (`/` for the list, `/projects/<id>` and its views for a project; the full table is
 `utils/routes.ts`), so
@@ -426,7 +426,8 @@ Each is marked in code with a `ponytail:` comment.
 
 ## Known gaps
 
-- No auth, no rate limits, no per-tenant quotas; usage is recorded but not enforced.
+- Sign-in is limited to an approved list set by hand, and only sign-in attempts are rate limited; there are no
+  per-tenant quotas or spending limits (#83), so usage is recorded but not enforced.
 - Temporal history is lost when its container restarts; project and build rows survive in Postgres.
   A build whose workflow vanished is marked failed when the server next starts.
 - A step restarted after a server restart begins again: an agent run starts a new session (with a
