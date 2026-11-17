@@ -22,6 +22,7 @@ import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts"
 import type { Db } from "../db/client.ts";
 import {
   buildFiles,
+  builds,
   files,
   projectIcons,
   projects,
@@ -67,7 +68,12 @@ export type Config = {
   // A command that stands in for Claude (SCHMEIDE_AGENT_CMD): `<cmd> spec` prints a spec and
   // `<cmd> build` edits the workspace, both with the prompt in AGENT_PROMPT. Used by `make e2e/fake`.
   readonly agentCmd?: string;
+  // How deploy asks a started app whether it answers; tests stand in for a running app.
+  readonly fetch?: typeof fetch;
 };
+
+// A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
+export const isCommit = (text: string): boolean => /^[0-9a-f]{40}$/.test(text);
 
 // Written by main.ts under the data dir: bin/make points at GNU make, gitconfig is a neutral identity.
 export const shimDir = (dataDir: string) => join(dataDir, "bin");
@@ -521,6 +527,28 @@ export const createActivities = (
     );
   };
 
+  // What ships is a commit, so work the builder left uncommitted is committed first. Answers the
+  // commit, checked to be one before anything stores it or hands it to git.
+  const commitAll = async (project: Project, buildId: number): Promise<string> => {
+    const workspace = workspaceOf(project);
+    const env = projectEnv(project, config.dataDir);
+    await mustRun(project, "git", ["add", "-A"], workspace);
+    if ((await run("git", ["diff", "--cached", "--quiet"], { cwd: workspace, env })).code !== 0) {
+      await mustRun(
+        project,
+        "git",
+        ["commit", "-q", "-m", "keep what the builder left uncommitted"],
+        workspace
+      );
+      await event(buildId, "deploy", "Committed what the builder left uncommitted");
+    }
+    const head = await run("git", ["rev-parse", "HEAD"], { cwd: workspace, env });
+    const commit = head.output.trim();
+    if (head.code !== 0 || !isCommit(commit))
+      throw ApplicationFailure.nonRetryable(`The workspace has no commit to deploy: ${commit}`);
+    return commit;
+  };
+
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
@@ -770,6 +798,7 @@ export const createActivities = (
     // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
+      const commit = await commitAll(project, buildId);
       await event(buildId, "deploy", "Starting the app (make up)");
       const result = await run(config.makeBin, ["up"], {
         cwd: workspaceOf(project),
@@ -788,7 +817,9 @@ export const createActivities = (
         for (;;) {
           const statuses = await Promise.all(
             [`${url}/`, `${url}/api/healthz`].map((target) =>
-              fetch(target, { signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]) })
+              (config.fetch ?? fetch)(target, {
+                signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+              })
                 .then((response) => response.status)
                 .catch(() => 0)
             )
@@ -807,6 +838,7 @@ export const createActivities = (
         .update(projects)
         .set({ previewUrl: url, status: "live" })
         .where(eq(projects.id, project.id));
+      await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
       await event(buildId, "deploy", `Live at ${url}`);
     },
 
