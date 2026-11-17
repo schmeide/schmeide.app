@@ -29,6 +29,8 @@ export function SignInPage() {
     returned && (refusals[returned] ?? copy.signInPage.providerFailed)
   );
   const [busy, setBusy] = useState(false);
+  // Deleting an account ends here, signed out.
+  const deleted = new URLSearchParams(search).has("deleted");
 
   const withProvider = async (provider: Provider) => {
     setBusy(true);
@@ -61,6 +63,7 @@ export function SignInPage() {
           {copy.signInPage.signedOut}
         </p>
       )}
+      {deleted && <p className={styles.notice}>{copy.signInPage.deleted}</p>}
       <p className={styles.intro}>{copy.signInPage.intro}</p>
       <div className={styles.column}>
         {problem && (

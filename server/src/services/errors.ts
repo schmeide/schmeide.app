@@ -2,6 +2,8 @@
 export class NotFoundError extends Error {}
 export class ConflictError extends Error {}
 export class ForbiddenError extends Error {}
+// The input was well formed but wrong, such as a confirmation that does not match.
+export class BadInputError extends Error {}
 // The model could not produce the next interview turn; the caller can fall back or try again.
 export class InterviewUnavailableError extends Error {}
 export class ReaderUnavailableError extends Error {}

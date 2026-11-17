@@ -150,7 +150,7 @@ taken offline. It has three views, each with its own address:
 
 Once a person has a business, every page sits in the app shell: the logo (back to the list), the business name, the
 navigation (Apps, Usage, Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal
-links in the footer. The pages other than the project list and a project say "This page is not built yet".
+links in the footer. Usage, Billing, Business, Help, and the legal pages say "This page is not built yet".
 
 Before that, the entry pages (`/sign-in`, `/sign-up`, `/set-password` and `/welcome`) sit in a plainer frame, the next
 step after schmeide.com: no app navigation, the logo leads back to schmeide.com, and the account menu shows once someone
@@ -159,6 +159,14 @@ early-access form. People sign in with an approved email address ([docs/auth.md]
 `/sign-up`, `/sign-in` or `/set-password` travels on in the address (inside `next` through a provider sign-in) to
 checkout (#61) if the id is a known plan, and is dropped otherwise; nothing is stored, and no plan is known until #119.
 "Sign out" in the account menu leads to sign-in on any page but a public one, and sign-in says the sign-out worked.
+
+**Account** (`/account`, from the account menu): change your name; see how you sign in, connect a provider the server
+offers, and disconnect one while another way in remains; see where you are signed in and "Sign out everywhere else";
+"Download my details" as a JSON file; and "Delete my account". Deleting asks you to type your email address, removes
+your account, sign-in methods and approval at once, and removes a business that was only yours and has no apps. It is
+refused while a business you alone own still has apps (delete them first) or has other people in it (handing it over
+comes with business settings, #66). Changing your email address and the email switches wait for the server to send
+email (#88).
 
 The address is the view (`/` for the list, `/projects/<id>` and its views for a project; the full table is
 `utils/routes.ts`), so

@@ -450,6 +450,18 @@ describe("while viewing as a person", () => {
     expect(accepted.code).toBe("FORBIDDEN");
     expect((await callApi(app, "invites.get", { token })).status).toBe(200);
   });
+
+  it("refuses changing the person's sign-in methods, devices, or deleting their account", async () => {
+    const { cookie, owner } = await viewing();
+    const calls = [
+      ["account.disconnect", { id: "any" }],
+      ["account.signOutOthers", undefined],
+      ["account.delete", { email: owner.email }],
+    ] as const;
+    for (const [path, input] of calls)
+      expect((await callApi(app, path, input, cookie)).code).toBe("FORBIDDEN");
+    expect(await idOf(owner.email)).toBeTruthy();
+  });
 });
 
 describe("ending views", () => {

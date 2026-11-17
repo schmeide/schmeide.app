@@ -283,6 +283,7 @@ export const copy = {
     wrong: "That email and password do not match. Check both and try again.",
     tooMany: "Too many tries. Wait a minute, then try again.",
     failed: "Sign-in did not work this time. Try again in a moment.",
+    deleted: "Your account is deleted, and you are signed out everywhere.",
   },
   signUpPage: {
     inviteOnly:
@@ -313,6 +314,78 @@ export const copy = {
     title: "This business is suspended",
     body: "Its apps keep running, but nothing in it can be opened or changed for now. Get in touch and we will help.",
     contact: "Get in touch",
+  },
+  accountPage: {
+    profile: {
+      title: "Profile",
+      nameLabel: "Name",
+      save: "Save name",
+      saving: "Saving…",
+      saved: "Saved.",
+      emailLabel: "Email",
+      emailNote:
+        "You cannot change your email address here yet. Ask the person who invited you to change it.",
+    },
+    methods: {
+      title: "How you sign in",
+      kind: {
+        password: "Password",
+        google: "Google",
+        microsoft: "Microsoft",
+        apple: "Apple",
+      },
+      connectedOn: (date: string) => `Connected on ${date}`,
+      notConnected: "Not connected",
+      noPassword: "Not set. Ask the person who invited you for a set-password link.",
+      connect: (method: string) => `Connect ${method}`,
+      opening: (method: string) => `Opening ${method}…`,
+      disconnect: (method: string) => `Disconnect ${method}`,
+      disconnecting: "Disconnecting…",
+      disconnected: (method: string) => `${method} disconnected.`,
+      onlyOne: "You need at least one way to sign in, so your only one cannot be disconnected.",
+      connectFailed:
+        "That sign-in method was not connected. Use an account with the same email address as this one, then try again.",
+    },
+    devices: {
+      title: "Where you are signed in",
+      named: (browser: string, os: string) => `${browser} on ${os}`,
+      unknown: "Unknown browser",
+      thisDevice: "This device",
+      lastActive: (date: string) => `Last active ${date}`,
+      signOutOthers: "Sign out everywhere else",
+      signingOut: "Signing out…",
+      signedOutOthers: "Signed out everywhere else.",
+    },
+    details: {
+      title: "Details",
+      intro:
+        "Download a copy of what Schmeide holds about you: your profile, how you sign in, where you are signed in, and your businesses and their apps.",
+      download: "Download my details",
+      preparing: "Preparing your download…",
+      fileName: "schmeide-my-details.json",
+    },
+    delete: {
+      title: "Delete account",
+      intro:
+        "This deletes your name, email address and sign-in methods straight away and signs you out everywhere. It cannot be undone. To use Schmeide again, you would need a new invitation.",
+      outcome: {
+        leave: (business: string) => `${business} carries on without you, with its apps.`,
+        remove: (business: string) => `${business} is deleted too. It has no apps and nobody else.`,
+      },
+      blockedTitle: "Before you can delete your account",
+      blocked: {
+        deleteApps: (business: string) => `${business} still has apps. Delete them first.`,
+        handOver: (business: string) =>
+          `You are the only owner of ${business}, and other people work in it or are invited to it. Someone else needs to own it first, which you cannot do from here yet.`,
+      },
+      toApps: "Go to your apps",
+      start: "Delete my account",
+      confirmLabel: (email: string) => `To confirm, type ${email}`,
+      confirm: "Delete my account",
+      cancel: "Keep my account",
+      deleting: "Deleting…",
+      mismatch: "That is not the email address of this account. Type it exactly as shown.",
+    },
   },
   problems: {
     notFound: {
