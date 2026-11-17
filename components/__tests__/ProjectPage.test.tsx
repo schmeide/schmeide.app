@@ -629,7 +629,7 @@ describe("ProjectPage designer", () => {
     expect(Number(frame.getAttribute("width"))).toBeLessThan(wide);
   });
 
-  it("keeps showing the live app while a change is built, saying so, and loads the new version after", async () => {
+  it("keeps showing the live app while a change is built, saying so, and loads the new version after when asked to", async () => {
     const state = {
       project: aProject({ status: "building", spec: SPEC, previewUrl: "http://localhost:8100" }),
       latestBuild: aBuild({ id: 8, kind: "change", request: "Add a logo" }),
@@ -645,6 +645,9 @@ describe("ProjectPage designer", () => {
       "http://localhost:8100"
     );
     fireEvent.load(before);
+    await userEvent.click(
+      within(app).getByRole("checkbox", { name: copy.project.designer.reloadOnBuild })
+    );
 
     state.project = { ...state.project, status: "live" };
     state.latestBuild = { ...state.latestBuild, status: "passed", finishedAt: new Date() };

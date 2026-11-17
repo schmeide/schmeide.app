@@ -135,3 +135,40 @@
   color: var(--color-muted);
   font-size: var(--text-small);
 }
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-s);
+  min-height: var(--hit-target);
+  cursor: pointer;
+}
+
+.toggle input {
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+/* Sits over the top of the frame; empty, it takes no room and hides nothing. */
+.notice {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1;
+}
+
+.notice p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s) var(--space-m);
+  margin: var(--space-s);
+  padding: var(--space-s) var(--space-m);
+  background: var(--color-surface);
+  color: var(--color-fg);
+  border-radius: var(--radius-input);
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
