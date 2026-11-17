@@ -86,6 +86,15 @@ import {
   type DesignBrief,
   type Lead,
 } from "../services/designBrief.ts";
+import {
+  REVIEW_JSON_SCHEMA,
+  noBrowser,
+  parseReview,
+  reviewFeedbackPrompt,
+  reviewPrompt,
+  touchesInterface,
+  type ScreenCapture,
+} from "../services/designReview.ts";
 import { THEMES, styleById } from "../services/designStyles.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import { NARROWEST_PHONE_PX, mobileProblems, type BuiltApp } from "../services/mobileCheck.ts";
@@ -222,6 +231,9 @@ export const AGENT_ALLOWED_TOOLS = [
   ].map((command) => `Bash(${command}:*)`),
   "Bash(pwd)",
 ];
+
+// The design reviewer reads; it changes nothing and runs nothing.
+const REVIEWER_TOOLS = ["Read", "Glob", "Grep"];
 
 // The same skill names appear in server/builder-plugin/skills/.
 const INTERFACE_RULES = `Interface:
@@ -476,7 +488,8 @@ export const createActivities = (
   store: FileStore = createLocalFileStore(config.dataDir),
   // The running summary of each build (services/summaries.ts). Told of each event and of the end;
   // it never holds the build up. None in tests that do not ask for it.
-  summaries?: Summaries
+  summaries?: Summaries,
+  capture: ScreenCapture = noBrowser
 ) => {
   const db: Db = deps.db;
   const dirOf = (project: Project, copy: Copy) => copyOf(config.dataDir, project.slug, copy).dir;
@@ -656,7 +669,7 @@ export const createActivities = (
 
   const runAgentCmd = async (
     project: Project,
-    mode: "spec" | "build" | "design",
+    mode: "spec" | "build" | "design" | "review",
     prompt: string,
     cwd: string,
     buildId?: number
@@ -1381,51 +1394,85 @@ export const createActivities = (
     (await db.select().from(projectDesigns).where(eq(projectDesigns.projectId, projectId)))[0]
       ?.brief;
 
-  // The design lead's answer, or undefined when it gave none that can be used. It has no tools and
-  // sees only the spec. A failure of any kind but a cancel is logged and answered with undefined.
-  const runLead = async (project: Project, buildId: number): Promise<Lead | undefined> => {
-    const prompt = leadPrompt(project.spec ?? "");
+  // One answer from the design team, held to `schema`: the lead (no tools, sees only the spec) or
+  // the reviewer (read-only tools in the workspace). Undefined when there is no answer that can be
+  // used; a failure of any kind but a cancel is logged, never thrown, so it cannot fail the build.
+  const designRun = async (
+    project: Project,
+    buildId: number,
+    ask: {
+      readonly kind: "design" | "review";
+      readonly prompt: string;
+      readonly cwd: string;
+      readonly schema: Readonly<Record<string, unknown>>;
+      readonly options: Options;
+    }
+  ): Promise<unknown> => {
     try {
       if (config.agentCmd) {
-        return parseLead(
-          parseJson(await runAgentCmd(project, "design", prompt, config.dataDir, buildId))
-        );
+        return parseJson(await runAgentCmd(project, ask.kind, ask.prompt, ask.cwd, buildId));
       }
       return await withHeartbeat(async (signal) => {
         const abortController = new AbortController();
         signal.addEventListener("abort", () => abortController.abort(), { once: true });
         for await (const message of query({
-          prompt,
+          prompt: ask.prompt,
           options: {
             ...agentOptions(
-              config.dataDir,
+              ask.cwd,
               agentEnv(project),
-              pickModel(config.agentModels, "design").model,
+              pickModel(config.agentModels, ask.kind).model,
               config.claudeBin
             ),
             settingSources: [],
-            tools: [],
-            maxTurns: 3,
             persistSession: false,
-            outputFormat: { type: "json_schema", schema: LEAD_JSON_SCHEMA },
+            outputFormat: { type: "json_schema", schema: ask.schema },
+            ...ask.options,
             abortController,
           },
         })) {
           if (message.type !== "result") continue;
-          await recordUsage(db, runUsage(message, project.id, buildId, "design"));
+          await recordUsage(db, runUsage(message, project.id, buildId, ask.kind));
           if (message.subtype !== "success" || message.is_error) {
-            await log(buildId, `Design lead run failed: ${message.subtype}`);
+            await log(buildId, `The ${ask.kind} run failed: ${message.subtype}`);
             return undefined;
           }
-          return parseLead(message.structured_output ?? parseJson(message.result));
+          return message.structured_output ?? parseJson(message.result);
         }
         return undefined;
       });
     } catch (error) {
       if (Context.current().cancellationSignal.aborted) throw error;
-      await log(buildId, `Design lead run failed: ${String(error)}`);
+      await log(buildId, `The ${ask.kind} run failed: ${String(error)}`);
       return undefined;
     }
+  };
+
+  const runLead = async (project: Project, buildId: number): Promise<Lead | undefined> =>
+    parseLead(
+      await designRun(project, buildId, {
+        kind: "design",
+        prompt: leadPrompt(project.spec ?? ""),
+        cwd: config.dataDir,
+        schema: LEAD_JSON_SCHEMA,
+        options: { tools: [], maxTurns: 3 },
+      })
+    );
+
+  const headOf = async (project: Project): Promise<string> =>
+    (
+      await run("git", ["rev-parse", "HEAD"], {
+        cwd: workspaceOf(project),
+        env: projectEnv(project, config.dataDir),
+      })
+    ).output.trim();
+
+  // Files the build changed since `base`, committed or not, new ones included.
+  const changedSince = async (project: Project, base: string): Promise<readonly string[]> => {
+    const options = { cwd: workspaceOf(project), env: projectEnv(project, config.dataDir) };
+    const changed = await run("git", ["diff", "--name-only", base], options);
+    const added = await run("git", ["ls-files", "--others", "--exclude-standard"], options);
+    return [...changed.output.split("\n"), ...added.output.split("\n")].filter(Boolean);
   };
 
   return {
@@ -1535,8 +1582,10 @@ export const createActivities = (
     // look from the spec, and the brief is stored for every later build of the project. A brief is
     // made once: a rebuild keeps it. An app first built without one keeps its look on a change; it
     // gets a brief only when the person picks a look. Never fails the build over the lead's answer.
-    async planDesign(buildId: number): Promise<void> {
-      if (!config.designTeam) return;
+    //
+    // Returns the commit the build starts from when the build has a brief, for the design review.
+    async planDesign(buildId: number): Promise<{ readonly base: string } | null> {
+      if (!config.designTeam) return null;
       const { build, project } = await stepOfBuild(buildId);
       const kept = await briefOf(project.id);
       if (kept) {
@@ -1545,9 +1594,9 @@ export const createActivities = (
           "step",
           `Design: keeping the ${styleName(kept.style)} look chosen before`
         );
-        return;
+        return { base: await headOf(project) };
       }
-      if (build.kind !== "initial") return;
+      if (build.kind !== "initial") return null;
       await event(buildId, "step", "The design lead is choosing the app's look");
       const brief = designBrief(await runLead(project, buildId), project.brandColors);
       await db
@@ -1561,8 +1610,7 @@ export const createActivities = (
           ? `Design: the ${styleName(brief.style)} look. ${brief.reason}`
           : `Design: the design lead's answer could not be used, so the app gets the default ${styleName(brief.style)} look`
       );
-      if (project.brandColors.length === 0) return;
-      for (const theme of THEMES) {
+      for (const theme of project.brandColors.length > 0 ? THEMES : []) {
         const color = brief.brand[theme];
         await event(
           buildId,
@@ -1572,6 +1620,95 @@ export const createActivities = (
             : `Design: the business's colors do not pass contrast in ${theme} mode, so the look keeps its own accent`
         );
       }
+      return { base: await headOf(project) };
+    },
+
+    // The design review (#159), after the checks pass: a reviewer compares every screen with the
+    // brief, from pictures when `capture` can take them and from the code when it cannot. Not ok
+    // means a fix round; on the `last` round what is left is recorded and the build goes on. A
+    // change that does not touch the interface, or a reviewer with no usable answer, passes.
+    async reviewDesign(input: {
+      buildId: number;
+      base: string;
+      round: number;
+      last: boolean;
+    }): Promise<{ ok: boolean; output: string }> {
+      const passed = { ok: true, output: "" };
+      const { buildId } = input;
+      const { build, project } = await stepOfBuild(buildId);
+      const brief = await briefOf(project.id);
+      if (!brief) return passed;
+      if (build.kind !== "initial" && !touchesInterface(await changedSince(project, input.base))) {
+        await event(
+          buildId,
+          "check",
+          "This change does not touch the interface, so the design review is skipped"
+        );
+        return passed;
+      }
+      await event(buildId, "check", "Design review: comparing every screen with the brief");
+      const workspace = workspaceOf(project);
+      const outDir = join(config.dataDir, "reviews", `build-${buildId}`);
+      await rm(outDir, { recursive: true, force: true });
+      await mkdir(outDir, { recursive: true });
+      const problems = await (async () => {
+        try {
+          const pictures = await capture({ workspace, outDir });
+          return parseReview(
+            await designRun(project, buildId, {
+              kind: "review",
+              prompt: reviewPrompt({ brief, spec: project.spec ?? "", pictures }),
+              cwd: workspace,
+              schema: REVIEW_JSON_SCHEMA,
+              options: {
+                tools: REVIEWER_TOOLS,
+                allowedTools: REVIEWER_TOOLS,
+                maxTurns: 40,
+                ...(pictures.length > 0 && { additionalDirectories: [outDir] }),
+              },
+            })
+          );
+        } finally {
+          await rm(outDir, { recursive: true, force: true });
+        }
+      })();
+      if (problems === undefined) {
+        await event(
+          buildId,
+          "check",
+          "The design review could not run, so the build goes on without it"
+        );
+        return passed;
+      }
+      const serious = problems.filter(({ severity }) => severity === "serious").length;
+      const counted = `${problems.length} ${problems.length === 1 ? "problem" : "problems"}`;
+      const leftForLater = async () => {
+        for (const { severity, screen, problem } of problems) {
+          await event(buildId, "check", `Left for later (${severity}): ${screen}: ${problem}`);
+        }
+      };
+      if (serious === 0) {
+        await event(
+          buildId,
+          "check",
+          problems.length === 0
+            ? "Design review passed"
+            : `Design review passed, with ${counted} small enough to leave`
+        );
+        await leftForLater();
+        return passed;
+      }
+      if (input.last) {
+        await event(
+          buildId,
+          "check",
+          `Design review still found ${counted} (${serious} serious) after ${input.round} fix ${input.round === 1 ? "round" : "rounds"}; the app is published with them`
+        );
+        await leftForLater();
+        return passed;
+      }
+      await event(buildId, "check", `Design review found ${counted} (${serious} serious)`);
+      return { ok: false, output: reviewFeedbackPrompt(problems) };
     },
 
     // Returns the session id so a later fix-up run can resume the same conversation.
@@ -1583,6 +1720,8 @@ export const createActivities = (
       round?: number;
       resume?: string;
       feedback?: string;
+      // The design review's problems, as reviewFeedbackPrompt wrote them.
+      review?: string;
     }): Promise<string> {
       const { build, project } = await stepOfBuild(input.buildId);
       const retried = Context.current().info.attempt > 1;
@@ -1600,13 +1739,13 @@ export const createActivities = (
             : [],
           brief && briefPrompt(brief, runKind)
         );
+      // The design review's problems, or the failed checks' output, for a fix round.
+      const fix =
+        input.review ??
+        (input.feedback === undefined ? undefined : checksFeedbackPrompt(input.feedback));
       const prompt =
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
-        (input.feedback === undefined
-          ? await task()
-          : config.runner
-            ? `${await task()}\n\n${checksFeedbackPrompt(input.feedback)}`
-            : checksFeedbackPrompt(input.feedback)) +
+        (fix === undefined ? await task() : config.runner ? `${await task()}\n\n${fix}` : fix) +
         attachmentsNote(attachments) +
         (config.runner ? `\n\n${POD_NOTE}` : "");
       await event(
@@ -1614,9 +1753,11 @@ export const createActivities = (
         "step",
         retried
           ? "The server restarted; the agent picks up where it stopped"
-          : input.feedback !== undefined
-            ? "Agent is fixing failed checks"
-            : "Agent is building the app"
+          : input.review !== undefined
+            ? "Agent is fixing design problems"
+            : input.feedback !== undefined
+              ? "Agent is fixing failed checks"
+              : "Agent is building the app"
       );
       if (config.agentCmd) {
         await runAgentCmd(project, "build", prompt, workspaceOf(project), input.buildId);

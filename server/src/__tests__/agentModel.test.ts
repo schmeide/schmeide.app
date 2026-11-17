@@ -33,7 +33,9 @@ describe("agent model routing", () => {
   it("routes one kind and leaves the others on the fallback", () => {
     const routing = routingFromEnv({ SCHMEIDE_AGENT_MODEL_SPEC: "haiku" });
 
-    expect(describeRouting(routing)).toBe("spec haiku, initial opus, change opus, design sonnet");
+    expect(describeRouting(routing)).toBe(
+      "spec haiku, initial opus, change opus, design sonnet, review sonnet"
+    );
   });
 
   it("puts the design lead on a mid-size model unless it is routed or the fallback is", () => {
@@ -44,6 +46,10 @@ describe("agent model routing", () => {
     expect(
       pickModel(routingFromEnv({ SCHMEIDE_AGENT_MODEL_DESIGN: "haiku" }), "design").model
     ).toBe("haiku");
+    expect(pickModel(routingFromEnv({}), "review").model).toBe("sonnet");
+    expect(pickModel(routingFromEnv({ SCHMEIDE_AGENT_MODEL_REVIEW: "opus" }), "review").model).toBe(
+      "opus"
+    );
   });
 
   it("treats an empty variable as unset", () => {

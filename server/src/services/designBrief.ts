@@ -158,10 +158,10 @@ const PIECES: readonly (readonly [keyof Style["pieces"], string])[] = [
   ["empty", "Empty state"],
 ];
 
-const piecesGuide = (style: Style): string =>
+export const piecesGuide = (style: Style): string =>
   PIECES.map(([piece, label]) => `- ${label}: ${style.pieces[piece]}`).join("\n");
 
-const screensGuide = (brief: DesignBrief): string =>
+export const screensGuide = (brief: DesignBrief): string =>
   brief.screens.length > 0
     ? `\n\nThe screens:\n\n${brief.screens.map(({ name, layout }) => `- ${name}: ${layout}`).join("\n")}`
     : "";

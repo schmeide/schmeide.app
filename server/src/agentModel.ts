@@ -10,6 +10,7 @@ export const ROUTED_KINDS = [
   "initial",
   "change",
   "design",
+  "review",
 ] as const satisfies readonly RunKind[];
 export type RoutedKind = (typeof ROUTED_KINDS)[number];
 
@@ -18,7 +19,10 @@ export const DEFAULT_MODEL = "opus";
 
 // Kinds that start on their own model rather than the fallback: the design team's runs judge and
 // write little code, so a mid-size model does (#159).
-const KIND_DEFAULTS: Readonly<Partial<Record<RoutedKind, string>>> = { design: "sonnet" };
+const KIND_DEFAULTS: Readonly<Partial<Record<RoutedKind, string>>> = {
+  design: "sonnet",
+  review: "sonnet",
+};
 
 // A model per run kind; a kind without one uses the fallback. Names go to the Claude Agent SDK as
 // they are, so each must be an alias or a deployment name that every tenant's resource serves.

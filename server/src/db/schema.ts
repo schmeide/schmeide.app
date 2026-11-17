@@ -160,6 +160,7 @@ export const agentRunKind = pgEnum("agent_run_kind", [
   "read",
   "summary",
   "design",
+  "review",
 ]);
 
 // A plain-language account of a build, written as it runs from its events (services/summaries.ts).

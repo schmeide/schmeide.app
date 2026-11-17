@@ -421,9 +421,11 @@ decides, and the run kind is its only input.
 | `initial` | The first build from the spec, and its fix-up runs   | `SCHMEIDE_AGENT_MODEL_INITIAL` |
 | `change`  | A change request on a built app, and its fix-up runs | `SCHMEIDE_AGENT_MODEL_CHANGE`  |
 | `design`  | The design lead choosing an app's look               | `SCHMEIDE_AGENT_MODEL_DESIGN`  |
+| `review`  | The design review of a build against its brief       | `SCHMEIDE_AGENT_MODEL_REVIEW`  |
 
-- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`, except `design`, which uses `sonnet`: it judges
-  and writes no code, so a mid-size model does. With none of them set, every build run uses that one model, as before.
+- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`, except `design` and `review`, which use
+  `sonnet`: they judge and write no code, so a mid-size model does. With none of them set, every build run uses that
+  one model, as before.
 - The server prints the resolved table at startup. Each build run adds an event with the model and the reason, for
   example `Model sonnet for this change run (SCHMEIDE_AGENT_MODEL_CHANGE routes change runs)`, just before
   `Agent started (...)`, which shows the model the SDK resolved it to.
@@ -433,7 +435,7 @@ decides, and the run kind is its only input.
   `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`. A build's
   running summary is a seventh, `summary`, on `SCHMEIDE_SUMMARY_MODEL`; it is Schmeide's cost, left out of what a
   project or business is shown or counted against, and shown in the admin area's usage by kind of run. The design
-  lead's runs are `design`.
+  lead's runs are `design`, the design reviewer's `review`.
 - Every run that reaches the model also gets one `agent_runs` row with how long it ran (`duration_ms` from the SDK's
   result), and its `usage` rows name it in `run_id`. The time is kept once per run, not per model, so summing it never
   counts a run twice. Rows from before runs were recorded have no `run_id`, and their time is not known.
@@ -602,6 +604,21 @@ on by default (#83). With it off, builds run exactly as above: no extra runs, th
   styled as the style says, then the screens from those pieces only. This is prompt instructions in the one build
   run, not a run of its own: a separate run would read the whole project again and hand its work over through git,
   for no gain the checks could see. On a change the prompt says to keep to the brief and not change the look.
+- **The design review** (`reviewDesign`, run kind `review`) runs after `runChecks` passes and before deploy, on a
+  first build and on a change that touches the interface: the build's changes since it started (committed or not)
+  include a file under `frontend/` that is not a test (`touchesInterface` in `server/src/services/designReview.ts`).
+  Other changes skip it. The reviewer compares every screen in the spec with the brief and returns at most fifteen
+  problems, each `serious` or `minor`, serious first. Serious ones go back to the builder's session as a fix round
+  (up to 2, `MAX_REVIEW_ROUNDS`); each round's work goes through `runChecks` again, so the phone check and the make
+  targets can still fail the build as before. What is still wrong after the last round, and every minor problem, is
+  recorded as `Left for later` events and the app is published with it. A reviewer that fails or answers out of form
+  is recorded and passes the build.
+- **What the reviewer sees.** It has `Read`, `Glob` and `Grep` in the workspace and nothing else: no Bash, no
+  writes, no web. It is meant to work from pictures of the running app at 360px and 1280px, light and dark, taken
+  through the `ScreenCapture` seam passed to `createActivities`. Nothing takes pictures yet (`noBrowser`): there is no
+  browser where builds run. So today it is a **code-based review**, and its prompt says so: it reads the shared
+  stylesheet and the screens under `frontend/src/` and judges from the markup and CSS. It cannot see overflow,
+  rendering, or contrast as drawn.
 - **Apps built without a brief** (before the design team, or with it off) keep their look: a change build makes no
   brief and gets none.
 
