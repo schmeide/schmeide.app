@@ -93,6 +93,7 @@ import {
   type Interviewer,
 } from "./services/interview.ts";
 import { siteSchema } from "./services/site.ts";
+import { getDesign, pickLook, pickLookSchema } from "./services/designs.ts";
 import { readWebsite, type WebsiteDeps } from "./services/website.ts";
 import {
   approveSpec,
@@ -125,6 +126,8 @@ export type AppContext = Deps &
     readonly providers: readonly Provider[];
     // SCHMEIDE_BUILDS=admins: builds are on for platform admins and off for everyone else.
     readonly buildsAdminsOnly?: boolean;
+    // The design team (SCHMEIDE_DESIGN_TEAM); absent is off.
+    readonly designTeam?: boolean;
   };
 
 // Whether this caller may build: never with builds off, and with builds for admins only, only a
@@ -504,6 +507,11 @@ export const appRouter = t.router({
     removeItem: onProject(planItemIdSchema).mutation(({ ctx, input }) =>
       removePlanItem(ctx.db, input)
     ),
+  }),
+  // The look of the app: the one it has and why, and picking another; see services/designs.ts.
+  design: t.router({
+    get: onProject(projectIdSchema).query(({ ctx, input }) => getDesign(ctx, input.id)),
+    pick: building(pickLookSchema).mutation(({ ctx, input }) => pickLook(ctx, input)),
   }),
   website: t.router({
     read: onProject(readWebsiteSchema).mutation(({ ctx, input }) =>

@@ -82,6 +82,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "interview.updateItem": { id, itemId: 1, text: "Take over" },
   "interview.removeItem": { id, itemId: 1 },
   "website.read": { id, address: "https://bakery.example/", whose: "mine" },
+  "design.get": { id },
+  "design.pick": { id, style: "bold" },
   "files.list": { id },
   "files.rename": { id, fileId: 1, displayName: "Taken over" },
   "files.delete": { id, fileId: 1 },

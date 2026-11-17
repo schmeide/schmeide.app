@@ -10,6 +10,7 @@ import type {
   Build,
   BuildEvent,
   BuildSummary,
+  Design,
   Interview,
   PlanItem,
   Project,
@@ -218,7 +219,9 @@ export const projectServer = (state: {
   usage?: Usage;
   time?: TimeTotals;
   interview?: Interview;
+  design?: Design;
 }): Handlers => ({
+  "design.get": () => state.design ?? { enabled: false, current: null, styles: [] },
   "interview.get": () => state.interview ?? anInterview(),
   "projects.list": () => [state.project],
   "projects.get": () => ({

@@ -5,6 +5,7 @@ import { AppFrame } from "./AppFrame";
 import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
 import { Link } from "./Link";
+import { LookStep } from "./LookStep";
 import { QueuedChanges } from "./QueuedChanges";
 import { Release } from "./Release";
 import { Spec } from "./Spec";
@@ -165,6 +166,7 @@ export function Designer({
             </details>
           </section>
         )}
+        <LookStep project={project} />
         <UsageSummary
           usage={usage}
           time={time}
