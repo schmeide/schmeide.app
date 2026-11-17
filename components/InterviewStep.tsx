@@ -17,7 +17,7 @@ import { ErrorNote } from "./ErrorNote";
 import stepStyles from "./Step.module.css";
 import styles from "./InterviewStep.module.css";
 
-const SECTIONS = ["who", "does", "screens", "keeps"] as const;
+const SECTIONS = ["who", "does", "screens", "keeps", "replaces"] as const;
 const YES = "yes";
 const NO = "no";
 
@@ -194,13 +194,17 @@ function Plan({ interview, fresh }: PlanProps) {
       <h3 id="plan">{copy.interview.planTitle(interview.items.length)}</h3>
       {SECTIONS.map((section) => {
         const items = interview.items.filter((item) => item.section === section);
+        const given = section === "replaces";
+        if (given && items.length === 0) return null;
         return (
           <div key={section} className={styles.section}>
             <h4>
               {copy.interview.sections[section]}{" "}
-              <span className={styles.sectionStatus}>
-                {copy.interview.sectionStatus[interview.sections[section]]}
-              </span>
+              {!given && (
+                <span className={styles.sectionStatus}>
+                  {copy.interview.sectionStatus[interview.sections[section]]}
+                </span>
+              )}
             </h4>
             {items.length ? (
               <ul>

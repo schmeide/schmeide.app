@@ -8,6 +8,7 @@ import { ProjectPage } from "./ProjectPage";
 import { SetPasswordPage } from "./SetPasswordPage";
 import { SignInPage } from "./SignInPage";
 import { StartPage } from "./StartPage";
+import { TodayPage } from "./TodayPage";
 
 const placeholder = (name: RouteName) => () => <PlaceholderPage title={copy.routes[name]} />;
 
@@ -15,6 +16,7 @@ const placeholder = (name: RouteName) => () => <PlaceholderPage title={copy.rout
 const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   apps: () => <ProjectList />,
   start: () => <StartPage />,
+  startExisting: () => <TodayPage />,
   // One key for the three views, so moving between them keeps the page and what was typed.
   project: ({ id }) => <ProjectPage key={id} id={id} view="overview" />,
   projectChanges: ({ id }) => <ProjectPage key={id} id={id} view="changes" />,

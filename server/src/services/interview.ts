@@ -121,6 +121,7 @@ export const getInterview = async (db: Db, id: number): Promise<Interview> => {
       does: sectionStatus("does"),
       screens: sectionStatus("screens"),
       keeps: sectionStatus("keeps"),
+      replaces: sectionStatus("replaces"),
     },
     finished: state?.finished ?? false,
   };
@@ -334,6 +335,7 @@ const SECTION_TITLES: Readonly<Record<PlanSection, string>> = {
   does: "What it does",
   screens: "Its screens",
   keeps: "What it keeps",
+  replaces: "What it replaces, which they use today",
 };
 
 const bullets = (title: string, items: readonly Pick<PlanItem, "text">[]): readonly string[] =>

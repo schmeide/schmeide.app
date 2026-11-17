@@ -24,6 +24,7 @@ export const copy = {
   routes: {
     apps: "Apps",
     start: "New app",
+    startExisting: "What you have today",
     project: "App",
     projectChanges: "Changes",
     projectSettings: "Settings",
@@ -128,18 +129,10 @@ export const copy = {
         need: "I need to track each job from the first call to the day it is paid.",
       },
     ],
-    replacing: {
-      toggle: "I’m replacing something I already use",
-      legend: "What are you replacing?",
-      kinds: {
-        spreadsheet: { label: "A spreadsheet", replaces: "a spreadsheet" },
-        paper: { label: "Paper forms", replaces: "paper forms" },
-        product: { label: "Another app or website", replaces: "another app or website" },
-      },
-      nameLabel: "Which app or website? (optional)",
-      named: (name: string) => `another app or website, ${name}`,
-      productNote:
-        "Schmeide builds your own app with the same kinds of features. It does not copy the other product’s name, logo, wording, or look.",
+    ways: {
+      label: "Where you are starting from",
+      idea: "I have an idea",
+      existing: "I already have something",
     },
     builds:
       "Schmeide builds apps that open in a browser, on a phone or a computer. It does not build apps for the app stores, and the apps it builds do not connect to other tools yet.",
@@ -147,6 +140,40 @@ export const copy = {
     continue: "Continue",
     continuing: "Thinking of the first question…",
     unfinishedTitle: "Continue where you left off",
+  },
+  today: {
+    title: "What you have today",
+    intro:
+      "Tell us what does this job for you now. Schmeide starts your plan from it, so nothing you rely on gets lost.",
+    usesLegend: "What do you use for this today?",
+    usesHint: "Choose every one that applies.",
+    usesMissing: "Choose at least one thing you use today.",
+    uses: {
+      spreadsheet: { label: "A spreadsheet", appName: "In place of my spreadsheet", note: null },
+      paper: { label: "Paper", appName: "In place of paper", note: null },
+      product: {
+        label: "A product I pay for",
+        appName: "In place of a product I pay for",
+        note: "Schmeide builds your own app with the same kinds of features. It does not copy the other product’s name, logo, wording, or look.",
+      },
+      software: {
+        label: "Software built for me",
+        appName: "In place of my software",
+        note: "Schmeide cannot change that software. It builds a new app that does the same job.",
+      },
+      website: {
+        label: "A website",
+        appName: "Beside my website",
+        note: "Your website stays as it is. The app sits beside it at its own address.",
+      },
+    },
+    keepLabel: "What works well and must not change?",
+    keepDecide: "You decide",
+    keepDecideHint: "Schmeide works out what to keep and marks it in your plan.",
+    fixLabel: "What gets in your way?",
+    fixMissing: "Write a sentence about what gets in your way today.",
+    builtHere: "Changing an app you built here? Open it from",
+    builtHereLink: "your apps",
   },
   project: {
     back: "← All projects",
@@ -347,6 +374,7 @@ export const copy = {
       does: "What it does",
       screens: "Its screens",
       keeps: "What it keeps",
+      replaces: "What it replaces",
     },
     sectionStatus: { not_started: "Not started", sketched: "Sketched", ready: "Ready" },
     sectionEmpty: "Nothing here yet.",

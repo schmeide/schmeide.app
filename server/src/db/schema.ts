@@ -128,7 +128,7 @@ export const usage = pgTable("usage", {
 });
 
 // The plan the interview builds: the same parts the spec has, plus who uses the app.
-export const PLAN_SECTIONS = ["who", "does", "screens", "keeps"] as const;
+export const PLAN_SECTIONS = ["who", "does", "screens", "keeps", "replaces"] as const;
 export const planSection = pgEnum("plan_section", PLAN_SECTIONS);
 // `schmeide`: an item the model added that the person did not state themselves.
 export const planSource = pgEnum("plan_source", ["you", "schmeide"]);
@@ -191,13 +191,21 @@ export const projectIdSchema = z.object({ id: projectId });
 
 export const NEED_MAX = 2000;
 
+export const todaySchema = z.object({
+  uses: z.array(z.string().trim().min(1).max(100)).min(1).max(5),
+  keep: z.string().trim().min(1).max(500).optional(),
+  keepDecided: z.boolean().optional(),
+  fix: z.string().trim().min(1).max(500),
+});
+export type Today = z.infer<typeof todaySchema>;
+
 export const newProjectSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     need: z.string().trim().min(1).max(NEED_MAX).optional(),
-    replaces: z.string().trim().min(1).max(200).optional(),
+    today: todaySchema.optional(),
   })
-  .refine((input) => input.name !== undefined || input.need !== undefined, {
+  .refine((input) => [input.name, input.need, input.today].some((given) => given !== undefined), {
     message: "Say what you need, or give the app a name",
     path: ["need"],
   });

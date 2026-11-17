@@ -112,28 +112,22 @@ describe("StartPage", () => {
     );
   });
 
-  it("takes what the app replaces, and says another product is not copied", async () => {
-    const calls = renderWithApi(<StartPage />, server());
-    const { replacing } = copy.start;
+  it("offers both ways in, marking the one shown", () => {
+    renderWithApi(<StartPage />, server());
 
-    expect(screen.queryByRole("group", { name: replacing.legend })).toBeNull();
-    await userEvent.click(screen.getByRole("checkbox", { name: replacing.toggle }));
-    const kinds = screen.getByRole("group", { name: replacing.legend });
-    expect(screen.queryByText(replacing.productNote)).toBeNull();
-    await userEvent.click(
-      within(kinds).getByRole("radio", { name: replacing.kinds.product.label })
-    );
-    expect(screen.getByText(replacing.productNote)).toBeVisible();
-    await userEvent.type(screen.getByRole("textbox", { name: replacing.nameLabel }), "QuickBooks");
-    await userEvent.type(field(), "Invoices for my clients");
-    await submit();
-
-    await waitFor(() =>
-      expect(calls).toContainEqual({
-        path: "projects.create",
-        input: { need: "Invoices for my clients", replaces: replacing.named("QuickBooks") },
-      })
-    );
+    const ways = screen.getByRole("navigation", { name: copy.start.ways.label });
+    expect(
+      within(ways)
+        .getAllByRole("link")
+        .map((link) => [
+          link.textContent,
+          link.getAttribute("href"),
+          link.getAttribute("aria-current"),
+        ])
+    ).toEqual([
+      [copy.start.ways.idea, "/new", "page"],
+      [copy.start.ways.existing, "/new/existing", null],
+    ]);
   });
 
   it("offers the apps that are not built yet, and not the ones that are", async () => {

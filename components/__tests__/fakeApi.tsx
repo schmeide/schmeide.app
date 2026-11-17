@@ -139,6 +139,7 @@ export const anInterview = (overrides: Partial<Interview> = {}): Interview => ({
     does: "not_started",
     screens: "not_started",
     keeps: "not_started",
+    replaces: "not_started",
   },
   finished: false,
   ...overrides,

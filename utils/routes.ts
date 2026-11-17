@@ -9,6 +9,7 @@ export type Access = "public" | "signedIn" | "business";
 const table = {
   apps: { path: "/", access: "business" },
   start: { path: "/new", access: "business" },
+  startExisting: { path: "/new/existing", access: "business" },
   project: { path: "/projects/:id", access: "business" },
   projectChanges: { path: "/projects/:id/changes", access: "business" },
   projectSettings: { path: "/projects/:id/settings", access: "business" },
