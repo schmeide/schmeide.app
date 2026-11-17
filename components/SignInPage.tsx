@@ -3,7 +3,7 @@ import { useState, type FormEvent } from "react";
 import { copy } from "../data/copy";
 import { providerSignInUrl, signInWithPassword, type PasswordSignIn } from "../utils/authApi";
 import { leaveTo } from "../utils/navigation";
-import { nextPath } from "../utils/routes";
+import { carryPlan, nextPath } from "../utils/routes";
 import type { Provider } from "../utils/session";
 import { useSession } from "./SessionProvider";
 
@@ -21,7 +21,7 @@ const problems: Readonly<Record<Exclude<PasswordSignIn, "ok">, string>> = {
 // Sign in with a provider or with email and password. Once the session says who this is, the
 // route guard sends the person on to the page they asked for.
 export function SignInPage() {
-  const { providers, refresh } = useSession();
+  const { providers, refresh, signedOutHere } = useSession();
   const search = window.location.search;
   // A provider sign-in that was refused comes back here with the reason.
   const returned = new URLSearchParams(search).get("error");
@@ -33,7 +33,7 @@ export function SignInPage() {
   const withProvider = async (provider: Provider) => {
     setBusy(true);
     setProblem(null);
-    const url = await providerSignInUrl(provider, nextPath(search));
+    const url = await providerSignInUrl(provider, carryPlan(nextPath(search), search));
     if (url) return leaveTo(url);
     setProblem(copy.signInPage.providerFailed);
     setBusy(false);
@@ -56,6 +56,11 @@ export function SignInPage() {
   return (
     <>
       <h1>{copy.routes.signIn}</h1>
+      {signedOutHere && (
+        <p role="status" className={styles.status}>
+          {copy.signInPage.signedOut}
+        </p>
+      )}
       <p className={styles.intro}>{copy.signInPage.intro}</p>
       <div className={styles.column}>
         {problem && (
@@ -93,6 +98,9 @@ export function SignInPage() {
           </button>
         </form>
         <p className={styles.hint}>{copy.signInPage.help}</p>
+        <p className={styles.hint}>
+          <a href={copy.outbound.earlyAccess}>{copy.signInPage.notInvited}</a>
+        </p>
       </div>
     </>
   );

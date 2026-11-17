@@ -1,0 +1,64 @@
+.frame {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Off screen until a keyboard user tabs to it, then the first thing on the page. */
+.skip {
+  position: absolute;
+  inset-block-start: var(--space-s);
+  inset-inline-start: var(--space-gutter);
+  z-index: 2;
+  padding: var(--space-s) var(--space-m);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border-radius: var(--radius-highlight);
+  translate: 0 -200%;
+}
+
+.skip:focus {
+  translate: 0;
+}
+
+/* No rule under the header: with nothing but the logo, space alone sets it apart. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s) var(--space-m);
+  width: 100%;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-s) var(--space-gutter);
+}
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--hit-target);
+  font-family: var(--font-display);
+  font-size: var(--text-title);
+  font-weight: 400;
+  text-decoration: none;
+}
+
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* One narrow column, set lower than the app's pages: these are single steps, not workspaces. */
+.main {
+  flex: 1;
+  width: 100%;
+  max-width: calc(var(--prose-width) + 2 * var(--space-gutter));
+  margin: 0 auto;
+  padding: var(--space-xl) var(--space-gutter);
+}

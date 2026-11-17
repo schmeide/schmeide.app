@@ -42,3 +42,50 @@
   font-size: var(--text-small);
   color: var(--color-muted);
 }
+
+/* The sign-up page's two ways on: one primary, one plain link, stacked on a narrow screen. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-m) var(--space-gutter);
+  margin-top: var(--space-l);
+}
+
+/* A link to another site that carries the page's main action, drawn as the primary button. */
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit-target);
+  padding: 0.75rem 1.25rem;
+  background: var(--color-accent);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-button);
+  color: var(--color-on-accent);
+  font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition-property: background-color, border-color, color, scale;
+}
+
+@media (hover: hover) {
+  .primaryLink:hover {
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+    color: var(--color-on-accent);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .primaryLink:active {
+    scale: 0.96;
+  }
+}
+
+.status {
+  margin: 0;
+  font-weight: 600;
+}

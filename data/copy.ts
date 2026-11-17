@@ -1,6 +1,15 @@
 // Every string that appears on the page lives here. Components import from
 // this file; they do not hardcode copy.
+
+// The marketing site. The one place its address is written.
+const MARKETING_SITE = "https://schmeide.com";
+
 export const copy = {
+  // Addresses outside this app.
+  outbound: {
+    marketingSite: `${MARKETING_SITE}/`,
+    earlyAccess: `${MARKETING_SITE}/early-access/`,
+  },
   hero: {
     headline: "Schmeide",
     tagline: "Coming soon.",
@@ -19,6 +28,11 @@ export const copy = {
     legalNav: "Legal",
     signIn: "Sign in",
     signOut: "Sign out",
+  },
+  // The frame around the pages a person arriving from schmeide.com sees before the app shell.
+  entry: {
+    // Read after the logo, so the logo link says where it goes.
+    logoHint: ", back to schmeide.com",
   },
   // The name of each route in utils/routes.ts: its navigation label and its tab title.
   routes: {
@@ -43,6 +57,7 @@ export const copy = {
     adminAudit: "Audit log",
     help: "Help",
     signIn: "Sign in",
+    signUp: "Join Schmeide",
     setPassword: "Set your password",
     terms: "Terms",
     privacy: "Privacy",
@@ -255,6 +270,8 @@ export const copy = {
     action: "Sign in",
     signingIn: "Signing in…",
     help: "No password yet, or forgotten it? Ask the person who invited you for a new link.",
+    notInvited: "Not invited yet? Ask for early access",
+    signedOut: "You are signed out.",
     // Why a sign-in was refused. `refused` is keyed by the reason the server sends back.
     refused: {
       not_approved:
@@ -266,6 +283,13 @@ export const copy = {
     wrong: "That email and password do not match. Check both and try again.",
     tooMany: "Too many tries. Wait a minute, then try again.",
     failed: "Sign-in did not work this time. Try again in a moment.",
+  },
+  signUpPage: {
+    inviteOnly:
+      "Schmeide is open by invitation while we work with a first group of businesses. Ask for early access, and we will email you a link to set up your account once we can take you on.",
+    askForAccess: "Ask for early access",
+    signIn: "Already invited? Sign in",
+    planKept: "The plan you chose comes with you. It will be ready when you set up payment.",
   },
   setPasswordPage: {
     intro: (email: string) =>
@@ -301,6 +325,7 @@ export const copy = {
     },
     signedInAs: (email: string) => `You are signed in as ${email}.`,
     action: "Go to your apps",
+    toMarketingSite: "Go to schmeide.com",
   },
   list: {
     title: "Your apps",

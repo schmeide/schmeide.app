@@ -6,7 +6,7 @@ import { useTRPC } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { signInWithPassword } from "../utils/authApi";
 import { navigate } from "../utils/navigation";
-import { pathTo } from "../utils/routes";
+import { carryPlan, nextPath, pathTo } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
@@ -22,7 +22,8 @@ const MIN_PASSWORD_LENGTH = 10;
 export function SetPasswordPage() {
   const trpc = useTRPC();
   const { refresh } = useSession();
-  const token = new URLSearchParams(window.location.search).get("token") ?? "";
+  const search = window.location.search;
+  const token = new URLSearchParams(search).get("token") ?? "";
   const invite = useQuery({ ...trpc.invites.get.queryOptions({ token }), enabled: token !== "" });
   const accept = useMutation(trpc.invites.accept.mutationOptions());
   const [mismatch, setMismatch] = useState(false);
@@ -57,7 +58,9 @@ export function SetPasswordPage() {
     });
     if ((await signInWithPassword(email, password)) !== "ok") return setSignedOutAfter(true);
     await refresh();
-    navigate(pathTo("apps"));
+    // On to where the link says, with a plan chosen on schmeide.com; the guard sends a person with
+    // no business yet to first-run.
+    navigate(carryPlan(nextPath(search), search));
   };
 
   return (

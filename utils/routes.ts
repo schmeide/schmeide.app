@@ -29,6 +29,7 @@ const table = {
   adminAudit: { path: "/admin/audit", access: "admin" },
   help: { path: "/help", access: "public" },
   signIn: { path: "/sign-in", access: "public" },
+  signUp: { path: "/sign-up", access: "public" },
   setPassword: { path: "/set-password", access: "public" },
   terms: { path: "/terms", access: "public" },
   privacy: { path: "/privacy", access: "public" },
@@ -45,6 +46,15 @@ export type Route = {
 };
 export type RouteParams = Readonly<Record<string, number>>;
 export type RouteMatch = { readonly route: Route; readonly params: RouteParams };
+
+// The pages a person arriving from schmeide.com sees before they have a business. They sit in the
+// entry frame, not the app shell: no app navigation, and the logo leads back to schmeide.com.
+export const entryRoutes: ReadonlySet<RouteName> = new Set<RouteName>([
+  "signIn",
+  "signUp",
+  "setPassword",
+  "welcome",
+]);
 
 const names = Object.keys(table) as RouteName[];
 
@@ -84,6 +94,34 @@ export const nextPath = (search: string): string => {
   return next && /^\/(?![/\\])/.test(next) ? next : pathTo("apps");
 };
 
+// The plan ids schmeide.com's pricing page may send with `?plan=<id>`. Empty until the server
+// exposes the plans (#119); until then every id is unknown and dropped.
+export const KNOWN_PLANS: readonly string[] = [];
+
+// The plan a person chose on schmeide.com: only a known id, otherwise null without an error. It is
+// never put into the page.
+export const planFrom = (search: string, known: readonly string[] = KNOWN_PLANS): string | null => {
+  const plan = new URLSearchParams(search).get("plan");
+  return plan && known.includes(plan) ? plan : null;
+};
+
+// `path` with the known plan from `search` added to its query, so the plan travels with the
+// person: through a redirect, a provider sign-in (inside `next`), and the set-password link, on to
+// checkout (#61). Nothing is stored. A path that already names a plan keeps its own.
+export const carryPlan = (
+  path: string,
+  search: string,
+  known: readonly string[] = KNOWN_PLANS
+): string => {
+  const plan = planFrom(search, known);
+  if (!plan) return path;
+  const [pathname, query = ""] = path.split("?");
+  const params = new URLSearchParams(query);
+  if (params.has("plan")) return path;
+  params.set("plan", plan);
+  return `${pathname}?${params.toString()}`;
+};
+
 export type Guarded =
   { readonly kind: "page" } | { readonly kind: "redirect"; readonly to: string };
 
@@ -93,8 +131,10 @@ const redirect = (to: string): Guarded => ({ kind: "redirect", to });
 export const guard = (
   route: Route,
   session: Session,
-  location: { readonly pathname: string; readonly search: string }
+  location: { readonly pathname: string; readonly search: string },
+  known: readonly string[] = KNOWN_PLANS
 ): Guarded => {
+  const carried = (path: string) => carryPlan(path, location.search, known);
   if (!session.person) {
     if (route.access === "public") return { kind: "page" };
     const asked = location.pathname + location.search;
@@ -103,11 +143,12 @@ export const guard = (
       home ? pathTo("signIn") : `${pathTo("signIn")}?next=${encodeURIComponent(asked)}`
     );
   }
-  if (route.name === "signIn") return redirect(nextPath(location.search));
+  if (route.name === "signIn" || route.name === "signUp")
+    return redirect(carried(nextPath(location.search)));
   if (route.access === "admin" && !isAdmin(session)) return redirect(pathTo("apps"));
   const hasBusiness = session.businesses.length > 0;
   if (route.access === "business" && !hasBusiness)
-    return redirect(pathTo(isAdmin(session) ? "admin" : "welcome"));
-  if (route.name === "welcome" && hasBusiness) return redirect(pathTo("apps"));
+    return redirect(isAdmin(session) ? pathTo("admin") : carried(pathTo("welcome")));
+  if (route.name === "welcome" && hasBusiness) return redirect(carried(pathTo("apps")));
   return { kind: "page" };
 };

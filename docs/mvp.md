@@ -148,11 +148,17 @@ taken offline. It has three views, each with its own address:
   put live like any change; while a build runs, the update waits its turn. "Use the default icon" goes back to the
   template's. Under "Manage" are "Take the app offline" while live and "Delete project".
 
-Every page sits in the app shell: the logo (back to the list), the business name, the navigation (Apps, Usage,
-Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal links in the footer. The
-pages other than the project list and a project say "This page is not built yet". People sign in with an approved email
-address ([docs/auth.md](auth.md)); the shell shows their business, and "Sign out" in the account menu ends the
-session.
+Once a person has a business, every page sits in the app shell: the logo (back to the list), the business name, the
+navigation (Apps, Usage, Billing, Help; behind a "Menu" button on a narrow screen), the account menu, and the legal
+links in the footer. The pages other than the project list and a project say "This page is not built yet".
+
+Before that, the entry pages (`/sign-in`, `/sign-up`, `/set-password` and `/welcome`) sit in a plainer frame, the next
+step after schmeide.com: no app navigation, the logo leads back to schmeide.com, and the account menu shows once someone
+is signed in. `/sign-up` is where schmeide.com links to; while Schmeide is invite-only it says so and links to the
+early-access form. People sign in with an approved email address ([docs/auth.md](auth.md)). A `?plan=<id>` on
+`/sign-up`, `/sign-in` or `/set-password` travels on in the address (inside `next` through a provider sign-in) to
+checkout (#61) if the id is a known plan, and is dropped otherwise; nothing is stored, and no plan is known until #119.
+"Sign out" in the account menu leads to sign-in on any page but a public one, and sign-in says the sign-out worked.
 
 The address is the view (`/` for the list, `/projects/<id>` and its views for a project; the full table is
 `utils/routes.ts`), so

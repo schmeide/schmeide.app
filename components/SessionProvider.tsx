@@ -26,6 +26,9 @@ type SessionContext = {
   readonly startViewingAs: (email: string, reason: string) => Promise<void>;
   // Ends the view and returns the admin to the admin area as themselves.
   readonly stopViewing: () => Promise<void>;
+  // True once the person signed out on this page, until someone signs in again: sign-in then says
+  // the sign-out worked.
+  readonly signedOutHere: boolean;
 };
 
 const Context = createContext<SessionContext | null>(null);
@@ -50,6 +53,7 @@ export function SessionProvider({
   const queryClient = useQueryClient();
   const query = useQuery({ ...trpc.session.get.queryOptions(), enabled: !fixed });
   const [businessId, setBusinessId] = useState<number | null>(null);
+  const [signedOutHere, setSignedOutHere] = useState(false);
 
   const value = useMemo((): SessionContext => {
     const loaded: Session | undefined =
@@ -102,10 +106,12 @@ export function SessionProvider({
       },
       providers: query.data?.providers ?? [],
       refresh,
+      signedOutHere: signedOutHere && !session.person,
       signOut: async () => {
         // The server refuses signing out of a view; ending it first is what Stop does.
         if (session.impersonatedBy) await client.impersonation.stop.mutate();
         await endSession();
+        setSignedOutHere(true);
         await changedHands();
       },
       startViewingAs: async (email, reason) => {
@@ -115,6 +121,6 @@ export function SessionProvider({
       },
       stopViewing,
     };
-  }, [fixed, query.data, query.error, businessId, queryClient, trpc, client]);
+  }, [fixed, query.data, query.error, businessId, signedOutHere, queryClient, trpc, client]);
   return <Context value={value}>{children}</Context>;
 }
