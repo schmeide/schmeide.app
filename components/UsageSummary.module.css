@@ -26,3 +26,10 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+.usage dd.note {
+  margin-top: var(--space-s);
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  font-weight: 400;
+}

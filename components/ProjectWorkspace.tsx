@@ -1,5 +1,5 @@
 import { copy } from "../data/copy";
-import type { Build, BuiltChange, Project, Usage } from "../trpc";
+import type { Build, BuiltChange, Project, TimeTotals, Usage } from "../trpc";
 import { pathTo } from "../utils/routes";
 import { canDelete, DeleteProject } from "./DeleteProject";
 import { Designer } from "./Designer";
@@ -20,6 +20,7 @@ type Props = {
   readonly changes: readonly BuiltChange[];
   readonly hasIcon: boolean;
   readonly usage: Usage;
+  readonly time: TimeTotals;
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly onStop: () => void;
@@ -35,6 +36,7 @@ export function ProjectWorkspace({
   changes,
   hasIcon,
   usage,
+  time,
   request,
   onRequestChange,
   onStop,
@@ -72,6 +74,7 @@ export function ProjectWorkspace({
           queued={queued}
           changes={changes}
           usage={usage}
+          time={time}
           request={request}
           onRequestChange={onRequestChange}
           onStop={onStop}

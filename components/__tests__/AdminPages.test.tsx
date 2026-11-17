@@ -667,7 +667,16 @@ const aSummary = (): UsageSummaryData => ({
   projects: [{ id: 7, name: "Invoices", business: { id: 4, name: "Ada's bakery" }, ...spent }],
   models: [{ model: "claude-opus", ...spent }],
   runKinds: [{ runKind: "change", ...spent }],
-  times: [],
+  times: [
+    {
+      id: 4,
+      name: "Ada's bakery",
+      buildingMs: 5_430_000,
+      failedBuildingMs: 65_000,
+      builderMs: 900_000,
+    },
+    { id: 5, name: "Bea's books", buildingMs: 30_000, failedBuildingMs: 0, builderMs: 0 },
+  ],
 });
 
 describe("AdminUsagePage", () => {
@@ -699,6 +708,28 @@ describe("AdminUsagePage", () => {
     // The timezone, and what happens to a deleted app's usage, are said on the page.
     expect(screen.getByText(copy.usage.timezone)).toBeInTheDocument();
     expect(screen.getByText(copy.usage.deletedProjects)).toBeInTheDocument();
+  });
+
+  it("shows building time, its failed part, and builder time per business", async () => {
+    renderWithApi(<AdminUsagePage />, { "admin.usage.summary": aSummary }, admin);
+    const table = await screen.findByRole("table", { name: copy.usage.timeCaption });
+    const rows = within(table).getAllByRole("row");
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent)
+    ).toEqual([
+      copy.usage.business,
+      copy.project.time.building,
+      copy.usage.failedBuilding,
+      copy.project.time.builder,
+    ]);
+    expect(cellsOf(rows[1])).toEqual(["Ada's bakery", "1 h 30 min", "1 min 5 s", "15 min 0 s"]);
+    expect(cellsOf(rows[2])).toEqual(["Bea's books", "30 s", "0 s", "0 s"]);
+    expect(within(rows[1]).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
+      "href",
+      "/admin/businesses/4"
+    );
   });
 
   it("asks again for the period chosen", async () => {

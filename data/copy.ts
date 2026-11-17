@@ -219,6 +219,11 @@ export const copy = {
     modelsCaption: "Usage by model",
     runKindsTitle: "By kind of run",
     runKindsCaption: "Usage by kind of run",
+    timeTitle: "Time by business",
+    timeCaption: "Time by business",
+    timeNote:
+      "A build counts in the period it finished in. Builder time leaves out runs from before it was recorded.",
+    failedBuilding: "Of it, failed or canceled",
     business: "Business",
     project: "App",
     model: "Model",
@@ -525,6 +530,15 @@ export const copy = {
       cacheCreationTokens: "Tokens saved to cache",
       costUsd: "Reported cost",
     },
+    time: {
+      building: "Building time",
+      builder: "Builder time",
+      failed: (duration: string) => `${duration} of it on builds that failed or were canceled`,
+      notRecorded: "Not recorded",
+      partlyRecorded: "Earlier runs were not timed and are left out.",
+      explained:
+        "Building time runs from the start to the end of each build, checks and publishing included: the time you waited. A change waiting its turn starts counting when it starts. Builder time is how long the AI itself was working, on builds, the spec, and questions.",
+    },
     site: {
       title: "Page title and icon",
       intro:
@@ -636,4 +650,5 @@ export const copy = {
   },
   duration: (minutes: number, seconds: number) =>
     minutes > 0 ? `${minutes} min ${seconds} s` : `${seconds} s`,
+  longDuration: (hours: number, minutes: number) => `${hours} h ${minutes} min`,
 } as const;

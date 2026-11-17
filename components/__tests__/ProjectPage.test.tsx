@@ -276,6 +276,12 @@ describe("ProjectPage", () => {
           cacheCreationTokens: 0,
           costUsd: 0.42,
         },
+        time: {
+          buildingMs: 400_000,
+          failedBuildingMs: 0,
+          builderMs: 250_000,
+          builderUnrecorded: false,
+        },
       })
     );
     const link = await screen.findByRole("link", { name: new RegExp(copy.project.open) });
@@ -283,6 +289,8 @@ describe("ProjectPage", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByText("$0.42")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
+    expect(screen.getByText("6 min 40 s")).toBeInTheDocument();
+    expect(screen.getByText("4 min 10 s")).toBeInTheDocument();
     const frame = screen.getByTitle(copy.project.designer.frameTitle("Invoices"));
     expect(frame).toHaveAttribute("src", "http://localhost:8100");
     expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
