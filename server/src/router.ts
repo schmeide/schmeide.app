@@ -12,6 +12,7 @@ import {
   buildIdSchema,
   businessStateSchema,
   changeRequestSchema,
+  deleteAccountSchema,
   editChangeSchema,
   editPlanItemSchema,
   eventsQuerySchema,
@@ -27,8 +28,10 @@ import {
   projectIdsSchema,
   readWebsiteSchema,
   removeMemberSchema,
+  renameAccountSchema,
   renameFileSchema,
   setFeaturesSchema,
+  signInMethodIdSchema,
   sessions,
   tenantIdSchema,
   usageQuerySchema,
@@ -44,6 +47,14 @@ import {
   removeAccess,
   revokeAdmin,
 } from "./services/access.ts";
+import {
+  deleteAccount,
+  disconnectMethod,
+  exportAccount,
+  getAccount,
+  renameAccount,
+  signOutOthers,
+} from "./services/account.ts";
 import { auditFilters, listAdminActions, withAudit, type Actor } from "./services/audit.ts";
 import {
   currentPerson,
@@ -71,6 +82,7 @@ import {
 import {
   BUILDS_OFF,
   BUSINESS_SUSPENDED,
+  BadInputError,
   BusinessSuspendedError,
   ConflictError,
   ForbiddenError,
@@ -150,6 +162,8 @@ const procedure = t.procedure.use(async ({ next }) => {
     const cause = result.error.cause;
     if (cause instanceof NotFoundError)
       throw new TRPCError({ code: "NOT_FOUND", message: cause.message });
+    if (cause instanceof BadInputError)
+      throw new TRPCError({ code: "BAD_REQUEST", message: cause.message, cause });
     if (cause instanceof ConflictError)
       throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
     if (cause instanceof ForbiddenError)
@@ -241,7 +255,8 @@ const impersonating = procedure.use(async ({ ctx, path, next }) => {
 });
 
 // Refused while an admin views the app as the person: what changes how the person signs in
-// (`/auth` is refused as a whole in app.ts), and anything that charges money (#82 builds its
+// (`/auth` is refused as a whole in app.ts; the account's sign-in methods, devices and deletion
+// here), and anything that charges money (#82 builds its
 // payment procedures with `.use(refuseImpersonation)`).
 const refuseImpersonation = t.middleware(async ({ ctx, next }) => {
   if ((await currentPerson(ctx, ctx.headers))?.impersonatedBy)
@@ -454,6 +469,25 @@ export const appRouter = t.router({
         return null;
       })
     ),
+  }),
+  // The signed-in person's own account; see services/account.ts.
+  account: t.router({
+    get: signedIn.query(({ ctx }) => getAccount(ctx, ctx.person, ctx.headers)),
+    rename: signedIn
+      .input(renameAccountSchema)
+      .mutation(({ ctx, input }) => renameAccount(ctx.db, ctx.person, input)),
+    disconnect: signedIn
+      .use(refuseImpersonation)
+      .input(signInMethodIdSchema)
+      .mutation(({ ctx, input }) => disconnectMethod(ctx, ctx.person, input, ctx.headers)),
+    signOutOthers: signedIn
+      .use(refuseImpersonation)
+      .mutation(({ ctx }) => signOutOthers(ctx, ctx.headers)),
+    export: signedIn.query(({ ctx }) => exportAccount(ctx, ctx.person, ctx.headers)),
+    delete: signedIn
+      .use(refuseImpersonation)
+      .input(deleteAccountSchema)
+      .mutation(({ ctx, input }) => deleteAccount(ctx.db, ctx.person, input)),
   }),
   // One-time links that let an approved person set a password; see services/access.ts.
   invites: t.router({

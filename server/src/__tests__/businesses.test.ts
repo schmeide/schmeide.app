@@ -63,6 +63,12 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "session.get": undefined,
   "invites.get": { token: "no-such-token" },
   "invites.accept": { token: "no-such-token", name: "Eve", password: "a long password" },
+  "account.get": undefined,
+  "account.rename": { name: "Taken over" },
+  "account.disconnect": { id: "no-such-method" },
+  "account.signOutOthers": undefined,
+  "account.export": undefined,
+  "account.delete": { email: "nobody@example.com" },
   "projects.list": undefined,
   "projects.create": { name: `walk ${randomUUID()}` },
   "projects.get": { id },
@@ -96,6 +102,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "builds.removeQueued": { buildId },
 });
 const takesAnId = (input: unknown) => typeof input === "object" && input !== null;
+// The caller's own account: about the person, never a project or build.
+const isOwnAccount = (path: string) => path.startsWith("account.");
 
 // A project with a spec and a running build, in the given business.
 const aBuiltProject = async (tenantId: number) => {
@@ -145,7 +153,11 @@ describe("every procedure", () => {
     try {
       const calls = everyCall(project.id, build.id);
       const scoped = customerPaths.filter(
-        (path) => !OPEN.includes(path) && takesAnId(calls[path]) && path !== "projects.create"
+        (path) =>
+          !OPEN.includes(path) &&
+          !isOwnAccount(path) &&
+          takesAnId(calls[path]) &&
+          path !== "projects.create"
       );
       expect(scoped.length).toBeGreaterThan(15);
       for (const path of scoped)

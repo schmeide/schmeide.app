@@ -1,0 +1,91 @@
+/* Shared by the sections of the account page. */
+
+.page {
+  max-width: var(--prose-width);
+}
+
+/* A list of things, one per row: what it is on the leading edge, its action trailing. */
+.rows {
+  margin: var(--space-m) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s) var(--space-m);
+  padding-block: var(--space-m);
+  border-top: 1px solid var(--color-border);
+}
+
+.row:first-child {
+  border-top: 0;
+  padding-block-start: 0;
+}
+
+.what {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  padding: 0.125rem var(--space-s);
+  font-size: var(--text-label);
+  font-weight: 700;
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+  border-radius: var(--radius-badge);
+}
+
+/* A live region beside the buttons; empty until there is something to say. */
+.status {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.facts {
+  margin: var(--space-l) 0 var(--space-xs);
+}
+
+.facts dt {
+  font-weight: 700;
+}
+
+.facts dd {
+  margin: var(--space-xs) 0 0;
+}
+
+.email {
+  overflow-wrap: anywhere;
+}
+
+.subhead {
+  margin: 0 0 var(--space-s);
+  font-size: var(--text-body);
+}
+
+.reasons {
+  margin: var(--space-s) 0 var(--space-m);
+  padding-inline-start: 1.25rem;
+}
+
+.reasons li + li {
+  margin-top: var(--space-s);
+}
+
+.reasonLink {
+  margin: 0;
+}

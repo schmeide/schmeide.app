@@ -701,3 +701,9 @@ export const acceptInviteSchema = inviteTokenSchema.extend({
   name: z.string().trim().min(1).max(100).optional(),
   password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
 });
+
+// The signed-in person's own account (services/account.ts).
+export const renameAccountSchema = z.object({ name: z.string().trim().min(1).max(100) });
+export const signInMethodIdSchema = z.object({ id: z.string().min(1).max(200) });
+// The person types their own email address to confirm deleting the account.
+export const deleteAccountSchema = z.object({ email: emailSchema });

@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { copy } from "../data/copy";
 import type { RouteName, RouteParams } from "../utils/routes";
+import { AccountPage } from "./AccountPage";
 import { AdminAdminsPage } from "./AdminAdminsPage";
 import { AdminAuditPage } from "./AdminAuditPage";
 import { AdminBusinessPage } from "./AdminBusinessPage";
@@ -33,7 +34,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   usage: placeholder("usage"),
   billing: placeholder("billing"),
   business: placeholder("business"),
-  account: placeholder("account"),
+  account: () => <AccountPage />,
   welcome: placeholder("welcome"),
   admin: () => <AdminPage />,
   adminBusinesses: () => <AdminBusinessesPage />,

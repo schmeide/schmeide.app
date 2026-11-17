@@ -264,6 +264,8 @@ export const authServer = (state: {
     }
     if (path === "/sign-in/social")
       return answer(200, { url: `https://provider.example/${String(body.provider)}` });
+    if (path === "/link-social")
+      return answer(200, { url: `https://provider.example/link/${String(body.provider)}` });
     if (path === "/sign-in/email") {
       if (state.signInStatus) return answer(state.signInStatus);
       const { account } = state;
