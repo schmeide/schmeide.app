@@ -1,58 +1,44 @@
-.intro {
-  max-width: var(--lead-width);
-  font-size: var(--text-lead);
-  color: var(--color-muted);
-}
-
-.section {
-  margin-top: var(--space-l);
-}
-
-/* "How it works" numbered with the butter step badges schmeide.com uses. */
-.section ol {
-  display: grid;
-  gap: var(--space-m);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  counter-reset: how;
-}
-
-.section ol li {
-  display: flex;
-  align-items: center;
-  gap: var(--space-m);
-  counter-increment: how;
-}
-
-.section ol li::before {
-  content: counter(how);
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  width: var(--hit-target);
-  height: var(--hit-target);
-  background: var(--color-highlight);
-  color: var(--color-on-highlight);
-  border-radius: var(--radius-badge);
-  font-weight: 700;
-}
-
-.form {
-  display: grid;
-  gap: var(--space-s);
-}
-
-.row {
+.header {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-s);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-s) var(--space-m);
+  margin-bottom: var(--space-l);
 }
 
-.row input {
-  flex: 1 1 12rem;
-  min-width: 0;
+.header h1 {
+  margin: 0;
+}
+
+.newApp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--hit-target);
+  padding: 1rem 1.75rem;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  border: 2px solid var(--color-accent);
+  border-radius: var(--radius-button-lg);
+  font-size: var(--text-lead);
+  font-weight: 700;
+  line-height: 1.3;
+  text-decoration: none;
+  transition-property: background-color, border-color, scale;
+}
+
+@media (hover: hover) {
+  .newApp:hover {
+    background: var(--color-accent-hover);
+    border-color: var(--color-accent-hover);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .newApp:active {
+    scale: 0.96;
+  }
 }
 
 .projects {

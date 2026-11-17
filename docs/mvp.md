@@ -15,10 +15,10 @@ setup, and how to connect the hosted site.
    password. `TENANT=demo` puts you in the business that holds the projects made before sign-in existed; leave it
    out and you get an empty business of your own.
    You are now signed in; next time, sign in at <http://localhost:5173> with that email and password.
-4. Type a project name and press "Create project".
-5. Press "Write it myself" and type one request per box ("Add another request" or Enter adds a box), or press
-   "Start the questions" and answer them. Then press "Write the spec",
-   read it, and press "Approve and build".
+4. Under "What do you need?", say what the app is for in a sentence or two (or pick a starting point) and press
+   "Continue". With apps already there, "New app" leads to the same page.
+5. Answer the questions, or press "Write it myself" and type one request per box ("Add another request" or Enter
+   adds a box). Then press "Write the spec", read it, and press "Approve and build".
 6. When the status says Live (about 3 minutes for a small app, 10 for a medium one), press "Open your app".
 
 ## What to expect
@@ -88,7 +88,10 @@ the build cannot resume; the server marks it failed at startup, and "Request a c
 Open <http://localhost:5173> after `make serve`. The page is the whole tool; there is nothing to install. Sign in with
 an approved email (step 3 of the quick start).
 
-1. **Create a project**: type a name and press "Create project". The project page opens.
+1. **Start an app**: the start page (`/new`, and the home page until there is a first app) asks "What do you
+   need?". The answer is kept as the app's first answer (`projects.need`), the app is named from it (the name of a
+   starting point, or the first few words), and the first interview question is asked before the project page
+   opens. "I'm replacing something I already use" adds what it replaces to that first answer.
 
 A project page has two phases. **Setup** lasts until the first build passes. It shows one step at a time, with a
 stepper (Describe, Spec, Build, Live) above it, and one main button per step:

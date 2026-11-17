@@ -61,7 +61,7 @@ export type AnsweredQuestion = {
 
 // Asks the model for the next turn. Throws InterviewUnavailableError when it cannot.
 export type Interviewer = (input: {
-  readonly project: Pick<Project, "id" | "name" | "features">;
+  readonly project: Pick<Project, "id" | "name" | "need" | "features">;
   readonly items: readonly PlanItem[];
   readonly trail: readonly AnsweredQuestion[];
 }) => Promise<{ readonly turn: Turn; readonly usage: readonly NewUsage[] }>;

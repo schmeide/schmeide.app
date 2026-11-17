@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { Query } from "../builds.ts";
 import { InterviewUnavailableError } from "../errors.ts";
 import type { Interviewer } from "../interview.ts";
-import { createInterviewer } from "../interviewer.ts";
+import { createInterviewer, interviewPrompt } from "../interviewer.ts";
 
 const config = { dataDir: tmpdir(), claudeBin: undefined, model: "sonnet" } as const;
 
@@ -45,7 +45,7 @@ const TURN = {
 };
 
 const input: Parameters<Interviewer>[0] = {
-  project: { id: 7, name: "Invoices", features: "Keep a list of my clients" },
+  project: { id: 7, name: "Invoices", need: "", features: "Keep a list of my clients" },
   items: [
     {
       id: 41,
@@ -68,6 +68,19 @@ const input: Parameters<Interviewer>[0] = {
     },
   ],
 };
+
+describe("interviewPrompt", () => {
+  it("opens with what the person said they need on the start page", () => {
+    const prompt = interviewPrompt({
+      ...input,
+      project: { ...input.project, need: "I need to send invoices and see who has paid" },
+    });
+
+    expect(prompt).toContain(
+      "What they said they need when they started, in their own words:\nI need to send invoices and see who has paid"
+    );
+  });
+});
 
 describe("createInterviewer", () => {
   it("gives the model the project, the plan with its ids, and the answers so far", async () => {

@@ -7,12 +7,14 @@ import { ProjectList } from "./ProjectList";
 import { ProjectPage } from "./ProjectPage";
 import { SetPasswordPage } from "./SetPasswordPage";
 import { SignInPage } from "./SignInPage";
+import { StartPage } from "./StartPage";
 
 const placeholder = (name: RouteName) => () => <PlaceholderPage title={copy.routes[name]} />;
 
 // The page of every route. A route added to utils/routes.ts does not compile until it has one.
 const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   apps: () => <ProjectList />,
+  start: () => <StartPage />,
   // One key for the three views, so moving between them keeps the page and what was typed.
   project: ({ id }) => <ProjectPage key={id} id={id} view="overview" />,
   projectChanges: ({ id }) => <ProjectPage key={id} id={id} view="changes" />,

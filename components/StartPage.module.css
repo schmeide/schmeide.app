@@ -1,0 +1,136 @@
+.form {
+  display: grid;
+  gap: var(--space-m);
+  max-width: var(--prose-width);
+}
+
+.form > * {
+  margin: 0;
+}
+
+.title {
+  overflow-wrap: anywhere;
+}
+
+.intro {
+  font-size: var(--text-lead);
+  color: var(--color-muted);
+}
+
+.need {
+  width: 100%;
+  font-size: var(--text-lead);
+}
+
+.error {
+  padding: 0.75rem var(--space-m);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-radius: var(--radius-input);
+  font-weight: 600;
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.points h2,
+.unfinished h2 {
+  margin: 0;
+  font-size: var(--text-lead);
+}
+
+.points ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s);
+  margin: var(--space-s) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.replacing {
+  display: grid;
+  gap: var(--space-s);
+  padding: var(--space-m) var(--space-gutter);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+}
+
+.check {
+  display: flex;
+  gap: var(--space-m);
+  align-items: center;
+  min-height: var(--hit-target);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.check input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+.kinds {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.kinds legend {
+  padding: 0;
+  font-weight: 700;
+}
+
+.name {
+  display: grid;
+  gap: var(--space-xs);
+  font-weight: 500;
+}
+
+.note {
+  margin: 0;
+  padding: 0.75rem var(--space-m);
+  background: var(--color-inset);
+  border-radius: var(--radius-input);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s) var(--space-m);
+}
+
+.unfinished {
+  max-width: var(--prose-width);
+  margin-top: var(--space-l);
+}
+
+.unfinished ul {
+  display: grid;
+  gap: var(--space-s);
+  margin: var(--space-s) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.unfinished li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-xs) var(--space-m);
+  padding: var(--space-m) var(--space-gutter);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+}
