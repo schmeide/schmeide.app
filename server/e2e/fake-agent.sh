@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stands in for Claude in `make e2e/fake` (SCHMEIDE_AGENT_CMD): no model calls, no usage.
-# `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green;
+# `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green and adds a stylesheet;
 # `interview` prints one turn that adds a plan item and asks nothing further;
 # `website mine|someone_else` prints one reading of a website.
 # `read` prints one reading of an uploaded picture, with one proposed plan item.
@@ -16,6 +16,12 @@ case "${1:-}" in
     title="Schmeide e2e fixture $(date +%s)"
     sed -i.bak "s|<title>[^<]*</title>|<title>${title}</title>|" frontend/index.html
     rm frontend/index.html.bak
+    # The template ships no stylesheet, and Schmeide's phone check fails a build without one.
+    if [[ ! -f frontend/src/e2e.css ]]; then
+      printf '%s\n' 'body {' '  margin: 0;' '  font-family: system-ui, sans-serif;' '}' >frontend/src/e2e.css
+      sed -i.bak 's|</head>|  <link rel="stylesheet" href="/src/e2e.css" />\n  </head>|' frontend/index.html
+      rm frontend/index.html.bak
+    fi
     git add -A
     git commit -q -m "retitle the page to ${title}"
     echo "fake agent: retitled the page to ${title}"

@@ -16,11 +16,11 @@
     "lint:eslint": "eslint .",
     "lint:types": "tsc --noEmit && tsc -p server",
     "lint:prettier": "prettier --check .",
-    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!**/node_modules/**\" \"!.claude/worktrees/**\"",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" \"!**/node_modules/**\" \"!.claude/worktrees/**\" \"!server/builder-plugin/skills/{afk,better-*,break,build-design,explain-interface,interface-review,state-machine,variant}/**\"",
     "lint": "concurrently -m1 npm:lint:*",
     "fix:eslint": "eslint . --fix",
     "fix:prettier": "prettier --write .",
-    "fix:md": "markdownlint-cli2 --fix \"**/*.md\" \"!**/node_modules/**\" \"!.claude/worktrees/**\"",
+    "fix:md": "markdownlint-cli2 --fix \"**/*.md\" \"!**/node_modules/**\" \"!.claude/worktrees/**\" \"!server/builder-plugin/skills/{afk,better-*,break,build-design,explain-interface,interface-review,state-machine,variant}/**\"",
     "fix": "concurrently -m1 npm:fix:*"
   },
   "dependencies": {

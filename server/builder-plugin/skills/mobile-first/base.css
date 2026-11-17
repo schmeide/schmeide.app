@@ -1,0 +1,399 @@
+/* The app's shared stylesheet. Phone first: the rules outside media queries are for a 360px-wide
+   phone, and `min-width` queries add room on wider screens. Use the tokens; add a token before a
+   new raw value. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --text: #1c1c1a;
+  --text-muted: #5c5c57;
+  --border: #d5d5cf;
+  --accent: #1f5fd1;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  --focus: #1f5fd1;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius: 10px;
+  --tap: 44px;
+  --page-width: 720px;
+
+  --text-s: 0.875rem;
+  --text-m: 1rem;
+  --text-l: 1.25rem;
+  --text-xl: clamp(1.5rem, 1.2rem + 1.5vw, 2rem);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131312;
+    --surface: #1e1e1c;
+    --text: #f0f0ec;
+    --text-muted: #a8a8a1;
+    --border: #3a3a36;
+    --accent: #8ab4ff;
+    --accent-text: #0b1b3a;
+    --danger: #ffb4ab;
+    --focus: #8ab4ff;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: var(--text-m);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--text-xl);
+}
+
+h2 {
+  font-size: var(--text-l);
+}
+
+h3 {
+  font-size: var(--text-m);
+}
+
+p,
+ul,
+ol,
+dl,
+dd {
+  margin: 0;
+}
+
+img,
+svg,
+video {
+  max-width: 100%;
+  height: auto;
+}
+
+a {
+  color: var(--accent);
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Page frame: content in one column, inset from the screen edges and the notch. */
+main {
+  display: grid;
+  gap: var(--space-6);
+  width: 100%;
+  max-width: var(--page-width);
+  margin-inline: auto;
+  padding: var(--space-4);
+  padding-inline: max(var(--space-4), env(safe-area-inset-left))
+    max(var(--space-4), env(safe-area-inset-right));
+  padding-block-end: max(var(--space-8), env(safe-area-inset-bottom));
+}
+
+/* Vertical rhythm for any group of things. */
+.stack {
+  display: grid;
+  gap: var(--space-4);
+}
+
+/* A row that wraps instead of overflowing. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.muted {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+/* Forms: one column, label above the field, controls at 16px so iOS does not zoom on focus. */
+form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+label {
+  display: grid;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input:not([type="checkbox"], [type="radio"]),
+select,
+textarea {
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-weight: 400;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: 1.25rem;
+  height: 1.25rem;
+  accent-color: var(--accent);
+}
+
+/* A checkbox or radio beside its text; the whole line is the tap target. */
+label:has(> input[type="checkbox"], > input[type="radio"]) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--tap);
+  font-weight: 400;
+}
+
+/* Buttons: full width on a phone, their own width from 600px up. */
+button,
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: var(--tap);
+  padding: var(--space-2) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* The one main action of a screen or form. */
+button[type="submit"],
+.button-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.button-danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (min-width: 600px) {
+  button,
+  .button {
+    width: auto;
+  }
+}
+
+/* Messages. */
+[role="alert"] {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+}
+
+[role="status"],
+.empty {
+  padding: var(--space-6) var(--space-4);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* A surface for one thing: a record, a summary, a form. */
+.card {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+/* A list of records: stacked cards on a phone, more columns when there is room. */
+.list {
+  display: grid;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+}
+
+/* A whole card or row that opens something. */
+.list a,
+.list button {
+  justify-content: space-between;
+  text-align: start;
+}
+
+/* Label and value pairs: stacked on a phone, side by side from 600px up. */
+dl {
+  display: grid;
+  gap: var(--space-1) var(--space-4);
+}
+
+dt {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+}
+
+@media (min-width: 600px) {
+  dl {
+    grid-template-columns: max-content 1fr;
+  }
+}
+
+/* A table that must stay a table scrolls inside this, never the page. */
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: var(--space-3) var(--space-4);
+  border-block-end: 1px solid var(--border);
+  text-align: start;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--text-muted);
+  font-size: var(--text-s);
+  font-weight: 600;
+}
+
+/* The menu: a bar fixed to the bottom of a phone, a row at the top from 600px up.
+   At most five items. Mark the current one with aria-current="page". */
+nav {
+  position: fixed;
+  inset-inline: 0;
+  inset-block-end: 0;
+  z-index: 10;
+  display: flex;
+  background: var(--surface);
+  border-block-start: 1px solid var(--border);
+  padding-block-end: env(safe-area-inset-bottom);
+}
+
+nav a,
+nav button {
+  flex: 1;
+  width: auto;
+  min-height: 56px;
+  padding: var(--space-2);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: var(--text-s);
+  text-align: center;
+  text-decoration: none;
+}
+
+nav [aria-current="page"] {
+  color: var(--accent);
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
+/* Room for the bar, so it never covers the end of a page. */
+nav ~ main {
+  padding-block-end: calc(56px + var(--space-8) + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 600px) {
+  nav {
+    position: sticky;
+    inset-block: 0 auto;
+    justify-content: center;
+    border-block: 0;
+    border-block-end: 1px solid var(--border);
+    padding-block-end: 0;
+  }
+
+  nav a,
+  nav button {
+    flex: 0 1 auto;
+    padding-inline: var(--space-6);
+    font-size: var(--text-m);
+  }
+
+  nav [aria-current="page"] {
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+
+  nav ~ main {
+    padding-block-end: var(--space-8);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

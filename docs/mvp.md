@@ -58,8 +58,8 @@ subscription they count against its usage limits rather than being billed):
 2. Describe what to fix under "Try again" (or "Request a change" once the app has been live), or just
    write "try again". The agent continues in the same project with your note.
 3. "Checks still failing after 3 fix attempts" means the agent could not make `make check`,
-   `make test`, and `make build` pass; the output under "What went wrong" is the last failure.
-   Request a change that describes the problem.
+   `make test`, `make build`, and the phone check pass; the output under "What went wrong" is the
+   last failure. Request a change that describes the problem.
 4. "did not answer 200 within 3 minutes" means the app built but would not start: run `make doctor`
    (a port may be taken), then request a change.
 5. The full output of every command and every agent message is in `~/.schmeide/logs/build-<id>.log`.
@@ -179,11 +179,11 @@ volumes, workspace, and rows) whether it passed or failed. It exits non-zero on 
 
 - `make e2e/fake`: no Claude usage. Starts its own server on `:3199` (task queue `schmeide-fake`) with
   `SCHMEIDE_AGENT_CMD=server/e2e/fake-agent.sh`, which prints a fixed spec and makes one small real commit (it retitles
-  the page). Clone, the independent checks, deploy, and preview all run for real. The project without the queued change
-  also saves a page title and icon, checks they reach staging and not production, promotes, and checks production has
-  them. It builds two projects at once and queues a change on one of them while it builds (`E2E_CONCURRENT=1`), and
-  fails unless both were seen building together. About 75 seconds. Run this one while developing; it needs only
-  `make infra/up`, which it runs.
+  the page and adds a stylesheet, which the phone check requires). Clone, the independent checks, deploy, and preview
+  all run for real. The project without the queued change also saves a page title and icon, checks they reach staging
+  and not production, promotes, and checks production has them. It builds two projects at once and queues a change on
+  one of them while it builds (`E2E_CONCURRENT=1`), and fails unless both were seen building together. About 75 seconds.
+  Run this one while developing; it needs only `make infra/up`, which it runs.
 - `make e2e`: the same flow with Claude against the server from `make serve` (`:3100`). A few
   minutes and well under a dollar with `opus` so far. Run it sparingly.
 - `KEEP=1` on either leaves the app running and prints its preview URL, and the email and password
@@ -219,8 +219,9 @@ Print an invoice as a clean page I can save as a PDF
       fresh git history with one commit; later builds reuse it.
    2. `runAgent`: Claude builds the spec in the workspace, test-first, until `make check`,
       `make test`, and `make build` pass, then commits.
-   3. `runChecks`: the server runs the three targets itself. On failure the output goes back to the
-      same agent session, up to 3 fix rounds, then the build fails with the last output.
+   3. `runChecks`: the server runs the three targets itself, then checks the built app for phones
+      (below). On failure the output goes back to the same agent session, up to 3 fix rounds, then
+      the build fails with the last output.
    4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, and
       records it (`builds.commit`). Then `make up` in the workspace for **staging** (Compose project
       `schmeide-<slug>_staging`, web port + 10000) and a wait for `/` and `/api/healthz` to answer
@@ -472,7 +473,7 @@ environment. The server refuses to start when `claude auth status` reports neith
   setting sources, so it is excluded explicitly. `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` as well.
   `--bare` is not used: it drops the subscription login.
 - `permissionMode: "dontAsk"` with an allowlist: `Read`, `Glob`, `Grep`, `TodoWrite`, `Edit`/`Write`
-  inside the workspace, `Skill` for the design skills the template vendors in `.claude/skills/`, and
+  inside the workspace, `Skill` for the builder plugin's skills (below), and
   Bash limited to `make`, `npm`, `npx`, `node`, `git`, and basic file commands. Anything else is
   denied without a prompt and logged as a `Denied ...` event.
 - An allow-listed environment (`server/src/services/claudeEnv.ts`): `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`,
@@ -526,6 +527,32 @@ The worker's identity needs, on the registry, `listBuildSourceUploadUrl/action`,
 `runs/read` and `runs/listLogSasUrl/action`, plus Container Registry Repository Contributor limited to `apps/`: a
 quick run in ABAC mode pushes as its caller, and a delete removes the repositories. The cluster's kubelet identity
 needs Container Registry Repository Reader on `apps/` to pull.
+
+## How built apps are made to work on a phone
+
+Three things, all in this repo, so they reach every build whatever the workspace was copied from:
+
+- **The builder plugin** (`server/builder-plugin/`, plugin name `schmeide`) is passed to every build
+  run through the SDK's `plugins` option. It is never copied into the customer's code. It holds:
+  - `schmeide:mobile-first`, written here for the template's stack: a starter stylesheet
+    (`base.css`: tokens, light and dark, forms, buttons, lists, tables, a menu bar), exact sizes
+    (360px design width, 16px text in form controls, 44px tap targets), a pattern per kind of
+    screen, and a checklist.
+  - The design skills from [jakubkrehel/skills](https://github.com/jakubkrehel/skills), as
+    `schmeide:better-layout`, `schmeide:better-typography` and so on. Update them with
+    `make skills/update REF=<commit> DEST=<this repo>/server/builder-plugin/skills` in
+    home-schmeide; the commit is in `server/builder-plugin/skills/UPSTREAM_COMMIT`. Prettier and
+    markdownlint skip them so they stay identical to upstream.
+- **The build prompt** (`INTERFACE_RULES` in `server/src/temporal/activities.ts`) tells the builder
+  to design for a phone first, run `schmeide:mobile-first` before touching a screen, and treat an
+  app with no stylesheet as unfinished. A change build on an older, unstyled app adds the
+  stylesheet and brings the screens it touches up to the rules.
+- **The phone check** (`server/src/services/mobileCheck.ts`) runs in `runChecks` after `make build`
+  and reads `frontend/dist`. It fails the build when the page has no viewport tag with
+  `width=device-width`, the viewport tag blocks zoom, the build has no stylesheet, or a rule sets
+  a fixed `width` or `min-width` over 320px outside a `min-width` media or container query (a
+  `width` with a `max-width` in the same rule is fine). It reads files only; nothing opens the app
+  in a browser yet.
 
 ## Dev-mode substitutions
 

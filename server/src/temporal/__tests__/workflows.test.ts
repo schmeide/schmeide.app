@@ -56,7 +56,7 @@ const setup = (
   mkdirSync(template);
   writeFileSync(
     join(template, "Makefile"),
-    "check:\n\t@echo ok\ntest:\n\t@echo run $$(cat ../../runs); test ! -f broken\nbuild:\n\t@echo ok\n"
+    "check:\n\t@echo ok\ntest:\n\t@echo run $$(cat ../../runs); test ! -f broken\nbuild:\n\t@mkdir -p frontend/dist; echo '<meta name=viewport content=width=device-width><style>body{margin:0}</style>' > frontend/dist/index.html\n"
   );
   const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: gitConfigFile(dataDir) };
   for (const args of [
@@ -85,6 +85,7 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     agentModels: { fallback: "opus", byKind: {} },
     claudeBin: undefined,
     makeBin: "make",
+    builderPlugin: join(root, "builder-plugin"),
     agentCmd: agent,
   });
   const runPrompts = () =>

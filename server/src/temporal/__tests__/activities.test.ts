@@ -54,6 +54,9 @@ afterAll(() => db.$client.end());
 // These activities never start a workflow.
 const deps = { db, workflows: {} as never, taskQueue: "test" };
 
+// The plugin the server gives every build run.
+const BUILDER_PLUGIN = join(import.meta.dirname, "..", "..", "..", "builder-plugin");
+
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", args, {
     cwd,
@@ -76,14 +79,16 @@ const setup = () => {
   mkdirSync(join(template, "frontend"));
   writeFileSync(
     join(template, "frontend", "index.html"),
-    "<html>\n  <head>\n    <title>Notes</title>\n  </head>\n</html>\n"
+    '<html>\n  <head>\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>Notes</title>\n  </head>\n</html>\n'
   );
   writeFileSync(
     join(template, "Makefile"),
     [
       "check:\n\t@echo checking on $$WEB_PORT",
       "test:\n\t@echo test db $$TEST_DB_PORT; test ! -f broken",
-      "build:\n\t@echo building",
+      // Stands in for the frontend build: a page and its stylesheet, or no stylesheet with `unstyled`.
+      "build:\n\t@echo building; mkdir -p frontend/dist/assets; cp frontend/index.html frontend/dist/; " +
+        "rm -f frontend/dist/assets/app.css; test -f unstyled || echo 'body{margin:0}' > frontend/dist/assets/app.css",
       // `make up` fails while a file named fail-up sits beside the data dir.
       `up:\n\t@test ! -e ${join(root, "fail-up")}\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
       `down:\n\t@echo down $$COMPOSE_PROJECT_NAME $$(pwd) >> ${calls}`,
@@ -103,6 +108,7 @@ const setup = () => {
     claudeBin: undefined,
     makeBin: "make",
     fetch: answering,
+    builderPlugin: BUILDER_PLUGIN,
   };
   const ran = () =>
     existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n").filter(Boolean) : [];
@@ -203,6 +209,17 @@ describe("buildPrompt", () => {
     );
   });
 
+  it.each(["initial", "change"] as const)(
+    "tells a %s build to design for a phone with the mobile skill and a stylesheet",
+    (kind) => {
+      const prompt = buildPrompt(kind, "## Features", "Add a due date");
+
+      expect(prompt).toContain("schmeide:mobile-first");
+      expect(prompt).toContain("360px");
+      expect(prompt).toMatch(/stylesheet/);
+    }
+  );
+
   it("says nothing about earlier changes when this is the first one", () => {
     expect(buildPrompt("change", "## Features", "Add a due date", [])).not.toContain(
       "Changes built since"
@@ -254,6 +271,7 @@ describe("build activities", () => {
       settingSources: ["project"],
       tools: expect.arrayContaining(["Skill"]),
       allowedTools: AGENT_ALLOWED_TOOLS,
+      plugins: [{ type: "local", path: BUILDER_PLUGIN }],
       env: expect.objectContaining({
         // The builder works on staging: nothing it runs can name production.
         WEB_PORT: String(project.webPort + 10_000),
@@ -389,7 +407,34 @@ describe("build activities", () => {
     expect(failing.ok).toBe(false);
     expect(failing.output).toContain(`test db ${5600 + project.webPort - 8100}`);
     expect(await messages(build.id)).toEqual(
-      expect.arrayContaining(["make check passed", "make test failed (exit 2)"])
+      expect.arrayContaining([
+        "make check passed",
+        "make test failed (exit 2)",
+        "The built app is ready for phones",
+      ])
+    );
+  });
+
+  it("fails a build that passes its make targets but is not ready for a phone", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    writeFileSync(join(dataDir, "projects", project.slug, "unstyled"), "");
+
+    const checks = (await env.run(activities.runChecks, build.id)) as Awaited<
+      ReturnType<typeof activities.runChecks>
+    >;
+
+    expect(checks.ok).toBe(false);
+    expect(checks.output).toContain("no stylesheet");
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "make build passed",
+        "Checking the built app for phones",
+        "The built app is not ready for phones (1 problem)",
+      ])
     );
   });
 
@@ -426,7 +471,7 @@ describe("build activities", () => {
     await env.run(activities.applySite, build.id);
 
     expect(index()).toBe(
-      `<html>\n  <head>\n    <title>${project.name}</title>\n  </head>\n</html>\n`
+      `<html>\n  <head>\n    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n    <title>${project.name}</title>\n  </head>\n</html>\n`
     );
     expect(existsSync(join(workspace, "frontend", "public", "site-icon.png"))).toBe(false);
   });

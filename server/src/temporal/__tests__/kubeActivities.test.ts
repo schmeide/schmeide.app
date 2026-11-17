@@ -270,6 +270,7 @@ const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
     agentModels: { fallback: "opus", byKind: {} },
     claudeBin: undefined,
     makeBin: "make",
+    builderPlugin: join(root, "builder-plugin"),
     runner,
     // Every app answers.
     fetch: async () => new Response("ok"),
