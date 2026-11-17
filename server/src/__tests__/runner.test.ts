@@ -11,6 +11,17 @@ const cluster = {
   KUBERNETES_SERVICE_PORT: "443",
   SCHMEIDE_BUILD_IMAGE: "schmeide.azurecr.io/schmeide-app:abc",
   SCHMEIDE_FORGEJO_TOKEN: "token",
+  AZURE_CLIENT_ID: "client",
+  AZURE_TENANT_ID: "tenant",
+  AZURE_FEDERATED_TOKEN_FILE: "/var/run/secrets/azure/tokens/azure-identity-token",
+  AZURE_AUTHORITY_HOST: "https://login.microsoftonline.com/",
+  SCHMEIDE_AZURE_SUBSCRIPTION_ID: "sub",
+  SCHMEIDE_ACR_RESOURCE_GROUP: "rg",
+  SCHMEIDE_ACR_NAME: "schmeide",
+  SCHMEIDE_ACR_LOGIN_SERVER: "schmeide.azurecr.io",
+  SCHMEIDE_APPS_DOMAIN: "apps.schmeide.com",
+  SCHMEIDE_PROVISIONER_URL: "postgres://schmeide_provisioner:pw@db.example:5432/postgres",
+  SCHMEIDE_APP_DATABASE_HOST: "db.example",
 };
 
 describe("parseRunner", () => {
@@ -24,7 +35,10 @@ describe("parseRunner", () => {
 describe("runnerFromEnv", () => {
   it("names everything Kubernetes mode is missing at once", () => {
     expect(() => runnerFromEnv({})).toThrow(
-      /KUBERNETES_SERVICE_HOST.*SCHMEIDE_BUILD_IMAGE.*SCHMEIDE_FORGEJO_TOKEN/
+      /KUBERNETES_SERVICE_HOST.*SCHMEIDE_BUILD_IMAGE.*SCHMEIDE_FORGEJO_TOKEN.*AZURE_CLIENT_ID.*SCHMEIDE_PROVISIONER_URL.*SCHMEIDE_APP_DATABASE_HOST/
+    );
+    expect(() => runnerFromEnv({ ...cluster, SCHMEIDE_APPS_DOMAIN: undefined })).toThrow(
+      "SCHMEIDE_RUNNER=kubernetes needs SCHMEIDE_APPS_DOMAIN (the domain apps are served under, such as apps.schmeide.com)."
     );
   });
 
@@ -48,11 +62,29 @@ describe("checkRunner", () => {
     writeFileSync(file, "token");
     return file;
   };
-  const runner = (kube: Partial<Kube>, forgejo: Partial<Forgejo>) => ({
-    ...runnerFromEnv(cluster),
-    kube: { ...runnerFromEnv(cluster).kube, ...kube },
-    forgejo: { ...runnerFromEnv(cluster).forgejo, ...forgejo },
-  });
+  const runner = (
+    kube: Partial<Kube>,
+    forgejo: Partial<Forgejo>,
+    hosting: {
+      readonly armToken?: () => Promise<string>;
+      readonly rights?: () => Promise<{ createDb: boolean; createRole: boolean }>;
+    } = {}
+  ) => {
+    const real = runnerFromEnv(cluster);
+    return {
+      ...real,
+      kube: { ...real.kube, ...kube },
+      forgejo: { ...real.forgejo, ...forgejo },
+      hosting: {
+        ...real.hosting,
+        acr: { ...real.hosting.acr, armToken: hosting.armToken ?? (async () => "arm") },
+        databases: {
+          ...real.hosting.databases,
+          rights: hosting.rights ?? (async () => ({ createDb: true, createRole: true })),
+        },
+      },
+    };
+  };
 
   it("finds nothing wrong when Forgejo answers and the worker has its rights", async () => {
     expect(
@@ -87,6 +119,44 @@ describe("checkRunner", () => {
       expect.stringMatching(/may not create jobs in schmeide-builds/),
       expect.stringMatching(/no Secret anthropic-builds/),
     ]);
+  });
+
+  it("names the fix when Azure refuses the worker or the provisioner lacks its rights", async () => {
+    const problems = await checkRunner(
+      runner(
+        { canI: async () => true, secretExists: async () => true },
+        { whoami: async () => "schmeide-platform" },
+        {
+          armToken: async () => {
+            throw new Error("AADSTS70021");
+          },
+          rights: async () => ({ createDb: true, createRole: false }),
+        }
+      ),
+      tokenFile()
+    );
+
+    expect(problems).toEqual([
+      expect.stringMatching(/Cannot sign in to Azure \(Error: AADSTS70021\).*federated credential/),
+      expect.stringMatching(/ALTER ROLE schmeide_provisioner CREATEDB CREATEROLE/),
+    ]);
+  });
+
+  it("says to check the provisioner URL when Postgres refuses it", async () => {
+    const problems = await checkRunner(
+      runner(
+        { canI: async () => true, secretExists: async () => true },
+        { whoami: async () => "schmeide-platform" },
+        {
+          rights: async () => {
+            throw new Error("password authentication failed");
+          },
+        }
+      ),
+      tokenFile()
+    );
+
+    expect(problems).toEqual([expect.stringMatching(/SCHMEIDE_PROVISIONER_URL/)]);
   });
 
   it("says how to mount the service account token when there is none", async () => {

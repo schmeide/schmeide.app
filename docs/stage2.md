@@ -273,13 +273,16 @@ Kubernetes mode.
 
 **Images: ACR Tasks, from platform-owned Dockerfiles.** Before every deploy the worker resets the files the
 platform owns (`frontend/Dockerfile`, `backend/Dockerfile`, `frontend/nginx.conf`, `.dockerignore`) to the
-template's versions in its scratch clone, as `applySite` does for the title and icon, uploads that tree as the
-build context, and schedules one ACR run that builds and pushes two images: `apps/t<tenant>/<slug>/web` and
-`.../api`, tagged with the commit. A promote builds nothing: production runs the images staging was built with.
-The frontend's `vite build` and `npm ci` run on Azure's build hosts, not in the
-cluster. The worker's workload identity gets a custom role with `scheduleRun`, `listBuildSourceUploadUrl` and
-`runs/read` on the registry. In ABAC repository mode a run gets no push rights of its own: give it a user-assigned
-identity holding Container Registry Repository Writer limited to `apps/*`.
+template's versions in a scratch clone of the commit, without committing them, uploads that tree as the build
+context, and schedules one ACR run that builds the frontend bundle, then builds and pushes two images:
+`apps/t<tenant>/<slug>/web` and `.../api`, tagged with the commit. A promote builds nothing: production runs the
+images staging was built with. The rest of the template reaches existing projects through a template upgrade change
+([#206](https://github.com/schmeide/schmeide.app/issues/206)); until then the platform keeps compatibility shims,
+such as `make test/run` in the checks, for projects made from older templates. The frontend's `vite build` and
+`npm ci` run on Azure's build hosts, not in the cluster. The worker's workload identity gets a custom role with
+`scheduleRun`, `listBuildSourceUploadUrl`, `runs/read` and `runs/listLogSasUrl` on the registry. In ABAC repository
+mode a quick run cannot carry an identity of its own; it pushes as its caller (`[caller]`), so the worker's identity
+also holds Container Registry Repository Contributor limited to `apps/` (push, and delete on `removeProject`).
 
 Rejected: rootless BuildKit in the cluster (needs unconfined seccomp and AppArmor, so a privileged-level namespace
 on a dedicated pool; it is the fallback if ACR Tasks is unavailable). Kaniko (archived upstream). The node's Docker

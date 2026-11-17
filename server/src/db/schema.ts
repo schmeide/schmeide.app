@@ -73,6 +73,9 @@ export const projects = pgTable(
     // Staging, the copy every build deploys to and the designer shows (services/resources.ts).
     stagingUrl: text("staging_url"),
     stagingCommit: varchar("staging_commit", { length: 40 }),
+    // SCHMEIDE_RUNNER=kubernetes: the first label of production's address on the apps domain,
+    // <slug>-<6 random>, chosen on the first deploy (docs/stage2.md, "Previews and domains").
+    host: varchar("host", { length: 63 }).unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

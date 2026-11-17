@@ -73,12 +73,6 @@ export type Pod = {
 };
 export type LogLine = { readonly time: string; readonly text: string };
 
-type Options = {
-  readonly body?: unknown;
-  readonly query?: Readonly<Record<string, string | undefined>>;
-  readonly signal?: AbortSignal;
-};
-
 // Lines of a stream of text, the last one without its newline too.
 async function* linesOf(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const decoder = new TextDecoder();
@@ -91,8 +85,14 @@ async function* linesOf(body: ReadableStream<Uint8Array>): AsyncGenerator<string
   if (rest) yield rest;
 }
 
-export const createKube = (config: KubeConfig) => {
-  const name = encodeURIComponent;
+type Options = {
+  readonly body?: unknown;
+  readonly contentType?: string;
+  readonly query?: Readonly<Record<string, string | undefined>>;
+  readonly signal?: AbortSignal;
+};
+
+const requester = (config: Omit<KubeConfig, "namespace">) => {
   const request = async (method: string, path: string, options: Options = {}) => {
     const url = new URL(path, config.server);
     for (const [key, value] of Object.entries(options.query ?? {}))
@@ -102,7 +102,9 @@ export const createKube = (config: KubeConfig) => {
       headers: {
         authorization: `Bearer ${await config.token()}`,
         accept: "application/json",
-        ...(options.body !== undefined && { "content-type": "application/json" }),
+        ...(options.body !== undefined && {
+          "content-type": options.contentType ?? "application/json",
+        }),
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body),
       signal: options.signal,
@@ -116,11 +118,18 @@ export const createKube = (config: KubeConfig) => {
   };
   const json = async <T>(method: string, path: string, options?: Options): Promise<T> =>
     (await (await request(method, path, options)).json()) as T;
-  // A 404 on a get or delete: there is nothing of that name.
-  const missing = (error: unknown): undefined => {
-    if (error instanceof KubeError && error.status === 404) return undefined;
-    throw error;
-  };
+  return { request, json };
+};
+
+// A 404 on a get or delete: there is nothing of that name.
+const missing = (error: unknown): undefined => {
+  if (error instanceof KubeError && error.status === 404) return undefined;
+  throw error;
+};
+
+export const createKube = (config: KubeConfig) => {
+  const name = encodeURIComponent;
+  const { request, json } = requester(config);
   const core = `/api/v1/namespaces/${name(config.namespace)}`;
   const batch = `/apis/batch/v1/namespaces/${name(config.namespace)}`;
 
@@ -185,3 +194,42 @@ export const createKube = (config: KubeConfig) => {
 };
 
 export type Kube = ReturnType<typeof createKube>;
+
+export type DeploymentStatus = {
+  readonly metadata: ObjectMeta & { readonly generation?: number };
+  readonly spec?: { readonly replicas?: number };
+  readonly status?: {
+    readonly observedGeneration?: number;
+    readonly replicas?: number;
+    readonly updatedReplicas?: number;
+    readonly availableReplicas?: number;
+  };
+};
+
+// The calls that put apps in tenant namespaces (kube/apps.ts), by each object's own path rather
+// than one namespace: server-side apply, read, scale, and delete.
+export const createCluster = (config: Omit<KubeConfig, "namespace">) => {
+  const { request, json } = requester(config);
+  return {
+    // Creates or updates `object` to exactly what is given, taking over fields another manager set.
+    apply: async (path: string, object: object) => {
+      await request("PATCH", path, {
+        body: object,
+        contentType: "application/apply-patch+yaml",
+        query: { fieldManager: "schmeide-worker", force: "true" },
+      });
+    },
+    get: <T>(path: string): Promise<T | undefined> => json<T>("GET", path).catch(missing),
+    scale: async (deploymentPath: string, replicas: number) => {
+      await request("PATCH", deploymentPath, {
+        body: { spec: { replicas } },
+        contentType: "application/merge-patch+json",
+      }).catch(missing);
+    },
+    remove: async (path: string) => {
+      await request("DELETE", path).catch(missing);
+    },
+  };
+};
+
+export type Cluster = ReturnType<typeof createCluster>;

@@ -13,14 +13,25 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
-import type { Kube } from "../kube/client.ts";
+import {
+  appHost,
+  appName,
+  appObjects,
+  copyUrl,
+  databaseName,
+  databaseSecret,
+  objectPath,
+  tenantObjects,
+  type AppCopy,
+} from "../kube/apps.ts";
+import { KubeError, type Cluster, type DeploymentStatus, type Kube } from "../kube/client.ts";
 import {
   buildSelector,
   LABELS,
@@ -55,6 +66,14 @@ import {
 import { businessSuspended } from "../services/businesses.ts";
 import { claudeEnv } from "../services/claudeEnv.ts";
 import { BUSINESS_SUSPENDED } from "../services/errors.ts";
+import type { Acr } from "../services/acr.ts";
+import { taskYaml } from "../services/acr.ts";
+import {
+  appDatabaseUrl,
+  newPassword,
+  passwordOf,
+  type AppDatabases,
+} from "../services/appDatabases.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
 import { deployKeyPair, orgOf, type Forgejo } from "../services/forgejo.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
@@ -68,7 +87,7 @@ import {
   transition,
   type Deps,
 } from "../services/projects.ts";
-import { copyOf, webPortOf, type Copy } from "../services/resources.ts";
+import { COPIES, copyOf, webPortOf, type Copy } from "../services/resources.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
 
@@ -101,7 +120,30 @@ export type KubeRunner = {
   readonly knownHosts?: string;
   // How often to look at a pod that has not started; tests make it short.
   readonly pollMs?: number;
+  // Where the app's images are built and its copies run (docs/stage2.md, "Deploy and hosting").
+  readonly hosting: Hosting;
 };
+
+export type Hosting = {
+  readonly cluster: Cluster;
+  readonly acr: Pick<Acr, "build" | "deleteImages" | "armToken">;
+  readonly databases: AppDatabases;
+  // The apps domain, such as apps.schmeide.com.
+  readonly domain: string;
+  // The registry's login server, such as schmeide.azurecr.io.
+  readonly registry: string;
+  // The shared Postgres server apps reach, such as psql-schmeide.postgres.database.azure.com.
+  readonly databaseHost: string;
+};
+
+// The files the platform owns in every app (schmeide/template AGENTS.md): the images are always
+// built with the template's, whatever the builder did to them.
+export const PLATFORM_FILES = [
+  "frontend/Dockerfile",
+  "backend/Dockerfile",
+  "frontend/nginx.conf",
+  ".dockerignore",
+] as const;
 
 // A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
 export const isCommit = (text: string): boolean => /^[0-9a-f]{40}$/.test(text);
@@ -250,10 +292,6 @@ export const POD_NOTE =
 // Until slice 2 stores files where a build pod can read them (docs/stage2.md, slice 1 step 4).
 export const ATTACHMENTS_REFUSED =
   "Files attached to a change cannot reach the builder on the cluster yet. Ask for the change again without them.";
-
-// Until #194 deploys to tenant namespaces, a build on the cluster ends with its code on staging.
-export const DEPLOY_REFUSED =
-  "Deploying on the cluster is not built yet (#194). The code is on the project's staging branch.";
 
 const SPEC_FORMAT = `Write a short plain-language spec for it in markdown with exactly three sections: "## Features", "## Screens", and "## Data it stores". Use short bullet points a non-technical reader understands. No code, no technology names, no title. Reply with only the markdown.`;
 
@@ -667,6 +705,7 @@ export const createActivities = (
   };
 
   // Moves the workspace, and so staging, back to `commit`, dropping every commit and edit since.
+  // On the cluster, force-pushes the staging branch there: the one branch a rewrite may touch.
   const resetStaging = async (project: Project, commit: string, buildId: number) => {
     const dir = workspaceOf(project);
     await event(
@@ -674,6 +713,7 @@ export const createActivities = (
       "deploy",
       `Returning the version being worked on to ${commit.slice(0, 12)}`
     );
+    if (config.runner) return pushCommit(config.runner, project, buildId, commit, "staging", true);
     for (const args of [
       ["checkout", "-q", "--force", "-B", "main", commit],
       ["clean", "-q", "-ffdx"],
@@ -686,6 +726,12 @@ export const createActivities = (
   const dropStagingData = async (project: Project, buildId: number) => {
     const { composeProject, dir } = copyOf(config.dataDir, project.slug, "staging");
     await event(buildId, "deploy", "Emptying the database of the version being worked on");
+    if (config.runner) {
+      const { cluster, databases } = config.runner.hosting;
+      await cluster.scale(copyPaths(project, "staging").deployment, 0);
+      await databases.drop(databaseName(project.id, "staging"), { role: false });
+      return;
+    }
     const result = await run(
       "docker",
       ["compose", "-p", composeProject, "--profile", "*", "down", "--volumes", "--remove-orphans"],
@@ -697,11 +743,43 @@ export const createActivities = (
       );
   };
 
+  // Waits until `url` and its /api/healthz answer 200.
+  const answers = (url: string, minutes: number) =>
+    withHeartbeat(async (signal) => {
+      const deadline = Date.now() + minutes * 60_000;
+      for (;;) {
+        const statuses = await Promise.all(
+          [`${url}/`, `${url}/api/healthz`].map((target) =>
+            (config.fetch ?? fetch)(target, {
+              signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+            })
+              .then((response) => response.status)
+              .catch(() => 0)
+          )
+        );
+        if (statuses.every((status) => status === 200)) return;
+        if (signal.aborted) throw new Error("deploy canceled");
+        if (Date.now() > deadline) {
+          throw ApplicationFailure.nonRetryable(
+            `${url} did not answer 200 within ${minutes} minutes (got ${statuses.join(", ")})`
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+    });
+
   // `make up` for one copy in its folder, under its Compose name and port, given on make's command
   // line so nothing in the app's own files can change them. `make up` runs the app's migrations
-  // forward against that copy's database. Answers the address once it answers 200.
-  // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
-  const up = async (project: Project, copy: Copy, buildId: number): Promise<string> => {
+  // forward against that copy's database. Answers the address once it answers 200. On the cluster
+  // the copy runs `commit`'s images in the tenant's namespace instead (deployCopy).
+  // ponytail: `make up` with Docker Compose on this machine; SCHMEIDE_RUNNER=kubernetes deploys to AKS
+  const up = async (
+    project: Project,
+    copy: Copy,
+    buildId: number,
+    commit: string
+  ): Promise<string> => {
+    if (config.runner) return deployCopy(config.runner, project, copy, commit, buildId);
     const { composeProject, dir } = copyOf(config.dataDir, project.slug, copy);
     const port = webPortOf(project, copy);
     await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} (make up)`);
@@ -717,35 +795,16 @@ export const createActivities = (
     }
     const url = `http://localhost:${port}`;
     await event(buildId, "deploy", `Waiting for ${url} to answer`);
-    await withHeartbeat(async (signal) => {
-      const deadline = Date.now() + 180_000;
-      for (;;) {
-        const statuses = await Promise.all(
-          [`${url}/`, `${url}/api/healthz`].map((target) =>
-            (config.fetch ?? fetch)(target, {
-              signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
-            })
-              .then((response) => response.status)
-              .catch(() => 0)
-          )
-        );
-        if (statuses.every((status) => status === 200)) return;
-        if (signal.aborted) throw new Error("deploy canceled");
-        if (Date.now() > deadline) {
-          throw ApplicationFailure.nonRetryable(
-            `${url} did not answer 200 within 3 minutes (got ${statuses.join(", ")})`
-          );
-        }
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      }
-    });
+    await answers(url, 3);
     return url;
   };
 
   // Production runs `commit`; every passed build staging held is now live.
+  // On the cluster, `main` records it, moved forward once production answers.
   const promote = async (project: Project, commit: string, buildId: number) => {
-    await checkOutProduction(project, commit, buildId);
-    const url = await up(project, "production", buildId);
+    if (!config.runner) await checkOutProduction(project, commit, buildId);
+    const url = await up(project, "production", buildId, commit);
+    if (config.runner) await pushCommit(config.runner, project, buildId, commit, "main", false);
     await db
       .update(projects)
       .set({ previewUrl: url, productionCommit: commit })
@@ -852,12 +911,12 @@ export const createActivities = (
         .limit(1)
     ).length > 0;
 
-  // A scratch clone of staging for `work`, pushed back after: the worker never keeps a workspace.
-  const onStaging = async (
+  // A scratch clone of staging for `work`, removed after: the worker never keeps a workspace.
+  const onClone = async (
     runner: KubeRunner,
     project: Project,
     buildId: number,
-    work: (dir: string) => Promise<void>
+    work: (dir: string, env: Record<string, string>) => Promise<void>
   ) => {
     const { org, repo } = repoOf(project);
     const remote = runner.forgejo.remote(org, repo);
@@ -872,6 +931,20 @@ export const createActivities = (
         buildId,
         env
       );
+      await work(dir, env);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+
+  // `work` on a scratch clone of staging, pushed back after.
+  const onStaging = (
+    runner: KubeRunner,
+    project: Project,
+    buildId: number,
+    work: (dir: string) => Promise<void>
+  ) =>
+    onClone(runner, project, buildId, async (dir, env) => {
       await work(dir);
       await mustRun(
         project,
@@ -881,9 +954,165 @@ export const createActivities = (
         buildId,
         env
       );
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    });
+
+  // Where a copy's objects are, for scaling and deleting them; the host and commit name nothing.
+  const copyPaths = (project: Project, copy: Copy) => {
+    const app: AppCopy = {
+      tenantId: project.tenantId,
+      projectId: project.id,
+      slug: project.slug,
+      copy,
+      host: "",
+      domain: "",
+      registry: "",
+      commit: "",
+    };
+    const [deployment, service, ingress] = appObjects(app).map(objectPath);
+    return { deployment, service, ingress, secret: objectPath(databaseSecret(app, "")) };
+  };
+
+  // Pushes `commit`, which staging holds, to `branch`: a fast-forward of main on a promote, or a
+  // forced return of staging on a discard.
+  const pushCommit = (
+    runner: KubeRunner,
+    project: Project,
+    buildId: number,
+    commit: string,
+    branch: "main" | "staging",
+    force: boolean
+  ) =>
+    onClone(runner, project, buildId, (dir, env) =>
+      mustRun(
+        project,
+        "git",
+        ["push", "-q", ...(force ? ["--force"] : []), "origin", `${commit}:refs/heads/${branch}`],
+        dir,
+        buildId,
+        env
+      )
+    );
+
+  // Builds and pushes `commit`'s web and api images on ACR Tasks, from a scratch clone whose
+  // platform-owned files are the template's. Nothing of that reset is committed or pushed.
+  const buildImages = (runner: KubeRunner, project: Project, buildId: number, commit: string) =>
+    onClone(runner, project, buildId, async (dir, env) => {
+      // A template given as a path is found from the data dir, as commitTemplate finds it.
+      const template = config.template.includes(":")
+        ? config.template
+        : resolve(config.dataDir, config.template);
+      for (const args of [
+        ["checkout", "-q", "--detach", commit],
+        ["fetch", "-q", "--depth", "1", template, "HEAD"],
+        ["checkout", "-q", "FETCH_HEAD", "--", ...PLATFORM_FILES],
+      ])
+        await mustRun(project, "git", args, dir, buildId, env);
+      const archive = `${dir}.tar.gz`;
+      try {
+        await mustRun(project, "tar", ["--exclude=.git", "-czf", archive, "-C", dir, "."], dir);
+        await event(buildId, "deploy", `Building the app's images for ${commit.slice(0, 12)}`);
+        await withHeartbeat((signal) =>
+          runner.hosting.acr.build(archive, taskYaml(project.tenantId, project.slug, commit), {
+            signal,
+            onQueued: (runId) => void event(buildId, "deploy", `Image build ${runId} queued`),
+          })
+        );
+      } finally {
+        await rm(archive, { force: true });
+      }
+    });
+
+  // projects.host, chosen on the project's first deploy.
+  const hostOf = async (project: Project): Promise<string> => {
+    if (project.host) return project.host;
+    await db
+      .update(projects)
+      .set({ host: appHost(project.slug) })
+      .where(and(eq(projects.id, project.id), isNull(projects.host)));
+    const { host } = await findProject(db, project.id);
+    if (!host) throw new Error(`Project ${project.id} has no host`);
+    return host;
+  };
+
+  // Applies each object, server side. Right after the namespace's RoleBinding the worker's new
+  // rights can take a moment to reach the API server, so a refusal is tried again for a while.
+  const applyAll = async (cluster: Cluster, objects: readonly object[]) => {
+    for (const object of objects)
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await cluster.apply(objectPath(object), object);
+          break;
+        } catch (error) {
+          if (!(error instanceof KubeError && error.status === 403) || attempt >= 10) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+  };
+
+  // Waits until every replica of the Deployment at `path` runs its newest spec.
+  const rolledOut = (cluster: Cluster, path: string, name: string) =>
+    withHeartbeat(async (signal) => {
+      const deadline = Date.now() + 300_000;
+      for (;;) {
+        const deployment = await cluster.get<DeploymentStatus>(path);
+        const want = deployment?.spec?.replicas ?? 1;
+        const status = deployment?.status;
+        if (
+          deployment &&
+          (status?.observedGeneration ?? 0) >= (deployment.metadata.generation ?? 1) &&
+          (status?.updatedReplicas ?? 0) === want &&
+          (status?.availableReplicas ?? 0) === want &&
+          (status?.replicas ?? 0) === want
+        )
+          return;
+        if (signal.aborted) throw new Error("deploy canceled");
+        if (Date.now() > deadline)
+          throw ApplicationFailure.nonRetryable(
+            `${name} did not roll out within 5 minutes; see its pods in ${path.split("/")[5]}`
+          );
+        await new Promise((resolve) => setTimeout(resolve, config.runner?.pollMs ?? 2000));
+      }
+    });
+
+  // One copy at `commit` in the tenant's namespace, with its own database, made on the first
+  // deploy. The database's password, once chosen, is read back from the copy's Secret.
+  const deployCopy = async (
+    runner: KubeRunner,
+    project: Project,
+    copy: Copy,
+    commit: string,
+    buildId: number
+  ): Promise<string> => {
+    const { cluster, databases } = runner.hosting;
+    const app: AppCopy = {
+      tenantId: project.tenantId,
+      projectId: project.id,
+      slug: project.slug,
+      copy,
+      host: await hostOf(project),
+      domain: runner.hosting.domain,
+      registry: runner.hosting.registry,
+      commit,
+    };
+    await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} at ${commit.slice(0, 12)}`);
+    await applyAll(cluster, tenantObjects(project.tenantId));
+    const secret = await cluster.get<{ data?: { DATABASE_URL?: string } }>(
+      copyPaths(project, copy).secret
+    );
+    const stored = secret?.data?.DATABASE_URL;
+    const password =
+      (stored && passwordOf(Buffer.from(stored, "base64").toString())) ?? newPassword();
+    const database = databaseName(project.id, copy);
+    await databases.ensure(database, password);
+    await applyAll(cluster, [
+      databaseSecret(app, appDatabaseUrl(runner.hosting.databaseHost, database, password)),
+      ...appObjects(app),
+    ]);
+    await rolledOut(cluster, copyPaths(project, copy).deployment, appName(project.id, copy));
+    const url = copyUrl(app);
+    await event(buildId, "deploy", `Waiting for ${url} to answer`);
+    await answers(url, 5);
+    return url;
   };
 
   // Starts the run's Job, or adopts it, with a fresh deploy key for the project's repository:
@@ -1354,9 +1583,19 @@ export const createActivities = (
     // live at once, as every build was before staging existed.
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
-      if (config.runner) throw ApplicationFailure.nonRetryable(DEPLOY_REFUSED);
-      const commit = await commitAll(project, buildId);
-      const url = await up(project, "staging", buildId);
+      // On the cluster the build's commit is staging's head, which the checks and applySite left.
+      const { runner } = config;
+      const commit = runner
+        ? assertCommit(
+            (await runner.forgejo.branchCommit(
+              repoOf(project).org,
+              repoOf(project).repo,
+              "staging"
+            )) ?? null
+          )
+        : await commitAll(project, buildId);
+      if (runner) await buildImages(runner, project, buildId, commit);
+      const url = await up(project, "staging", buildId, commit);
       await db
         .update(projects)
         .set({ stagingUrl: url, stagingCommit: commit, status: "live" })
@@ -1375,7 +1614,6 @@ export const createActivities = (
     // commit, production's, with an empty database. Neither runs the builder.
     async release(buildId: number): Promise<void> {
       const { build, project } = await stepOfBuild(buildId);
-      if (config.runner) throw ApplicationFailure.nonRetryable(DEPLOY_REFUSED);
       const commit = assertCommit(build.commit);
       if (build.kind === "promote") {
         await promote(project, commit, buildId);
@@ -1386,7 +1624,7 @@ export const createActivities = (
         await db.update(projects).set({ stagingCommit: commit }).where(eq(projects.id, project.id));
         await markReleased(db, project.id, "discarded");
         await dropStagingData(project, buildId);
-        const url = await up(project, "staging", buildId);
+        const url = await up(project, "staging", buildId, commit);
         await db.update(projects).set({ stagingUrl: url }).where(eq(projects.id, project.id));
         await event(buildId, "deploy", `The version being worked on is at ${url}`);
       } else {
@@ -1436,6 +1674,8 @@ export const createActivities = (
     // Both copies; their volumes are kept.
     async stopDeployment(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
+      for (const copy of COPIES)
+        await config.runner?.hosting.cluster.scale(copyPaths(project, copy).deployment, 0);
       for (const copy of ["production", "staging"] as const) {
         const dir = await composeDir(project, copy);
         if (!dir) continue;
@@ -1483,8 +1723,16 @@ export const createActivities = (
       }
       for (const copy of ["production", "staging"] as const)
         await rm(dirOf(project, copy), { recursive: true, force: true });
-      if (config.runner)
-        await config.runner.forgejo.deleteRepo(repoOf(project).org, repoOf(project).repo);
+      if (config.runner) {
+        const { hosting, forgejo } = config.runner;
+        for (const copy of COPIES) {
+          for (const path of Object.values(copyPaths(project, copy)))
+            await hosting.cluster.remove(path);
+          await hosting.databases.drop(databaseName(project.id, copy), { role: true });
+        }
+        await forgejo.deleteRepo(repoOf(project).org, repoOf(project).repo);
+        await hosting.acr.deleteImages(project.tenantId, project.slug);
+      }
       await store.removeProject({ tenantId: project.tenantId, projectId });
       await deleteProjectRows(db, projectId);
     },

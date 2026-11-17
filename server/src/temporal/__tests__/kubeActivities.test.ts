@@ -2,7 +2,14 @@
 // bare git repositories on disk and the Kubernetes API as a map of Jobs whose pods have exited.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MockActivityEnvironment } from "@temporalio/testing";
@@ -10,20 +17,22 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
 import { buildFiles, builds, files, projects, usage } from "../../db/schema.ts";
-import type { Job, Kube, LogLine, Pod } from "../../kube/client.ts";
+import type { Cluster, Job, Kube, LogLine, Pod } from "../../kube/client.ts";
 import { KubeError } from "../../kube/client.ts";
 import { appendEvent, listEvents } from "../../services/builds.ts";
 import type { Forgejo } from "../../services/forgejo.ts";
+import type { AppDatabases } from "../../services/appDatabases.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import {
   ATTACHMENTS_REFUSED,
-  DEPLOY_REFUSED,
   GIT_CONFIG,
   POD_NOTE,
   createActivities,
   gitConfigFile,
   sweepLeftoverRuns,
+  PLATFORM_FILES,
   type Config,
+  type Hosting,
   type KubeRunner,
 } from "../activities.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
@@ -141,6 +150,91 @@ const fakeForgejo = (root: string) => {
   return { forgejo, bare, keys, protectedMain, deletedRepos };
 };
 
+// The tenant namespaces as a map of applied objects by path, every Deployment rolled out at once;
+// ACR as a record of each build's context; Postgres as a map of databases to passwords.
+const fakeHosting = (root: string) => {
+  const objects = new Map<string, Record<string, unknown>>();
+  const removed: string[] = [];
+  const scaled: [string, number][] = [];
+  const builds: { files: Record<string, string>; yaml: string }[] = [];
+  const databases = new Map<string, string>();
+  const dropped: string[] = [];
+  const deletedImages: string[] = [];
+  const cluster = {
+    apply: async (path: string, object: object) => {
+      const applied = object as { kind: string; spec?: { replicas?: number } };
+      const replicas = applied.spec?.replicas ?? 0;
+      objects.set(path, {
+        ...applied,
+        ...(applied.kind === "Deployment" && {
+          status: {
+            observedGeneration: 1,
+            replicas,
+            updatedReplicas: replicas,
+            availableReplicas: replicas,
+          },
+        }),
+      });
+    },
+    get: async <T>(path: string) => {
+      const object = objects.get(path) as
+        { kind: string; stringData?: Record<string, string> } | undefined;
+      if (object?.kind !== "Secret") return object as T | undefined;
+      return {
+        data: Object.fromEntries(
+          Object.entries(object.stringData ?? {}).map(([key, value]) => [
+            key,
+            Buffer.from(value).toString("base64"),
+          ])
+        ),
+      } as T;
+    },
+    scale: async (path: string, replicas: number) => {
+      scaled.push([path, replicas]);
+    },
+    remove: async (path: string) => {
+      removed.push(path);
+      objects.delete(path);
+    },
+  } satisfies Cluster;
+  const hosting: Hosting = {
+    cluster,
+    acr: {
+      build: async (archive: string, yaml: string) => {
+        const dir = mkdtempSync(join(root, "context-"));
+        execFileSync("tar", ["-xzf", archive, "-C", dir]);
+        builds.push({
+          yaml,
+          files: Object.fromEntries(
+            [...PLATFORM_FILES, "app.ts"].map((file) => [
+              file,
+              existsSync(join(dir, file)) ? readFileSync(join(dir, file), "utf8") : "",
+            ])
+          ),
+        });
+      },
+      deleteImages: async (tenantId: number, slug: string) => {
+        deletedImages.push(`t${tenantId}/${slug}`);
+      },
+      armToken: async () => "arm",
+    },
+    databases: {
+      ensure: async (name: string, password: string) => {
+        databases.set(name, password);
+      },
+      drop: async (name: string) => {
+        dropped.push(name);
+        databases.delete(name);
+      },
+      rights: async () => ({ createDb: true, createRole: true }),
+    } satisfies AppDatabases,
+    domain: "apps.example",
+    registry: "registry.example",
+    databaseHost: "db.example",
+  };
+  return { hosting, objects, removed, scaled, builds, databases, dropped, deletedImages };
+};
+
 const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "schmeide-kube-")));
   writeFileSync(join(root, "gitconfig"), GIT_CONFIG);
@@ -150,6 +244,8 @@ const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
   const template = join(root, "template");
   mkdirSync(join(template, "frontend"), { recursive: true });
   writeFileSync(join(template, "AGENTS.md"), "# rules\n");
+  mkdirSync(join(template, "backend"), { recursive: true });
+  for (const file of PLATFORM_FILES) writeFileSync(join(template, file), `template ${file}\n`);
   writeFileSync(
     join(template, "frontend", "index.html"),
     "<html>\n  <head>\n    <title>Notes</title>\n  </head>\n</html>\n"
@@ -159,12 +255,14 @@ const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
   git(template, "commit", "-q", "-m", "template");
   const kube = fakeKube(scripts);
   const forgejo = fakeForgejo(root);
+  const hosting = fakeHosting(root);
   const runner: KubeRunner = {
     kube: kube.kube,
     forgejo: forgejo.forgejo,
     image: "schmeide.azurecr.io/schmeide-app:abc",
     postgresImage: "postgres",
     pollMs: 1,
+    hosting: hosting.hosting,
   };
   const config: Config = {
     dataDir,
@@ -173,8 +271,10 @@ const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
     claudeBin: undefined,
     makeBin: "make",
     runner,
+    // Every app answers.
+    fetch: async () => new Response("ok"),
   };
-  return { config, runner, kube, forgejo, root };
+  return { config, runner, kube, forgejo, hosting, root };
 };
 
 const newBuild = async () => {
@@ -496,14 +596,127 @@ describe("kubernetes mode", () => {
     expect(git(repo, "log", "-1", "--format=%s", "main")).toBe("start from the schmeide template");
   });
 
-  it("does not deploy until #194", async () => {
-    const { config } = setup();
-    const { build } = await newBuild();
+  // The builder's commit on staging: an app file, and a platform-owned file it should not touch.
+  const builderCommit = (root: string, repo: string) => {
+    const clone = join(root, `clone-${randomUUID()}`);
+    git(root, "clone", "-q", "--branch", "staging", repo, clone);
+    writeFileSync(join(clone, "app.ts"), `export {}; // ${randomUUID()}\n`);
+    writeFileSync(join(clone, "frontend", "Dockerfile"), "FROM evil\n");
+    git(clone, "add", "-A");
+    git(clone, "commit", "-q", "-m", "build the app");
+    git(clone, "push", "-q", "origin", "HEAD:refs/heads/staging");
+    return git(clone, "rev-parse", "HEAD");
+  };
+
+  it("deploys a first build to both copies on the apps domain from the template's Dockerfiles", async () => {
+    const { config, forgejo, hosting, root } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const repo = forgejo.bare(`t${project.tenantId}`, project.slug);
+    const commit = builderCommit(root, repo);
+
+    await env.run(activities.deploy, build.id);
+
+    expect(hosting.builds).toHaveLength(1);
+    expect(hosting.builds[0].files).toMatchObject({
+      "app.ts": expect.stringMatching(/^export \{\};/),
+      "frontend/Dockerfile": "template frontend/Dockerfile\n",
+      ".dockerignore": "template .dockerignore\n",
+    });
+    expect(hosting.builds[0].yaml).toContain(
+      `apps/t${project.tenantId}/${project.slug}/web:${commit}`
+    );
+    // The reset is only in the build's context: the repository keeps the builder's file.
+    expect(git(repo, "show", "staging:frontend/Dockerfile")).toBe("FROM evil");
+    expect(git(repo, "rev-parse", "main")).toBe(commit);
+
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row.host).toMatch(
+      new RegExp(`^${project.slug.slice(0, 47).replace(/-+$/, "")}-[a-z0-9]{6}$`)
+    );
+    expect(row).toMatchObject({
+      status: "live",
+      stagingCommit: commit,
+      productionCommit: commit,
+      stagingUrl: `https://${row.host}--staging.apps.example`,
+      previewUrl: `https://${row.host}.apps.example`,
+    });
+    const ns = `/api/v1/namespaces/tenant-${project.tenantId}`;
+    expect(hosting.objects.has(ns)).toBe(true);
+    const deployment = hosting.objects.get(
+      `/apis/apps/v1/namespaces/tenant-${project.tenantId}/deployments/app-${project.id}`
+    ) as { spec: { template: { spec: { containers: { image: string }[] } } } };
+    expect(deployment.spec.template.spec.containers[0].image).toBe(
+      `registry.example/apps/t${project.tenantId}/${project.slug}/web:${commit}`
+    );
+    const password = hosting.databases.get(`app_${project.id}_staging`);
+    expect(password).toMatch(/^[0-9a-f]{48}$/);
+    expect(hosting.objects.get(`${ns}/secrets/app-${project.id}-staging`)).toMatchObject({
+      stringData: {
+        DATABASE_URL: `postgres://app_${project.id}_staging:${password}@db.example:5432/app_${project.id}_staging?sslmode=require`,
+      },
+    });
+
+    // A later build keeps the host and each copy's password, and leaves production alone.
+    await db.update(builds).set({ release: "promoted" }).where(eq(builds.id, build.id));
+    const next = builderCommit(root, repo);
+    await env.run(activities.deploy, build.id);
+    const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(after).toMatchObject({ host: row.host, stagingCommit: next, productionCommit: commit });
+    expect(hosting.databases.get(`app_${project.id}_staging`)).toBe(password);
+  });
+
+  it("discards staging back to production's commit with an empty database", async () => {
+    const { config, forgejo, hosting, root } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const repo = forgejo.bare(`t${project.tenantId}`, project.slug);
+    const live = builderCommit(root, repo);
+    await env.run(activities.deploy, build.id);
+    await db.update(builds).set({ release: "promoted" }).where(eq(builds.id, build.id));
+    builderCommit(root, repo);
+    await env.run(activities.deploy, build.id);
+    const [discard] = await db
+      .insert(builds)
+      .values({
+        projectId: project.id,
+        kind: "discard",
+        request: "",
+        status: "running",
+        commit: live,
+      })
+      .returning();
+
+    await env.run(activities.release, discard.id);
+
+    expect(git(repo, "rev-parse", "staging")).toBe(live);
+    expect(hosting.scaled).toContainEqual([
+      `/apis/apps/v1/namespaces/tenant-${project.tenantId}/deployments/app-${project.id}-staging`,
+      0,
+    ]);
+    expect(hosting.dropped).toEqual([`app_${project.id}_staging`]);
+    expect(hosting.databases.has(`app_${project.id}_staging`)).toBe(true);
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row.stagingCommit).toBe(live);
+  });
+
+  it("stops both copies by scaling them to zero", async () => {
+    const { config, hosting } = setup();
+    const { project } = await newBuild();
     const activities = createActivities(deps, config);
 
-    await expect(new MockActivityEnvironment().run(activities.deploy, build.id)).rejects.toThrow(
-      DEPLOY_REFUSED
-    );
+    await new MockActivityEnvironment().run(activities.stopDeployment, project.id);
+
+    expect(hosting.scaled.map(([path, replicas]) => [path.split("/").pop(), replicas])).toEqual([
+      [`app-${project.id}-staging`, 0],
+      [`app-${project.id}`, 0],
+    ]);
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row).toMatchObject({ status: "stopped", previewUrl: null, stagingUrl: null });
   });
 
   it("removes every Job, Secret, and deploy key of a build when it finishes", async () => {
@@ -578,8 +791,8 @@ describe("kubernetes mode", () => {
     expect(forgejo.keys.map((key) => key.title)).toEqual([`checks-${running.build.id}-1`]);
   });
 
-  it("deletes the project's repository with the project", async () => {
-    const { config, forgejo } = setup();
+  it("deletes the project's repository, images, databases, and objects with the project", async () => {
+    const { config, forgejo, hosting } = setup();
     const { project } = await newBuild();
     await db.delete(builds).where(eq(builds.projectId, project.id));
     const activities = createActivities(deps, config);
@@ -587,5 +800,15 @@ describe("kubernetes mode", () => {
     await new MockActivityEnvironment().run(activities.removeProject, project.id);
 
     expect(forgejo.deletedRepos).toEqual([`t${project.tenantId}/${project.slug}`]);
+    expect(hosting.deletedImages).toEqual([`t${project.tenantId}/${project.slug}`]);
+    expect(hosting.dropped).toEqual([`app_${project.id}_staging`, `app_${project.id}`]);
+    expect(hosting.removed.map((path) => path.split("/").slice(-2).join("/"))).toEqual(
+      expect.arrayContaining([
+        `deployments/app-${project.id}`,
+        `services/app-${project.id}`,
+        `ingresses/app-${project.id}-staging`,
+        `secrets/app-${project.id}-staging`,
+      ])
+    );
   });
 });

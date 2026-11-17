@@ -124,7 +124,7 @@ const CHECKS_SCRIPT = [
 
 const AGENT_SCRIPT = [...PREPARE, "exec node /app/server/src/sandbox/agent.ts"].join("\n");
 
-const restricted = {
+export const restricted = {
   allowPrivilegeEscalation: false,
   readOnlyRootFilesystem: true,
   capabilities: { drop: ["ALL"] },
