@@ -1,4 +1,5 @@
-// Tokens and cost across businesses, from `usage` (recordUsage, builds.ts), for the admin area.
+// Tokens, cost, and time across businesses, from `usage`, `agent_runs` (recordUsage, builds.ts),
+// and `builds`, for the admin area.
 // Every sum is made by the database, cost as numeric: summing in JavaScript would drift.
 // A deleted project takes its usage rows with it (deleteProjectRows, projects.ts), so these sums
 // leave it out.
@@ -6,7 +7,16 @@ import { and, asc, desc, eq, gte, lt, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn, SelectedFields } from "drizzle-orm/pg-core";
 import type { z } from "zod";
 import type { Db } from "../db/client.ts";
-import { projects, tenants, usage, type usageQuerySchema } from "../db/schema.ts";
+import {
+  agentRuns,
+  builds,
+  projects,
+  tenants,
+  usage,
+  type periodSchema,
+  type usageQuerySchema,
+} from "../db/schema.ts";
+import { builderTime, buildingTime, finishedBuild } from "./builds.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -44,7 +54,7 @@ export const usageSummary = async (db: Db, query: z.infer<typeof usageQuerySchem
       .innerJoin(projects, eq(projects.id, usage.projectId))
       .innerJoin(tenants, eq(tenants.id, projects.tenantId))
       .where(where);
-  const [businesses, projectRows, models, runKinds] = await Promise.all([
+  const [businesses, projectRows, models, runKinds, times] = await Promise.all([
     grouped({ id: tenants.id, name: tenants.name })
       .groupBy(tenants.id)
       .orderBy(desc(byCost), asc(tenants.id)),
@@ -59,6 +69,69 @@ export const usageSummary = async (db: Db, query: z.infer<typeof usageQuerySchem
     grouped({ runKind: usage.runKind })
       .groupBy(usage.runKind)
       .orderBy(desc(byCost), asc(usage.runKind)),
+    timeSummary(db, query),
   ]);
-  return { businesses, projects: projectRows, models, runKinds };
+  return { businesses, projects: projectRows, models, runKinds, times };
+};
+
+export type BusinessTime = {
+  readonly buildingMs: number;
+  readonly failedBuildingMs: number;
+  readonly builderMs: number;
+};
+const NO_TIME: BusinessTime = { buildingMs: 0, failedBuildingMs: 0, builderMs: 0 };
+
+// Building and builder time per business (builds.ts says what each is), longest building first. A
+// build counts in the period it finished in, a model run in the one it was recorded in; a running
+// build counts once it finishes.
+export const timeSummary = async (
+  db: Db,
+  query: z.infer<typeof usageQuerySchema>
+): Promise<readonly (BusinessTime & { readonly id: number; readonly name: string })[]> => {
+  const { start, end } = periodBounds(query);
+  const tenant = query.tenantId === undefined ? undefined : eq(projects.tenantId, query.tenantId);
+  const perBusiness = { id: tenants.id, name: tenants.name };
+  const [building, builder] = await Promise.all([
+    db
+      .select({ ...perBusiness, ...buildingTime })
+      .from(builds)
+      .innerJoin(projects, eq(projects.id, builds.projectId))
+      .innerJoin(tenants, eq(tenants.id, projects.tenantId))
+      .where(
+        and(
+          finishedBuild,
+          start && gte(builds.finishedAt, start),
+          end && lt(builds.finishedAt, end),
+          tenant
+        )
+      )
+      .groupBy(tenants.id),
+    db
+      .select({ ...perBusiness, ...builderTime })
+      .from(agentRuns)
+      .innerJoin(projects, eq(projects.id, agentRuns.projectId))
+      .innerJoin(tenants, eq(tenants.id, projects.tenantId))
+      .where(and(start && gte(agentRuns.at, start), end && lt(agentRuns.at, end), tenant))
+      .groupBy(tenants.id),
+  ]);
+  const byId = new Map<number, BusinessTime & { readonly id: number; readonly name: string }>();
+  for (const row of [...building, ...builder])
+    byId.set(row.id, { ...NO_TIME, ...byId.get(row.id), ...row });
+  return [...byId.values()].sort((a, b) => b.buildingMs - a.buildingMs || a.id - b.id);
+};
+
+// One business's time for the period: what its own usage page reads.
+export const businessTime = async (
+  db: Db,
+  tenantId: number,
+  period: z.infer<typeof periodSchema>
+): Promise<BusinessTime> => {
+  const [found] = await timeSummary(db, { ...period, tenantId });
+  return found
+    ? {
+        buildingMs: found.buildingMs,
+        failedBuildingMs: found.failedBuildingMs,
+        builderMs: found.builderMs,
+      }
+    : NO_TIME;
 };

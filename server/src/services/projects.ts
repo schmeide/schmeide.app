@@ -1,5 +1,5 @@
 import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
-import { and, asc, desc, eq, inArray, like, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, lt, ne, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
@@ -24,7 +24,14 @@ import type {
   specWorkflow,
   stopWorkflow,
 } from "../temporal/workflows.ts";
-import { appendEvent, finishBuild, getBuild } from "./builds.ts";
+import {
+  appendEvent,
+  builderTime,
+  buildingTime,
+  finishBuild,
+  finishedBuild,
+  getBuild,
+} from "./builds.ts";
 import { assertActive, businessSuspended } from "./businesses.ts";
 import { BUILDS_OFF, ConflictError, NotFoundError } from "./errors.ts";
 
@@ -178,6 +185,15 @@ export type UsageTotals = {
   readonly costUsd: number;
 };
 
+export type TimeTotals = {
+  // Finished builds only; the page adds the running one's time as it runs.
+  readonly buildingMs: number;
+  readonly failedBuildingMs: number;
+  readonly builderMs: number;
+  // Some model runs were recorded before their time was, so builderMs leaves them out.
+  readonly builderUnrecorded: boolean;
+};
+
 export type BuiltChange = Pick<Build, "id" | "request" | "finishedAt">;
 
 export const builtChanges = (
@@ -210,6 +226,7 @@ export const getProject = async (
   // A build of this project has passed, so the app has been live at least once.
   hasBeenLive: boolean;
   usage: UsageTotals;
+  time: TimeTotals;
 }> => {
   const project = await findProject(db, id);
   const [latestBuild] = await db
@@ -233,6 +250,16 @@ export const getProject = async (
     })
     .from(usage)
     .where(eq(usage.projectId, id));
+  const [building] = await db
+    .select(buildingTime)
+    .from(builds)
+    .where(and(eq(builds.projectId, id), finishedBuild));
+  const [builder] = await db.select(builderTime).from(agentRuns).where(eq(agentRuns.projectId, id));
+  const [unrecorded] = await db
+    .select({ id: usage.id })
+    .from(usage)
+    .where(and(eq(usage.projectId, id), isNull(usage.runId)))
+    .limit(1);
   const [icon] = await db
     .select({ projectId: projectIcons.projectId })
     .from(projectIcons)
@@ -250,6 +277,7 @@ export const getProject = async (
     hasIcon: Boolean(icon),
     hasBeenLive: Boolean(passed),
     usage: totals,
+    time: { ...building, ...builder, builderUnrecorded: Boolean(unrecorded) },
   };
 };
 
