@@ -40,10 +40,19 @@ if (!claudeBin) {
   process.exit(1);
 }
 
+// SCHMEIDE_BUILDS=off (Stage 1 on AKS): people plan apps and get proposals, but nothing builds,
+// deploys, or is hosted, so neither GNU make nor Docker is needed.
+const builds = env.SCHMEIDE_BUILDS ?? "on";
+if (builds !== "on" && builds !== "off") {
+  console.error(`SCHMEIDE_BUILDS is "${builds}"; set it to on (the default) or off.`);
+  process.exit(1);
+}
+const buildsOff = builds === "off";
+
 const makeBin = [onPath("gmake"), onPath("make")].find((bin) => bin && isGnuMake4(bin));
-if (!makeBin) {
+if (!makeBin && !buildsOff) {
   console.error(
-    "GNU make 4 or newer is required (Apple's make is 3.81). Install it: brew install make"
+    "GNU make 4 or newer is required (Apple's make is 3.81). Install it: brew install make, or set SCHMEIDE_BUILDS=off to run without building apps."
   );
   process.exit(1);
 }
@@ -52,12 +61,13 @@ const dataDir = env.SCHMEIDE_DATA_DIR ?? join(homedir(), ".schmeide");
 // Project runs and the agent's own Bash calls find GNU make as `make` through this directory.
 mkdirSync(shimDir(dataDir), { recursive: true });
 rmSync(join(shimDir(dataDir), "make"), { force: true });
-symlinkSync(makeBin, join(shimDir(dataDir), "make"));
+if (makeBin) symlinkSync(makeBin, join(shimDir(dataDir), "make"));
 writeFileSync(gitConfigFile(dataDir), GIT_CONFIG);
 
 const config = {
   dataDir,
-  makeBin,
+  // Never run with builds off, the only case it can be missing.
+  makeBin: makeBin ?? "make",
   template: env.SCHMEIDE_TEMPLATE ?? "https://github.com/schmeide/template.git",
   agentModels: routingFromEnv(env),
   interviewModel: env.SCHMEIDE_INTERVIEW_MODEL ?? "sonnet",
@@ -86,7 +96,7 @@ const connection = await Connection.connect({ address: temporalAddress }).catch(
   }
 );
 const client = new Client({ connection });
-const deps = { db, workflows: client.workflow, taskQueue } as const;
+const deps = { db, workflows: client.workflow, taskQueue, buildsOff } as const;
 
 const worker = await Worker.create({
   connection: await NativeConnection.connect({ address: temporalAddress }),
@@ -126,6 +136,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 
 console.log(
   `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
+);
+console.log(
+  buildsOff
+    ? "Builds are off (SCHMEIDE_BUILDS=off): nothing is built, deployed, or hosted, and no docker command runs."
+    : "Builds are on: apps build with GNU make and Docker on this host."
 );
 console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}`

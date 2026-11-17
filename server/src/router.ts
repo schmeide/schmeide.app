@@ -278,6 +278,8 @@ export const appRouter = t.router({
           : null,
         businesses: person ? await businessesOf(ctx.db, person) : [],
         providers: ctx.providers,
+        // SCHMEIDE_BUILDS=off: the client offers no build, and says why.
+        buildsOff: ctx.buildsOff ?? false,
       };
     }),
   }),

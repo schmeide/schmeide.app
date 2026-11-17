@@ -173,6 +173,7 @@ describe("a session", () => {
       impersonatedBy: null,
       businesses: [],
       providers: ["google"],
+      buildsOff: false,
     });
   });
 

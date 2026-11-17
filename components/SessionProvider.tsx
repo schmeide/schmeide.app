@@ -58,6 +58,7 @@ export function SessionProvider({
         person: query.data.person,
         businesses: query.data.businesses,
         impersonatedBy: query.data.impersonatedBy,
+        buildsOff: query.data.buildsOff,
       });
     const session = loaded ?? signedOut;
     const sessionKey = trpc.session.pathKey();

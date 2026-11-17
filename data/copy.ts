@@ -198,6 +198,8 @@ export const copy = {
     workspace: "Workspace on disk",
     unknown: "unknown",
     reading: "…",
+    buildsOff:
+      "Builds are off on this server, so no app is hosted here and nothing is read from the container runtime or the disk.",
   },
   // Tokens and cost across businesses, in the admin area.
   usage: {
@@ -449,6 +451,8 @@ export const copy = {
     specIntro: "This is what Schmeide will build. Read it through before approving it.",
     approve: "Approve and build",
     approving: "Starting the build…",
+    buildsOff:
+      "Building apps is not open yet. Your spec is saved, and you can approve it here once building opens.",
     changeFeatures: "Change the requests",
     builtFrom: "The spec your app started from",
     builtFromUnchanged: "No changes have been built since, so this still describes your app.",

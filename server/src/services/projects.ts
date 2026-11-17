@@ -25,7 +25,7 @@ import type {
 } from "../temporal/workflows.ts";
 import { appendEvent, finishBuild, getBuild } from "./builds.ts";
 import { assertActive, businessSuspended } from "./businesses.ts";
-import { ConflictError, NotFoundError } from "./errors.ts";
+import { BUILDS_OFF, ConflictError, NotFoundError } from "./errors.ts";
 
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
@@ -34,6 +34,12 @@ export type Deps = {
   readonly db: Db;
   readonly workflows: Pick<WorkflowClient, "start" | "getHandle">;
   readonly taskQueue: string;
+  // SCHMEIDE_BUILDS=off: nothing builds, deploys, or stops (assertBuildsOn).
+  readonly buildsOff?: boolean;
+};
+
+const assertBuildsOn = ({ buildsOff }: Pick<Deps, "buildsOff">): void => {
+  if (buildsOff) throw new ConflictError(BUILDS_OFF);
 };
 
 type Status = Project["status"];
@@ -323,13 +329,15 @@ const hasRunningBuild = async (tx: Db, projectId: number): Promise<boolean> =>
 
 // Called inside the transaction that marks the build running, so a failed start rolls it back. A
 // repeated start (an activity retried after its first start went through) leaves the run alone.
-// Every build starts here, so a suspended business's never does, whoever asked.
+// Every build starts here, so a suspended business's never does, whoever asked, and none does with
+// builds off.
 const startWorkflow = async (
-  { workflows, taskQueue }: Deps,
+  { workflows, taskQueue, buildsOff }: Deps,
   tx: Db,
   project: Pick<Project, "tenantId">,
   build: Build
 ): Promise<void> => {
+  assertBuildsOn({ buildsOff });
   await assertActive(tx, project.tenantId);
   try {
     await workflows.start<typeof buildWorkflow>("buildWorkflow", {
@@ -522,9 +530,10 @@ export const removeQueuedChange = (db: Db, buildId: number): Promise<Build> =>
 
 // A running build is canceled; otherwise the deployment is taken down.
 export const stopProject = async (
-  { db, workflows, taskQueue }: Deps,
+  { db, workflows, taskQueue, buildsOff }: Deps,
   id: number
 ): Promise<Project> => {
+  assertBuildsOn({ buildsOff });
   const project = await findProject(db, id);
   if (project.status === "building") {
     const [build] = await db

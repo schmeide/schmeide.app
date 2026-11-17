@@ -8,11 +8,13 @@ export type Provider = "google" | "microsoft" | "apple";
 export type Impersonator = { readonly name: string; readonly email: string };
 
 // Who is using the app. `person` is null when signed out; a new person has no business yet.
-// `impersonatedBy` is set while an admin views the app as the person.
+// `impersonatedBy` is set while an admin views the app as the person. `buildsOff`: the server
+// builds and hosts no app (SCHMEIDE_BUILDS=off), so nothing offers to.
 export type Session = {
   readonly person: Person | null;
   readonly businesses: readonly Business[];
   readonly impersonatedBy?: Impersonator | null;
+  readonly buildsOff?: boolean;
 };
 
 export const signedOut: Session = { person: null, businesses: [] };

@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
+import { useSession } from "./SessionProvider";
 import { Spec } from "./Spec";
 
 import styles from "./Step.module.css";
@@ -13,6 +14,7 @@ type Props = { readonly project: Project; readonly onChangeFeatures: () => void 
 export function SpecStep({ project, onChangeFeatures }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
+  const { session } = useSession();
   const approve = useMutation(
     trpc.projects.approveSpec.mutationOptions({ onSettled: () => refresh() })
   );
@@ -25,15 +27,18 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
         <>
           <p className={styles.muted}>{copy.project.specIntro}</p>
           <Spec source={project.spec} />
+          {session.buildsOff && <p>{copy.project.buildsOff}</p>}
           <div className={styles.actions}>
-            <button
-              type="button"
-              data-variant="primary"
-              onClick={() => approve.mutate({ id: project.id })}
-              disabled={approve.isPending}
-            >
-              {approve.isPending ? copy.project.approving : copy.project.approve}
-            </button>
+            {!session.buildsOff && (
+              <button
+                type="button"
+                data-variant="primary"
+                onClick={() => approve.mutate({ id: project.id })}
+                disabled={approve.isPending}
+              >
+                {approve.isPending ? copy.project.approving : copy.project.approve}
+              </button>
+            )}
             <button type="button" onClick={onChangeFeatures} disabled={approve.isPending}>
               {copy.project.changeFeatures}
             </button>

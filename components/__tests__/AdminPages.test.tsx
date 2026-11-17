@@ -583,6 +583,32 @@ describe("AdminProjectsPage", () => {
   });
 });
 
+describe("with builds off", () => {
+  const buildsOff: Session = { ...admin, buildsOff: true };
+
+  it("says so on the projects page", async () => {
+    renderWithApi(
+      <AdminProjectsPage />,
+      { "admin.projects.list": () => ({ entries: [], nextCursor: null }) },
+      buildsOff
+    );
+    expect(await screen.findByText(copy.resources.buildsOff)).toBeInTheDocument();
+  });
+
+  it("says so where a business's apps would be measured", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => ({ ...aBusinessPage(), projects: [] }),
+        "admin.usage.summary": noSummary,
+      },
+      buildsOff
+    );
+    const region = within(await screen.findByRole("region", { name: copy.resources.title }));
+    expect(region.getByText(copy.resources.buildsOff)).toBeInTheDocument();
+  });
+});
+
 describe("AdminBusinessPage's resources", () => {
   const business = (projects: readonly { readonly id: number }[]) => () => ({
     business: aBusinessPage().business,

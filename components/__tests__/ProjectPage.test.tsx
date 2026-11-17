@@ -10,6 +10,7 @@ import {
   anEvent,
   aProject,
   ApiFailure,
+  demoOwner,
   noUsage,
   projectServer,
   renderWithApi,
@@ -157,6 +158,16 @@ describe("ProjectPage", () => {
     expect(calls).toContainEqual({ path: "projects.approveSpec", input: { id: 7 } });
     expect(await screen.findByText(copy.project.buildStatus.running)).toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(copy.status.building.label);
+  });
+
+  it("says building is not open yet in place of approving, when the server has builds off", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject({ status: "spec_ready", features: "a", spec: SPEC }) }),
+      { ...demoOwner, buildsOff: true }
+    );
+    expect(await screen.findByText(copy.project.buildsOff)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: copy.project.approve })).toBeNull();
   });
 
   it("lets a change be requested while a build runs, and lists the waiting changes", async () => {

@@ -17,6 +17,10 @@ export class UploadRefusedError extends Error {
 // The business is suspended (services/businesses.ts): its members cannot open it, and nothing in
 // it builds. The one message, so the client and the worker's build log say the same thing.
 export const BUSINESS_SUSPENDED = "This business is suspended";
+// The server runs with SCHMEIDE_BUILDS=off (Stage 1 on AKS): it plans apps but builds and hosts
+// none. Refused as a ConflictError with this message.
+export const BUILDS_OFF =
+  "Building apps is not open yet. Your plan and proposal are saved, and can be built once it opens.";
 export class BusinessSuspendedError extends Error {
   constructor() {
     super(BUSINESS_SUSPENDED);
