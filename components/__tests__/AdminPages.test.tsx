@@ -12,6 +12,7 @@ import type {
   UsageSummaryData,
 } from "../../trpc";
 import type { Session } from "../../utils/session";
+import { AdminAdminsPage } from "../AdminAdminsPage";
 import { AdminAuditPage } from "../AdminAuditPage";
 import { AdminBusinessPage } from "../AdminBusinessPage";
 import { AdminBusinessesPage } from "../AdminBusinessesPage";
@@ -62,6 +63,7 @@ describe("AdminPage", () => {
     ).toEqual([
       [copy.routes.adminBusinesses, "/admin/businesses"],
       [copy.routes.adminPeople, "/admin/people"],
+      [copy.routes.adminAdmins, "/admin/admins"],
       [copy.routes.adminProjects, "/admin/projects"],
       [copy.routes.adminUsage, "/admin/usage"],
       [copy.routes.adminAudit, "/admin/audit"],
@@ -1002,6 +1004,80 @@ describe("a person's access", () => {
     expect(callsTo(calls, "admin.access.approve")[0]?.input).toEqual({
       email: "n@e.com",
       reason: "New",
+    });
+  });
+});
+
+describe("AdminAdminsPage", () => {
+  const admins = () => [
+    { name: "Grace", email: "grace@example.com", pending: false, approved: true },
+    { name: "Hal", email: "hal@example.com", pending: false, approved: true },
+    { name: null, email: "new@example.com", pending: true, approved: true },
+  ];
+
+  it("lists the admins, one who has not signed in yet as waiting", async () => {
+    renderWithApi(<AdminAdminsPage />, { "admin.admins.list": admins }, admin);
+    const table = await screen.findByRole("table", { name: copy.admins.caption });
+    const rows = within(table).getAllByRole("row").slice(1);
+    expect(rows.map((row) => cellsOf(row).slice(0, 3))).toEqual([
+      ["Grace", "grace@example.com", copy.admins.active],
+      ["Hal", "hal@example.com", copy.admins.active],
+      [copy.people.notSignedIn, "new@example.com", copy.admins.pending],
+    ]);
+  });
+
+  it("offers taking the role away from everyone but yourself", async () => {
+    renderWithApi(<AdminAdminsPage />, { "admin.admins.list": admins }, admin);
+    await screen.findByRole("table", { name: copy.admins.caption });
+    expect(screen.queryByText(copy.admins.revoke("Grace"))).toBeNull();
+    expect(screen.getByText(copy.admins.revoke("Hal"))).toBeInTheDocument();
+    expect(screen.getByText(copy.admins.revoke(copy.people.notSignedIn))).toBeInTheDocument();
+  });
+
+  it("takes the role away with a reason", async () => {
+    const calls = renderWithApi(
+      <AdminAdminsPage />,
+      { "admin.admins.list": admins, "admin.admins.revoke": (input) => ({ email: input.email }) },
+      admin
+    );
+    const form = await openForm(copy.admins.revoke("Hal"));
+    await submit(form, copy.admins.revokeAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Left");
+    await submit(form, copy.admins.revokeAction);
+    await waitFor(() =>
+      expect(callsTo(calls, "admin.admins.revoke")[0]?.input).toEqual({
+        email: "hal@example.com",
+        reason: "Left",
+      })
+    );
+  });
+
+  it("makes someone an admin by email with a reason, showing their link when there is one", async () => {
+    const calls = renderWithApi(
+      <AdminAdminsPage />,
+      {
+        "admin.admins.list": admins,
+        "admin.admins.grant": (input) => ({ email: input.email, pending: true, token: "tok" }),
+      },
+      admin
+    );
+    const form = await openForm(copy.admins.grant);
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.emailLabel), "n@e.com");
+    await submit(form, copy.admins.grantAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Hire");
+    await submit(form, copy.admins.grantAction);
+    expect(
+      await within(form).findByText(`${window.location.origin}/set-password?token=tok`)
+    ).toBeInTheDocument();
+    expect(callsTo(calls, "admin.admins.grant")[0]?.input).toEqual({
+      email: "n@e.com",
+      reason: "Hire",
     });
   });
 });

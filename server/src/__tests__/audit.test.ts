@@ -63,6 +63,7 @@ const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
   const owner = await aSignedInPerson(app, deps);
   const leaving = await aSignedInPerson(app, deps);
   const teammate = await aSignedInPerson(app, deps, { joins: owner.tenantId });
+  const leavingAdmin = await aSignedInAdmin(app, deps);
   const reason = "audit walk";
   return {
     "admin.impersonation.start": { email: owner.email, reason },
@@ -73,6 +74,8 @@ const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
     // Walked in the router's order: suspended first, then restored.
     "admin.businesses.suspend": { id: owner.tenantId, reason },
     "admin.businesses.restore": { id: owner.tenantId, reason },
+    "admin.admins.grant": { email: anEmail(), reason },
+    "admin.admins.revoke": { email: leavingAdmin.email, reason },
   };
 };
 
@@ -210,7 +213,7 @@ describe("granting the admin role from the command line", () => {
   it("is recorded with the command line as the admin", async () => {
     const { email, token } = await approveEmail(db, anEmail());
     await acceptInvite(deps, { token, name: "Ada", password: PASSWORD });
-    await grantAdmin(db, email);
+    await grantAdmin(db, email, COMMAND_LINE);
     const userId = await idOf(email);
     const rows = await db
       .select()

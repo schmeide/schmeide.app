@@ -531,6 +531,9 @@ export const approvedEmails = pgTable("approved_emails", {
   email: text("email").primaryKey(),
   // The business this person joins on first sign-in; null gives them a new one of their own.
   tenantId: integer("tenant_id").references(() => tenants.id),
+  // An admin made this person an admin before they had an account: their account is created with
+  // the role (services/access.ts, services/auth.ts), and this is cleared. Set only by an admin.
+  admin: boolean("admin").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

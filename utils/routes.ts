@@ -23,6 +23,7 @@ const table = {
   adminBusinesses: { path: "/admin/businesses", access: "admin" },
   adminBusiness: { path: "/admin/businesses/:id", access: "admin" },
   adminPeople: { path: "/admin/people", access: "admin" },
+  adminAdmins: { path: "/admin/admins", access: "admin" },
   adminProjects: { path: "/admin/projects", access: "admin" },
   adminUsage: { path: "/admin/usage", access: "admin" },
   adminAudit: { path: "/admin/audit", access: "admin" },

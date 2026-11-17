@@ -8,6 +8,7 @@ import styles from "./AdminPage.module.css";
 const SECTIONS: readonly RouteName[] = [
   "adminBusinesses",
   "adminPeople",
+  "adminAdmins",
   "adminProjects",
   "adminUsage",
   "adminAudit",

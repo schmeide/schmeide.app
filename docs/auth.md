@@ -53,13 +53,26 @@ the server's `admin.*` procedures, the only ones that read across businesses. To
 procedure that does not exist.
 
 - `access/admin` works only for an approved address whose person has already set a password or signed in; it says
-  what to run first otherwise. The role takes effect on their next request.
+  what to run first otherwise. The role takes effect on their next request. It needs no admin to exist, so it makes
+  the first one, and brings a deployment that has lost its last admin back.
+- From the admin area, `/admin/admins` lists the admins, and those made admins who have not signed in yet:
+  - "Make someone an admin" (`admin.grant`), by email with a reason. Someone approved with an account has the role at
+    once; someone with an account whose access was removed is refused until it is given back. Someone with no account
+    is approved, their set-password link is shown once, and the role waits on their approval
+    (`approved_emails.admin`) until their account is made, by the link or a first provider sign-in, and is then
+    cleared. Nothing in the link or the sign-in carries the role, and an approval without it never gives it.
+  - "Take the role away" (`admin.revoke`), with a reason. It ends every session of theirs and every view as a
+    customer they have open, in the same transaction as its audit row, so the admin area is gone on their next
+    request. They stay approved and keep their businesses. Not offered for, and refused to, the admin themselves; the
+    last admin is refused too, and two admins taking each other's role at the same moment cannot leave none.
+- An admin's businesses are their own business: becoming or ceasing to be an admin leaves their memberships alone.
+  An owner made an admin still sees their business, with the admin area beside it, but can no longer be viewed as.
 - Every admin write, `access/admin` included, is recorded in the audit log (`admin_actions`), shown at `/admin/audit`.
   The command line is recorded as `command line`.
 - An admin is not given a business of their own, and lands on `/admin`. Approving them with `TENANT=...` puts them in
   one.
 - `access/remove` takes an admin's access away like anyone else's: the role is kept but does nothing while the address
-  is off the list.
+  is off the list. The admin area does not offer this for an admin, and refuses it: take the role away first.
 - `/admin/businesses` lists every business and its members and apps, and `/admin/people` every person with an
   account and every approved email that has not signed in yet. No admin procedure answers a password hash, session,
   or provider token; an invite token only in the one answer that shows its link ([Changing access](#changing-access)).
