@@ -60,6 +60,9 @@ procedure that does not exist.
   is off the list.
 - `/admin/businesses` lists every business and its members and apps, and `/admin/people` every person with an
   account. Both are read-only, and no admin procedure answers a password hash, session, provider, or invite token.
+- `/admin/projects` lists every hosted app with what it takes up: containers running, memory and CPU from `docker ps`
+  and `docker stats`, and its workspace on disk from `du`. They are read when the page asks and never stored; a read
+  that fails or takes over five seconds shows as unknown.
 - The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
 

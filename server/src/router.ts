@@ -20,6 +20,7 @@ import {
   newProjectSchema,
   planItemIdSchema,
   projectIdSchema,
+  projectIdsSchema,
   readWebsiteSchema,
   renameFileSchema,
   setFeaturesSchema,
@@ -38,7 +39,13 @@ import {
 } from "./services/auth.ts";
 import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
-import { getBusiness, listBusinesses, listPeople } from "./services/directory.ts";
+import {
+  getBusiness,
+  hostedResources,
+  listBusinesses,
+  listHostedProjects,
+  listPeople,
+} from "./services/directory.ts";
 import {
   ConflictError,
   InterviewUnavailableError,
@@ -47,6 +54,7 @@ import {
 } from "./services/errors.ts";
 import type { FileReader } from "./services/fileReader.ts";
 import type { FileStore } from "./services/fileStore.ts";
+import type { ResourceReader } from "./services/resources.ts";
 import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
   addPlanItem,
@@ -81,6 +89,8 @@ export type AppContext = Deps &
     readonly interviewer: Interviewer;
     readonly files: FileStore;
     readonly reader: FileReader;
+    // What hosted projects take up, read from the container runtime and the disk when asked.
+    readonly resources: ResourceReader;
     readonly auth: Auth;
     // The sign-in providers that have credentials, for the sign-in page.
     readonly providers: readonly Provider[];
@@ -250,6 +260,16 @@ export const appRouter = t.router({
     }),
     people: t.router({
       list: admin.input(adminListSchema).query(({ ctx, input }) => listPeople(ctx.db, input)),
+    }),
+    // The list answers from the database alone; what each project takes up is a second call, so
+    // a slow or missing container runtime never holds the list back.
+    projects: t.router({
+      list: admin
+        .input(adminListSchema)
+        .query(({ ctx, input }) => listHostedProjects(ctx.db, input)),
+      resources: admin
+        .input(projectIdsSchema)
+        .query(({ ctx, input }) => hostedResources(ctx, input.ids)),
     }),
     impersonation: t.router({
       // Switches the caller to a session as the person, for an hour at most (services/auth.ts).

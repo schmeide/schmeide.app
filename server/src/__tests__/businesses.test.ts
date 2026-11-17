@@ -35,6 +35,7 @@ const deps: AppContext = {
   siteFetcher,
   websiteReader,
   files: stored,
+  resources: {} as never,
   reader,
   auth: testAuth(db),
   providers: [],

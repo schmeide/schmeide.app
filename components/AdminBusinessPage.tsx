@@ -2,6 +2,13 @@ import { useQuery } from "@tanstack/react-query";
 
 import { copy } from "../data/copy";
 import { useTRPC } from "../trpc";
+import {
+  describeFigure,
+  formatBytes,
+  formatCount,
+  formatPercent,
+  sumResources,
+} from "../utils/resources";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
 import { ViewAsDisclosure } from "./ViewAsDisclosure";
@@ -15,6 +22,10 @@ const day = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 export function AdminBusinessPage({ id }: { readonly id: number }) {
   const trpc = useTRPC();
   const query = useQuery(trpc.admin.businesses.get.queryOptions({ id }));
+  const ids = query.data?.projects.map((project) => project.id).slice(0, 100) ?? [];
+  const resources = useQuery(
+    trpc.admin.projects.resources.queryOptions({ ids }, { enabled: ids.length > 0 })
+  );
 
   if (!query.data)
     return (
@@ -26,6 +37,19 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
     );
 
   const { business, members, projects } = query.data;
+  // Over more than the hundred apps read at once, the sums are unknown rather than short.
+  const totals =
+    projects.length === 0 || resources.data
+      ? sumResources(resources.data ?? [], projects.length)
+      : resources.isError
+        ? sumResources([], projects.length)
+        : undefined;
+  const tiles = [
+    [copy.resources.containers, describeFigure(totals?.containers, formatCount)],
+    [copy.resources.memory, describeFigure(totals?.memoryBytes, formatBytes)],
+    [copy.resources.cpu, describeFigure(totals?.cpuPercent, formatPercent)],
+    [copy.resources.workspace, describeFigure(totals?.workspaceBytes, formatBytes)],
+  ] as const;
   return (
     <>
       <header>
@@ -80,6 +104,19 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
             ))}
           </AdminTable>
         )}
+      </section>
+
+      <section aria-labelledby="business-resources" className={styles.section}>
+        <h2 id="business-resources">{copy.resources.title}</h2>
+        <p className={styles.note}>{copy.resources.intro}</p>
+        <dl className={styles.tiles}>
+          {tiles.map(([label, value]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
     </>
   );

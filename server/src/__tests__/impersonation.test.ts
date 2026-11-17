@@ -29,6 +29,7 @@ const deps: AppContext = {
   websiteReader: vi.fn(),
   files: { put: vi.fn(), get: vi.fn(), remove: vi.fn(), removeProject: vi.fn() },
   reader: vi.fn(),
+  resources: {} as never,
   auth: testAuth(db),
   providers: [],
 };

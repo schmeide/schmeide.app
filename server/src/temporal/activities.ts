@@ -48,6 +48,7 @@ import {
   transition,
   type Deps,
 } from "../services/projects.ts";
+import { composeProjectOf, workspaceOf as workspaceDir } from "../services/resources.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 
 export type { Query };
@@ -233,7 +234,7 @@ export const projectEnv = (project: Project, dataDir: string): NodeJS.ProcessEnv
     PATH: `${shimDir(dataDir)}:${env.PATH ?? ""}`,
     GIT_CONFIG_GLOBAL: gitConfigFile(dataDir),
     GIT_CONFIG_NOSYSTEM: "1",
-    COMPOSE_PROJECT_NAME: `schmeide-${project.slug}`,
+    COMPOSE_PROJECT_NAME: composeProjectOf(project.slug),
     WEB_PORT: String(project.webPort),
     TEST_DB_PORT: String(testDbPort(project)),
   };
@@ -280,7 +281,7 @@ export const createActivities = (
   store: FileStore = createLocalFileStore(config.dataDir)
 ) => {
   const db: Db = deps.db;
-  const workspaceOf = (project: Project) => join(config.dataDir, "projects", project.slug);
+  const workspaceOf = (project: Project) => workspaceDir(config.dataDir, project.slug);
   const attachmentsDir = (buildId: number) =>
     join(config.dataDir, "attachments", `build-${buildId}`);
 

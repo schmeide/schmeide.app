@@ -38,6 +38,7 @@ const deps: AppContext = {
   websiteReader,
   files: {} as never,
   reader: vi.fn(),
+  resources: {} as never,
   websiteLimits: { ...READ_LIMITS, perAccount: 3 },
   auth: testAuth(db),
   providers: [],

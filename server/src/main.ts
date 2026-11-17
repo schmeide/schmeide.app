@@ -14,6 +14,7 @@ import { createFileReader } from "./services/fileReader.ts";
 import { createLocalFileStore } from "./services/fileStore.ts";
 import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
+import { createResourceReader } from "./services/resources.ts";
 import { createSiteFetcher } from "./services/siteFetcher.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
@@ -109,6 +110,7 @@ const app = buildApp(
     reader,
     files,
     websiteReader,
+    resources: createResourceReader(config.dataDir),
     auth: createAuth(db, authConfig),
     providers,
   },

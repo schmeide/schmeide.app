@@ -58,6 +58,7 @@ const deps: AppContext = {
   taskQueue: "test",
   interviewer: vi.fn(),
   files: createLocalFileStore(dataDir),
+  resources: {} as never,
   reader,
   siteFetcher: vi.fn(),
   websiteReader: vi.fn(),

@@ -28,6 +28,7 @@ const context: AppContext = {
   websiteReader: vi.fn(),
   files: {} as never,
   reader: vi.fn(),
+  resources: {} as never,
   auth,
   providers: ["google"],
 };
