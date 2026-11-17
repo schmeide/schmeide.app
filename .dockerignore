@@ -1,0 +1,8 @@
+# The image needs only the manifests and server/. Everything else (the site, dist, .claude and its
+# worktrees, node_modules) stays out.
+*
+!package.json
+!package-lock.json
+!server
+**/node_modules
+**/__tests__
