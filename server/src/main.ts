@@ -132,6 +132,7 @@ const config = {
   summaryModel: env.SCHMEIDE_SUMMARY_MODEL ?? "haiku",
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
+  builderPlugin: join(import.meta.dirname, "..", "builder-plugin"),
 } as const;
 
 // The worker needs none of the sign-in settings or secrets.
