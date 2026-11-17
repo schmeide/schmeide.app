@@ -1,10 +1,12 @@
-// Sign-in: Better Auth over our Postgres, with Google, Microsoft, Apple, and email plus password.
+// Sign-in: Better Auth over our Postgres, with Google, Microsoft, Apple, an Auth0 tenant, and
+// email plus password.
 // Prelaunch, only an address on the approved list (services/access.ts) gets an account or a
 // session.
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins/admin";
+import { auth0, genericOAuth } from "better-auth/plugins/generic-oauth";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
@@ -19,9 +21,15 @@ import {
 } from "../db/schema.ts";
 import { claimPendingAdmin, isApproved } from "./access.ts";
 
-export const PROVIDERS = ["google", "microsoft", "apple"] as const;
+export const PROVIDERS = ["google", "microsoft", "apple", "auth0"] as const;
 export type Provider = (typeof PROVIDERS)[number];
 type Credentials = { readonly clientId: string; readonly clientSecret: string };
+// Auth0 is a tenant of ours, not one address for everyone: `domain` says which, like
+// `schmeide.us.auth0.com`.
+type Auth0Credentials = Credentials & { readonly domain: string };
+type ProviderCredentials = Readonly<Record<Exclude<Provider, "auth0">, Credentials>> & {
+  readonly auth0: Auth0Credentials;
+};
 
 export type AuthConfig = {
   // Signs session cookies. At least 32 random characters.
@@ -32,7 +40,7 @@ export type AuthConfig = {
   // strips the /api in `make serve`), or the API's own address (https://api.schmeide.app).
   readonly apiUrl: string;
   // A provider is offered only when its credentials are given.
-  readonly providers: Partial<Record<Provider, Credentials>>;
+  readonly providers: Partial<ProviderCredentials>;
   // Off only in tests that sign in many times.
   readonly rateLimit?: boolean;
 };
@@ -121,7 +129,19 @@ export const createAuth = (db: Db, config: AuthConfig) =>
     // No public sign-up: a password account opens only through an invite link, or anyone could
     // claim an approved address by knowing it.
     disabledPaths: ["/sign-up/email", ...ADMIN_PLUGIN_PATHS],
-    plugins: [adminPlugin],
+    plugins: [
+      adminPlugin,
+      // Auth0 signs in through the same `/sign-in/social` and `/callback/auth0` routes as the
+      // providers below, so `validateUserInfo` decides for it too. Signing out here leaves the
+      // person signed in at Auth0, as it leaves them signed in at Google.
+      ...(config.providers.auth0
+        ? [
+            genericOAuth({
+              config: [auth0({ ...config.providers.auth0, disableProviderLogout: true })],
+            }),
+          ]
+        : []),
+    ],
     emailAndPassword: {
       enabled: true,
       disableSignUp: true,
@@ -253,6 +273,8 @@ export const authConfigFromEnv = (
     const clientSecret = env[`SCHMEIDE_${name}_CLIENT_SECRET`];
     return clientId && clientSecret ? { clientId, clientSecret } : undefined;
   };
+  const auth0Credentials = credentials("AUTH0");
+  const auth0Domain = env.SCHMEIDE_AUTH0_DOMAIN;
   return {
     secret,
     publicUrl,
@@ -261,6 +283,8 @@ export const authConfigFromEnv = (
       google: credentials("GOOGLE"),
       microsoft: credentials("MICROSOFT"),
       apple: credentials("APPLE"),
+      auth0:
+        auth0Credentials && auth0Domain ? { ...auth0Credentials, domain: auth0Domain } : undefined,
     },
   };
 };

@@ -15,7 +15,7 @@ import styles from "./Account.module.css";
 import stepStyles from "./Step.module.css";
 
 type Kind = Account["methods"][number]["kind"];
-const KINDS: readonly Kind[] = ["password", "google", "microsoft", "apple"];
+const KINDS: readonly Kind[] = ["password", "google", "microsoft", "apple", "auth0"];
 const text = copy.accountPage.methods;
 
 const day = (date: Date) =>

@@ -1,7 +1,7 @@
 # Sign-in and the prelaunch approved list
 
-People sign in to Schmeide with Google, Microsoft, Apple, or an email and password. While we are in prelaunch, only
-email addresses on the approved list can have an account, so nobody else can spend model tokens.
+People sign in to Schmeide with Google, Microsoft, Apple, an Auth0 tenant, or an email and password. While we are in
+prelaunch, only email addresses on the approved list can have an account, so nobody else can spend model tokens.
 
 This page covers approving people, the settings, registering with each provider, and connecting the hosted site
 (schmeide.app on GitHub Pages) to a server.
@@ -164,13 +164,16 @@ the site build.
 - `SCHMEIDE_GOOGLE_CLIENT_ID` and `SCHMEIDE_GOOGLE_CLIENT_SECRET`: turn on "Continue with Google".
 - `SCHMEIDE_MICROSOFT_CLIENT_ID` and `SCHMEIDE_MICROSOFT_CLIENT_SECRET`: turn on "Continue with Microsoft".
 - `SCHMEIDE_APPLE_CLIENT_ID` and `SCHMEIDE_APPLE_CLIENT_SECRET`: turn on "Continue with Apple".
+- `SCHMEIDE_AUTH0_DOMAIN`, `SCHMEIDE_AUTH0_CLIENT_ID`, and `SCHMEIDE_AUTH0_CLIENT_SECRET`: turn on "Continue with
+  Auth0". The domain is the tenant's, like `schmeide.us.auth0.com`.
 - `VITE_API_URL` (site build): where the built site finds the API. Empty, the default, means its own origin.
 
 Notes:
 
 - The server will not start on a public address without `SCHMEIDE_AUTH_SECRET`. Changing the secret signs everyone
   out.
-- A provider needs both of its values. With neither set, its button is not shown, and email and password still work.
+- A provider needs all of its values: both, or all three for Auth0. With any missing, its button is not shown, and
+  email and password still work.
 - Secrets go in the server's environment only. Nothing secret goes in a `VITE_` variable: the site bundle is public.
 
 ## Register with each provider
@@ -182,10 +185,12 @@ Each provider needs the address it sends people back to. With `SCHMEIDE_API_URL`
 | Google    | `<api>/auth/callback/google`    |
 | Microsoft | `<api>/auth/callback/microsoft` |
 | Apple     | `<api>/auth/callback/apple`     |
+| Auth0     | `<api>/auth/callback/auth0`     |
 
-For local work, `<api>` is `http://localhost:5173/api`. Google and Microsoft accept that address; Apple does not.
+For local work, `<api>` is `http://localhost:5173/api`. Google, Microsoft, and Auth0 accept that address; Apple does
+not.
 
-None of the three has been tried against the real provider yet: that needs the credentials below. Sign in once with
+None of the four has been tried against the real provider yet: that needs the credentials below. Sign in once with
 each after setting it up, with an approved and an unapproved address.
 
 ### Google
@@ -231,6 +236,29 @@ localhost.
 People who choose "Hide My Email" reach us under an Apple relay address, which will not be on the approved list.
 They need to share their real address, or be approved under the relay address.
 
+### Auth0
+
+Auth0 is one more way in, next to the three above. A person signs in on the tenant's own page, with whichever
+connections the tenant has turned on (a social account, or a username and password kept by Auth0), and comes back
+through the same check as every other provider.
+
+1. In the [Auth0 dashboard](https://manage.auth0.com/), create an application of type "Regular Web Application".
+2. Add the return address above to "Allowed Callback URLs".
+3. Under the application's advanced settings, keep "OIDC Conformant" on and the ID token signed with RS256. Only the
+   "Authorization Code" grant is needed.
+4. Put the tenant's domain, the client ID, and the client secret in `SCHMEIDE_AUTH0_DOMAIN`,
+   `SCHMEIDE_AUTH0_CLIENT_ID`, and `SCHMEIDE_AUTH0_CLIENT_SECRET`.
+
+- The server reads the tenant's addresses from `https://<domain>/.well-known/openid-configuration` when it starts, and
+  again on the first Auth0 sign-in if that failed.
+- The approved list still decides. Someone who signs up on the Auth0 page with an address that is not approved is
+  refused here, and so is an Auth0 username-and-password account that has not confirmed its email.
+- A new tenant's Google connection uses Auth0's own development keys. Put your own Google credentials on the
+  connection before inviting people; Auth0 says the development keys are for testing only.
+- Signing out of Schmeide does not sign the person out of Auth0, as it does not sign them out of Google. The next
+  "Continue with Auth0" may not ask for a password again.
+- Use one tenant for local work and another for the hosted site, each with only its own return address.
+
 ## Connect the hosted site to a server
 
 schmeide.app is static files on GitHub Pages. Until it is built with an API address it shows "Coming soon". The API
@@ -260,6 +288,7 @@ its secrets. In short:
    - Google: `https://api.schmeide.app/auth/callback/google`
    - Microsoft: `https://api.schmeide.app/auth/callback/microsoft`
    - Apple: `https://api.schmeide.app/auth/callback/apple`, with `api.schmeide.app` as the domain
+   - Auth0: `https://api.schmeide.app/auth/callback/auth0`
 3. Put the provider values and the Anthropic key in Key Vault, reading each from standard input so it stays out of the
    shell history:
 
