@@ -100,3 +100,12 @@
 .summaries li[data-final="true"] {
   font-weight: 700;
 }
+
+/* The button sits one step from the text above and the log heading below. */
+.toggle {
+  margin-block: var(--space-m);
+}
+
+.logPanel h3 {
+  margin-top: 0;
+}

@@ -149,13 +149,14 @@ export function BuildStep({ build, title, by = null }: Props) {
 
       <button
         type="button"
+        className={styles.toggle}
         aria-expanded={showLog}
         aria-controls={logId}
         onClick={() => setShowLog((open) => !open)}
       >
         {copy.project.behindTheScenes}
       </button>
-      <div id={logId} hidden={!showLog}>
+      <div id={logId} hidden={!showLog} className={styles.logPanel}>
         <h3 id="build-log">{copy.project.logTitle}</h3>
         <p className={stepStyles.muted}>{copy.project.logHint}</p>
         {/* aria-live off: the status line above announces progress; every line would be noise. */}
