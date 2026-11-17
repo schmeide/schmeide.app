@@ -5,6 +5,7 @@
 # `website mine|someone_else` prints one reading of a website.
 # `read` prints one reading of an uploaded picture, with one proposed plan item.
 # `summary` prints one line of a build's running summary.
+# `design` prints the design lead's choice of look (SCHMEIDE_DESIGN_TEAM=1).
 set -euo pipefail
 
 case "${1:-}" in
@@ -36,6 +37,9 @@ case "${1:-}" in
       printf '%s\n' '{"features":[{"section":"does","text":"Fake feature read from a website"}]}'
     fi
     ;;
+  design)
+    printf '%s\n' '{"style":"calm","reason":"The end-to-end fixture gets the calm look.","screens":[]}'
+    ;;
   read)
     printf '%s\n' '{"outcome":"read","items":[{"section":"keeps","text":"Fake item read from the picture"}]}'
     ;;
@@ -43,7 +47,7 @@ case "${1:-}" in
     echo "Fake summary for the end-to-end fixture."
     ;;
   *)
-    echo "usage: $0 spec|build|interview|website|read|summary (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview|website|read|summary|design (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac

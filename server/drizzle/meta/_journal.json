@@ -162,6 +162,13 @@
       "when": 1794946598208,
       "tag": "0022_project_host",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794949336704,
+      "tag": "0023_design_briefs",
+      "breakpoints": true
     }
   ]
 }

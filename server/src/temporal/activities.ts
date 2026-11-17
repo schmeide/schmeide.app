@@ -48,6 +48,7 @@ import {
   buildFiles,
   builds,
   files,
+  projectDesigns,
   projectIcons,
   projects,
   type BuildEventKind,
@@ -76,6 +77,16 @@ import {
 } from "../services/appDatabases.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
 import { deployKeyPair, orgOf, type Forgejo } from "../services/forgejo.ts";
+import {
+  LEAD_JSON_SCHEMA,
+  briefPrompt,
+  designBrief,
+  leadPrompt,
+  parseLead,
+  type DesignBrief,
+  type Lead,
+} from "../services/designBrief.ts";
+import { THEMES, styleById } from "../services/designStyles.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import { NARROWEST_PHONE_PX, mobileProblems, type BuiltApp } from "../services/mobileCheck.ts";
 import {
@@ -104,6 +115,9 @@ export type Config = {
   // The Claude Code plugin every build run loads (server/builder-plugin): the mobile-first skill
   // and the design skills. It reaches workspaces copied before the template had any skills.
   readonly builderPlugin: string;
+  // The design team (#159, SCHMEIDE_DESIGN_TEAM): a design lead chooses the app's look before
+  // its first build and the builder builds to it. Off by default, so builds run as they did.
+  readonly designTeam?: boolean;
   // A command that stands in for Claude (SCHMEIDE_AGENT_CMD): `<cmd> spec` prints a spec and
   // `<cmd> build` edits the workspace, both with the prompt in AGENT_PROMPT. Used by `make e2e/fake`.
   readonly agentCmd?: string;
@@ -235,24 +249,27 @@ ${changes.map((change, index) => `${index + 1}. ${change}`).join("\n")}
 `
     : "";
 
+// `design` is the design brief's part of the prompt (services/designBrief.ts), when there is one.
 export const buildPrompt = (
   kind: "initial" | "change",
   spec: string,
   request: string,
-  changes: readonly string[] = []
-): string =>
-  kind === "initial"
+  changes: readonly string[] = [],
+  design?: string
+): string => {
+  const rules = design ? `${STANDING_RULES}\n\n${design}` : STANDING_RULES;
+  return kind === "initial"
     ? `Build the web app described by the spec below inside this repository, a Schmeide project template.
 Replace the sample notes feature entirely (table, migration, service, router, page, and tests) with the spec's features.
 
-${STANDING_RULES}
+${rules}
 
 Spec:
 
 ${spec}`
     : `This repository holds a web app first built from the spec below, then changed. Apply the change request at the end.
 
-${STANDING_RULES}
+${rules}
 
 Spec the app was first built from:
 
@@ -261,6 +278,7 @@ ${spec}
 ${builtSince(changes)}Change request:
 
 ${request}`;
+};
 
 export type Attachment = {
   readonly file: Pick<FileRow, "id" | "type" | "owner" | "purpose" | "displayName">;
@@ -338,6 +356,17 @@ const builtApp = async (workspace: string): Promise<BuiltApp> => {
         .map((name) => readFile(join(dist, name), "utf8"))
     ),
   };
+};
+
+const styleName = (id: string): string => styleById(id)?.name ?? id;
+
+// A model's answer as JSON, or undefined when it is not JSON at all.
+const parseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text.replace(/^\s*```(?:json)?\n|\n```\s*$/g, ""));
+  } catch {
+    return undefined;
+  }
 };
 
 const truncate = (text: string, max = MAX_EVENT): string => {
@@ -627,7 +656,7 @@ export const createActivities = (
 
   const runAgentCmd = async (
     project: Project,
-    mode: "spec" | "build",
+    mode: "spec" | "build" | "design",
     prompt: string,
     cwd: string,
     buildId?: number
@@ -1348,6 +1377,57 @@ export const createActivities = (
     );
   };
 
+  const briefOf = async (projectId: number): Promise<DesignBrief | undefined> =>
+    (await db.select().from(projectDesigns).where(eq(projectDesigns.projectId, projectId)))[0]
+      ?.brief;
+
+  // The design lead's answer, or undefined when it gave none that can be used. It has no tools and
+  // sees only the spec. A failure of any kind but a cancel is logged and answered with undefined.
+  const runLead = async (project: Project, buildId: number): Promise<Lead | undefined> => {
+    const prompt = leadPrompt(project.spec ?? "");
+    try {
+      if (config.agentCmd) {
+        return parseLead(
+          parseJson(await runAgentCmd(project, "design", prompt, config.dataDir, buildId))
+        );
+      }
+      return await withHeartbeat(async (signal) => {
+        const abortController = new AbortController();
+        signal.addEventListener("abort", () => abortController.abort(), { once: true });
+        for await (const message of query({
+          prompt,
+          options: {
+            ...agentOptions(
+              config.dataDir,
+              agentEnv(project),
+              pickModel(config.agentModels, "design").model,
+              config.claudeBin
+            ),
+            settingSources: [],
+            tools: [],
+            maxTurns: 3,
+            persistSession: false,
+            outputFormat: { type: "json_schema", schema: LEAD_JSON_SCHEMA },
+            abortController,
+          },
+        })) {
+          if (message.type !== "result") continue;
+          await recordUsage(db, runUsage(message, project.id, buildId, "design"));
+          if (message.subtype !== "success" || message.is_error) {
+            await log(buildId, `Design lead run failed: ${message.subtype}`);
+            return undefined;
+          }
+          return parseLead(message.structured_output ?? parseJson(message.result));
+        }
+        return undefined;
+      });
+    } catch (error) {
+      if (Context.current().cancellationSignal.aborted) throw error;
+      await log(buildId, `Design lead run failed: ${String(error)}`);
+      return undefined;
+    }
+  };
+
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
@@ -1451,6 +1531,49 @@ export const createActivities = (
       await event(buildId, "step", "Workspace ready");
     },
 
+    // The design lead (#159): before the first build writes any interface, it chooses the app's
+    // look from the spec, and the brief is stored for every later build of the project. A brief is
+    // made once: a rebuild keeps it. An app first built without one keeps its look on a change; it
+    // gets a brief only when the person picks a look. Never fails the build over the lead's answer.
+    async planDesign(buildId: number): Promise<void> {
+      if (!config.designTeam) return;
+      const { build, project } = await stepOfBuild(buildId);
+      const kept = await briefOf(project.id);
+      if (kept) {
+        await event(
+          buildId,
+          "step",
+          `Design: keeping the ${styleName(kept.style)} look chosen before`
+        );
+        return;
+      }
+      if (build.kind !== "initial") return;
+      await event(buildId, "step", "The design lead is choosing the app's look");
+      const brief = designBrief(await runLead(project, buildId), project.brandColors);
+      await db
+        .insert(projectDesigns)
+        .values({ projectId: project.id, style: brief.style, chosenBy: brief.chosenBy, brief })
+        .onConflictDoNothing();
+      await event(
+        buildId,
+        "step",
+        brief.chosenBy === "lead"
+          ? `Design: the ${styleName(brief.style)} look. ${brief.reason}`
+          : `Design: the design lead's answer could not be used, so the app gets the default ${styleName(brief.style)} look`
+      );
+      if (project.brandColors.length === 0) return;
+      for (const theme of THEMES) {
+        const color = brief.brand[theme];
+        await event(
+          buildId,
+          "step",
+          color
+            ? `Design: the business's color ${color} is the accent in ${theme} mode`
+            : `Design: the business's colors do not pass contrast in ${theme} mode, so the look keeps its own accent`
+        );
+      }
+    },
+
     // Returns the session id so a later fix-up run can resume the same conversation.
     // In a pod (SCHMEIDE_RUNNER=kubernetes) the session dies with the pod, so a fix-up round
     // starts a new one with the task and the checks' output instead of resuming.
@@ -1465,6 +1588,7 @@ export const createActivities = (
       const retried = Context.current().info.attempt > 1;
       const runKind: RoutedKind = build.kind === "initial" ? "initial" : "change";
       if (config.runner) await refuseAttachments(input.buildId);
+      const brief = config.designTeam ? await briefOf(project.id) : undefined;
       const attachments = config.runner ? [] : await stageAttachments(project, input.buildId);
       const task = async () =>
         buildPrompt(
@@ -1473,7 +1597,8 @@ export const createActivities = (
           build.request,
           runKind === "change"
             ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
-            : []
+            : [],
+          brief && briefPrompt(brief, runKind)
         );
       const prompt =
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +

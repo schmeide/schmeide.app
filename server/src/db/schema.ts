@@ -18,6 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
+import { DESIGN_CHOOSERS, type DesignBrief } from "../services/designBrief.ts";
 
 // Tables are the single source: validation and API types derive from them.
 
@@ -66,6 +67,9 @@ export const projects = pgTable(
     webPort: integer("web_port").notNull().unique(),
     // The deployed app's <title>; null means the project name.
     pageTitle: varchar("page_title", { length: 100 }),
+    // The business's own colors, from reading its website (services/website.ts), most important
+    // first. The design lead uses the first that passes contrast (services/designBrief.ts).
+    brandColors: jsonb("brand_colors").$type<readonly string[]>().notNull().default([]),
     // Production, the copy the app's own customers use: its address while it runs, and the commit
     // it runs from its own checkout (null for an app deployed before there was one).
     previewUrl: text("preview_url"),
@@ -155,6 +159,7 @@ export const agentRunKind = pgEnum("agent_run_kind", [
   "website",
   "read",
   "summary",
+  "design",
 ]);
 
 // A plain-language account of a build, written as it runs from its events (services/summaries.ts).
@@ -206,6 +211,24 @@ export const usage = pgTable("usage", {
   cacheCreationTokens: integer("cache_creation_tokens").notNull(),
   costUsd: doublePrecision("cost_usd").notNull(),
   at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const designChooser = pgEnum("design_chooser", DESIGN_CHOOSERS);
+
+// The look of a project's app (services/designBrief.ts): made once, on its first build with the
+// design team on, or when the person picks a look, and kept for every build after it.
+export const projectDesigns = pgTable("project_designs", {
+  projectId: integer("project_id")
+    .primaryKey()
+    .references(() => projects.id),
+  style: varchar("style", { length: 32 }).notNull(),
+  chosenBy: designChooser("chosen_by").notNull(),
+  brief: jsonb("brief").$type<DesignBrief>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
 });
 
 // The plan the interview builds: the same parts the spec has, plus who uses the app.
