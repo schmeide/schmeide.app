@@ -1,10 +1,12 @@
 import { matchQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 
-import { useTRPC } from "../trpc";
+import { useTRPC, useTRPCClient } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { signOut as endSession } from "../utils/authApi";
 import { chooseBusiness as tellServer } from "../utils/chosenBusiness";
+import { navigate } from "../utils/navigation";
+import { pathTo } from "../utils/routes";
 import { signedOut, type Business, type Provider, type Session } from "../utils/session";
 
 type SessionContext = {
@@ -19,6 +21,11 @@ type SessionContext = {
   // Asks the server again who this is: after signing in, or when a call answers "signed out".
   readonly refresh: () => Promise<void>;
   readonly signOut: () => Promise<void>;
+  // An admin starts viewing the app as the person with `email`, and lands on their home. Throws
+  // what the server answered when it refuses.
+  readonly startViewingAs: (email: string, reason: string) => Promise<void>;
+  // Ends the view and returns the admin to the admin area as themselves.
+  readonly stopViewing: () => Promise<void>;
 };
 
 const Context = createContext<SessionContext | null>(null);
@@ -39,16 +46,37 @@ export function SessionProvider({
   readonly children: ReactNode;
 }) {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const queryClient = useQueryClient();
   const query = useQuery({ ...trpc.session.get.queryOptions(), enabled: !fixed });
   const [businessId, setBusinessId] = useState<number | null>(null);
 
   const value = useMemo((): SessionContext => {
     const loaded: Session | undefined =
-      fixed ?? (query.data && { person: query.data.person, businesses: query.data.businesses });
+      fixed ??
+      (query.data && {
+        person: query.data.person,
+        businesses: query.data.businesses,
+        impersonatedBy: query.data.impersonatedBy,
+      });
     const session = loaded ?? signedOut;
     const sessionKey = trpc.session.pathKey();
     const refresh = () => queryClient.invalidateQueries({ queryKey: sessionKey });
+    // After the session changes hands. Nothing the last person loaded stays in memory for the
+    // next one: it is not theirs to see.
+    const changedHands = async () => {
+      tellServer(null);
+      setBusinessId(null);
+      await refresh();
+      queryClient.removeQueries({
+        predicate: (query) => !matchQuery({ queryKey: sessionKey }, query),
+      });
+    };
+    const stopViewing = async () => {
+      await client.impersonation.stop.mutate();
+      await changedHands();
+      navigate(pathTo("admin"));
+    };
     return {
       status: loaded
         ? "ready"
@@ -71,16 +99,18 @@ export function SessionProvider({
       providers: query.data?.providers ?? [],
       refresh,
       signOut: async () => {
+        // The server refuses signing out of a view; ending it first is what Stop does.
+        if (session.impersonatedBy) await client.impersonation.stop.mutate();
         await endSession();
-        tellServer(null);
-        setBusinessId(null);
-        await refresh();
-        // Nothing the last person loaded stays in memory for the next one to sign in here.
-        queryClient.removeQueries({
-          predicate: (query) => !matchQuery({ queryKey: sessionKey }, query),
-        });
+        await changedHands();
       },
+      startViewingAs: async (email, reason) => {
+        await client.admin.impersonation.start.mutate({ email, reason });
+        await changedHands();
+        navigate(pathTo("apps"));
+      },
+      stopViewing,
     };
-  }, [fixed, query.data, query.error, businessId, queryClient, trpc]);
+  }, [fixed, query.data, query.error, businessId, queryClient, trpc, client]);
   return <Context value={value}>{children}</Context>;
 }

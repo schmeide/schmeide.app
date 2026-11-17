@@ -169,6 +169,7 @@ describe("a session", () => {
   it("is signed out without a cookie, and still says which providers are on", async () => {
     expect((await trpc("session.get", undefined)).data).toEqual({
       person: null,
+      impersonatedBy: null,
       businesses: [],
       providers: ["google"],
     });

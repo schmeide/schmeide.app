@@ -16,6 +16,7 @@ import {
   aSignedInPerson,
   anEmail,
   callApi,
+  impersonationPaths,
   PASSWORD,
   signIn,
   TEST_ORIGIN,
@@ -65,6 +66,17 @@ describe("the admin procedures", () => {
       expect(await answer(path, owner.cookie)).toEqual(noProcedure(path));
       expect(await answer(path)).toEqual(noProcedure(path));
     }
+  });
+
+  it("include starting to view as someone, and stopping is just as hidden outside a view", async () => {
+    expect(adminPaths).toContain("admin.impersonation.start");
+    expect(impersonationPaths).toEqual(["impersonation.stop"]);
+    const owner = await aSignedInPerson(app, deps);
+    const admin = await aSignedInAdmin(app, deps);
+    // impersonation.test.ts shows it answering inside a view.
+    for (const path of impersonationPaths)
+      for (const cookie of [owner.cookie, admin.cookie, ""])
+        expect(await answer(path, cookie)).toEqual(noProcedure(path));
   });
 
   it("answer an admin", async () => {

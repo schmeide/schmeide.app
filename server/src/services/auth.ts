@@ -5,7 +5,7 @@ import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { admin } from "better-auth/plugins/admin";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
   accounts,
@@ -57,10 +57,38 @@ export const admit = async (
   return undefined;
 };
 
+// The admin behind a session that views the app as someone else.
+export type Impersonator = { readonly id: string; readonly name: string; readonly email: string };
+
+// The admin `adminId` names, while they still have the role and are approved, and are not the
+// person being viewed. Null otherwise: the view is over.
+const impersonator = async (
+  db: Db,
+  adminId: string,
+  personId: string
+): Promise<Impersonator | null> => {
+  const [admin] = await db
+    .select({ id: users.id, name: users.name, email: users.email })
+    .from(users)
+    .where(and(eq(users.id, adminId), eq(users.role, ADMIN_ROLE)));
+  return admin && admin.id !== personId && (await isApproved(db, admin.email)) ? admin : null;
+};
+
+// How long an admin may view the app as someone else (docs/auth.md), counted from the start.
+export const IMPERSONATION_SECONDS = 3600;
+
+// The only `/api/auth` route a session an admin is viewing through answers. Everything else,
+// a route a Better Auth upgrade adds included, is refused (app.ts): changing the password or
+// email, linking a provider, deleting the account, ending sessions, and signing in or out.
+export const AUTH_PATHS_WHILE_IMPERSONATING: readonly string[] = ["/get-session"];
+
 // Better Auth's admin plugin gives the role, bans, and impersonation (the admin behind a session,
 // an hour at most). Its own HTTP endpoints are all refused: an admin acts only through the
 // `admin` procedures (router.ts), which call `auth.api` on the server.
-const adminPlugin = admin({ adminRoles: [ADMIN_ROLE] });
+const adminPlugin = admin({
+  adminRoles: [ADMIN_ROLE],
+  impersonationSessionDuration: IMPERSONATION_SECONDS,
+});
 export const ADMIN_PLUGIN_PATHS = Object.values(adminPlugin.endpoints).map(({ path }) => path);
 
 export const createAuth = (db: Db, config: AuthConfig) =>
@@ -110,6 +138,14 @@ export const createAuth = (db: Db, config: AuthConfig) =>
         create: {
           // A password sign-in is not re-validated above, so a removed address is stopped here.
           before: async (session) => {
+            // A session an admin views through. Only the plugin's server-side
+            // `impersonateUser` sets this (it is not an input), and only `admin.impersonation.start`
+            // calls that: the admin must still have the role and be approved, the person need not.
+            if (session.impersonatedBy) {
+              if (!(await impersonator(db, String(session.impersonatedBy), session.userId)))
+                throw new APIError("FORBIDDEN", { message: "Only an admin can view as someone" });
+              return;
+            }
             const [user] = await db
               .select({ email: users.email })
               .from(users)
@@ -142,19 +178,34 @@ export type Person = {
   readonly id: string;
   readonly name: string;
   readonly email: string;
-  // Has the platform role: may call the `admin` procedures.
+  // Has the platform role: may call the `admin` procedures. Never while being viewed as.
   readonly admin: boolean;
+  // Set when this is an admin viewing the app as the person.
+  readonly impersonatedBy?: Impersonator;
 };
 
-// The signed-in, still-approved person behind a request, or null.
+// The signed-in, still-approved person behind a request, or null. A session an admin views
+// through is the person, approved or not, while the admin still qualifies and within the hour
+// from its start. Its expiry is not trusted for that: Better Auth renews a session that is used.
+// A view that is over is deleted here, so nothing is left behind to refuse a fresh sign-in.
 export const currentPerson = async (
   { auth, db }: { readonly auth: Auth; readonly db: Db },
-  headers: Headers
+  headers: Headers,
+  now = new Date()
 ): Promise<Person | null> => {
-  const session = await auth.api.getSession({ headers });
-  if (!session || !(await isApproved(db, session.user.email))) return null;
-  const { id, name, email, role } = session.user;
-  return { id, name, email, admin: role === ADMIN_ROLE };
+  const found = await auth.api.getSession({ headers });
+  if (!found) return null;
+  const { id, name, email, role } = found.user;
+  const { impersonatedBy, createdAt } = found.session;
+  if (!impersonatedBy)
+    return (await isApproved(db, email)) ? { id, name, email, admin: role === ADMIN_ROLE } : null;
+  const within = now.getTime() < new Date(createdAt).getTime() + IMPERSONATION_SECONDS * 1000;
+  const admin = within ? await impersonator(db, impersonatedBy, id) : null;
+  if (!admin) {
+    await db.delete(sessions).where(eq(sessions.id, found.session.id));
+    return null;
+  }
+  return { id, name, email, admin: false, impersonatedBy: admin };
 };
 
 export const enabledProviders = (config: Pick<AuthConfig, "providers">): readonly Provider[] =>

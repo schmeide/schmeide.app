@@ -3,7 +3,13 @@ import { fromNodeHeaders } from "better-auth/node";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { FILE_OWNERS, FILE_PURPOSES, type FileType } from "./db/schema.ts";
-import { callerOf, NOT_IN_A_BUSINESS, SIGN_IN_FIRST, type AppContext } from "./router.ts";
+import {
+  callerOf,
+  NOT_IN_A_BUSINESS,
+  recordWrite,
+  SIGN_IN_FIRST,
+  type AppContext,
+} from "./router.ts";
 import type { Person } from "./services/auth.ts";
 import { assertProjectIn } from "./services/businesses.ts";
 import { NotFoundError, UploadRefusedError } from "./services/errors.ts";
@@ -66,6 +72,8 @@ export const registerUploads = (
         );
         if (!caller) return refusal(reply, 401, "unauthorized", SIGN_IN_FIRST);
         if (caller === "forbidden") return refusal(reply, 403, "forbidden", NOT_IN_A_BUSINESS);
+        // An upload is a write: while an admin views as the person, it is on record first.
+        await recordWrite(context, caller, "files.upload");
         const projectId = Number(request.params.id);
         try {
           if (!Number.isSafeInteger(projectId) || projectId < 1)
