@@ -72,12 +72,7 @@ import { claudeEnv } from "../services/claudeEnv.ts";
 import { BUSINESS_SUSPENDED } from "../services/errors.ts";
 import type { Acr } from "../services/acr.ts";
 import { contextTarFlags, taskYaml } from "../services/acr.ts";
-import {
-  appDatabaseUrl,
-  newPassword,
-  passwordOf,
-  type AppDatabases,
-} from "../services/appDatabases.ts";
+import { appDatabaseUrl, copyPassword, type AppDatabases } from "../services/appDatabases.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
 import { deployKeyPair, orgOf, type Forgejo } from "../services/forgejo.ts";
 import {
@@ -813,9 +808,10 @@ export const createActivities = (
     await event(buildId, "deploy", "Emptying the database of the version being worked on");
     if (config.runner) {
       const { cluster, databases } = config.runner.hosting;
-      await cluster.scale(copyPaths(project, "staging").deployment, 0);
-      await databases.drop(databaseName(project.id, "staging"), { role: false });
-      return;
+      return withHeartbeat(async () => {
+        await cluster.scale(copyPaths(project, "staging").deployment, 0);
+        await databases.drop(databaseName(project.id, "staging"), { role: false });
+      });
     }
     const result = await run(
       "docker",
@@ -1169,59 +1165,55 @@ export const createActivities = (
     });
 
   // One copy at `commit` in the tenant's namespace, with its own database, made on the first
-  // deploy. The database's password, once chosen, is read back from the copy's Secret.
-  const deployCopy = async (
+  // deploy. The database's password, once chosen, is read back from the copy's Secret. Heartbeats
+  // throughout, so Temporal does not start a second attempt while this one still runs.
+  const deployCopy = (
     runner: KubeRunner,
     project: Project,
     copy: Copy,
     commit: string,
     buildId: number
-  ): Promise<string> => {
-    const { cluster, databases } = runner.hosting;
-    const app: AppCopy = {
-      tenantId: project.tenantId,
-      projectId: project.id,
-      slug: project.slug,
-      copy,
-      host: await hostOf(project),
-      domain: runner.hosting.domain,
-      registry: runner.hosting.registry,
-      commit,
-    };
-    await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} at ${commit.slice(0, 12)}`);
-    await applyAll(cluster, tenantObjects(project.tenantId));
-    // Migration for namespaces made before the four policies: their one `tenant` policy allowed
-    // Postgres on any private range, and policies add up, so applying the four alone leaves it.
-    await cluster.remove(
-      `/apis/networking.k8s.io/v1/namespaces/${tenantNamespace(project.tenantId)}/networkpolicies/tenant`
-    );
-    const secret = await cluster.get<{ data?: { DATABASE_URL?: string } }>(
-      copyPaths(project, copy).secret
-    );
-    const stored = secret?.data?.DATABASE_URL;
-    const password =
-      (stored && passwordOf(Buffer.from(stored, "base64").toString())) ?? newPassword();
-    const database = databaseName(project.id, copy);
-    await databases.ensure(database, password);
-    await applyAll(cluster, [
-      databaseSecret(app, appDatabaseUrl(runner.hosting.databaseHost, database, password)),
-      ...appObjects(app),
-    ]);
-    const { deployment } = copyPaths(project, copy);
-    // A staging copy that did not roll out stops, so its crash-looping surge pod does not hold
-    // the tenant's quota. Production keeps running what it ran.
-    await rolledOut(cluster, deployment, appName(project.id, copy)).catch(
-      async (error: unknown) => {
-        if (copy === "staging" && error instanceof ApplicationFailure)
-          await cluster.scale(deployment, 0);
-        throw error;
-      }
-    );
-    const url = copyUrl(app);
-    await event(buildId, "deploy", `Waiting for ${url} to answer`);
-    await answers(url, 5);
-    return url;
-  };
+  ): Promise<string> =>
+    withHeartbeat(async () => {
+      const { cluster, databases } = runner.hosting;
+      const app: AppCopy = {
+        tenantId: project.tenantId,
+        projectId: project.id,
+        slug: project.slug,
+        copy,
+        host: await hostOf(project),
+        domain: runner.hosting.domain,
+        registry: runner.hosting.registry,
+        commit,
+      };
+      await event(buildId, "deploy", `Starting ${COPY_NAMES[copy]} at ${commit.slice(0, 12)}`);
+      await applyAll(cluster, tenantObjects(project.tenantId));
+      // Migration for namespaces made before the four policies: their one `tenant` policy allowed
+      // Postgres on any private range, and policies add up, so applying the four alone leaves it.
+      await cluster.remove(
+        `/apis/networking.k8s.io/v1/namespaces/${tenantNamespace(project.tenantId)}/networkpolicies/tenant`
+      );
+      const database = databaseName(project.id, copy);
+      const secretWith = (password: string) =>
+        databaseSecret(app, appDatabaseUrl(runner.hosting.databaseHost, database, password));
+      const password = await copyPassword(cluster, secretWith);
+      await databases.ensure(database, password);
+      await applyAll(cluster, [secretWith(password), ...appObjects(app)]);
+      const { deployment } = copyPaths(project, copy);
+      // A staging copy that did not roll out stops, so its crash-looping surge pod does not hold
+      // the tenant's quota. Production keeps running what it ran.
+      await rolledOut(cluster, deployment, appName(project.id, copy)).catch(
+        async (error: unknown) => {
+          if (copy === "staging" && error instanceof ApplicationFailure)
+            await cluster.scale(deployment, 0);
+          throw error;
+        }
+      );
+      const url = copyUrl(app);
+      await event(buildId, "deploy", `Waiting for ${url} to answer`);
+      await answers(url, 5);
+      return url;
+    });
 
   // Starts the run's Job, or adopts it, with a fresh deploy key for the project's repository:
   // read-only for the checks. The key is titled with the run's name, which is how it is deleted.

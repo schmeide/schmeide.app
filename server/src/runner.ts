@@ -143,6 +143,10 @@ export const checkRunner = async (
         problems.push(
           `The provisioner has no ${APP_DATABASE_TEMPLATE} database to copy app databases from. Make it as described in schmeide/iac gitops/README.md (the provisioner creates it, an admin runs ALTER SCHEMA public OWNER TO pg_database_owner in it).`
         );
+      for (const name of rights.open)
+        problems.push(
+          `Any role may connect to the Postgres database ${name}, so every app's role may too. As an admin, GRANT CONNECT ON DATABASE ${name} to each role that uses it (the provisioner included), then REVOKE CONNECT ON DATABASE ${name} FROM PUBLIC.`
+        );
     },
     (error: unknown) => {
       problems.push(
