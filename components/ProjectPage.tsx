@@ -40,11 +40,6 @@ export function ProjectPage({ id, view = "overview" }: Props) {
     )
   );
   const status = query.data?.project.status;
-  // A spec run that ends back in draft failed; remember that until the status moves on.
-  const [seen, setSeen] = useState({ status, specFailed: false });
-  if (status !== seen.status) {
-    setSeen({ status, specFailed: seen.status === "spec_generating" && status === "draft" });
-  }
 
   // A project that has been live stays in its home when a later change fails or it goes offline;
   // one whose first build has not passed yet is still being set up.
@@ -125,7 +120,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
         <ProjectSetup
           project={project}
           latestBuild={latestBuild}
-          specFailed={seen.specFailed}
+          specFailed={project.specError}
           request={request}
           onRequestChange={setRequest}
           onStop={onStop}

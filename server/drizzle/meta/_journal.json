@@ -183,6 +183,13 @@
       "when": 1794955274448,
       "tag": "0025_canceled_build_status",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794955842584,
+      "tag": "0026_spec_error",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "spec_error" varchar(32);

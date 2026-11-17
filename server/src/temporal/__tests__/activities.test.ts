@@ -15,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { CancelledFailure } from "@temporalio/common";
 import { MockActivityEnvironment } from "@temporalio/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -48,6 +49,7 @@ import {
   createActivities,
   gitConfigFile,
   isCommit,
+  specFailure,
   specPrompt,
   type Config,
   type Query,
@@ -678,6 +680,65 @@ describe("files attached to a change", () => {
   });
 });
 
+// A spec run whose one answer from Claude is an error carrying `text`, as the SDK reports it.
+const failingQuery = (text: string): Query =>
+  (() =>
+    (async function* (): AsyncGenerator<SDKMessage> {
+      yield {
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        duration_ms: 1_000,
+        num_turns: 1,
+        total_cost_usd: 0,
+        session_id: "session-1",
+        result: text,
+        permission_denials: [],
+        modelUsage: {},
+      } as unknown as SDKMessage;
+    })()) as unknown as Query;
+
+describe("why a spec run failed", () => {
+  const generating = async () => {
+    const project = await createProject(db, {
+      name: `a ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await transition(db, project.id, ["draft"], { status: "spec_generating" });
+    return project;
+  };
+  const after = async (id: number) =>
+    (await db.select().from(projects).where(eq(projects.id, id)))[0];
+
+  it.each([
+    ["Not logged in · Please run /login", "claude_login"],
+    ["Invalid API key · Fix external API key", "claude_login"],
+    ["Claude AI usage limit reached|1794955274", "usage_limit"],
+    ["Something unexpected", "unknown"],
+  ] as const)("keeps %j as %s, and the project goes back to describing", async (text, reason) => {
+    const { config } = setup();
+    const project = await generating();
+    const activities = createActivities(deps, config, failingQuery(text));
+    await expect(
+      new MockActivityEnvironment().run(activities.generateSpec, project.id)
+    ).rejects.toThrow();
+    expect(await after(project.id)).toMatchObject({ status: "draft", specError: reason });
+  });
+
+  it("calls a run Temporal canceled, as a timeout does, timed out", () => {
+    expect(specFailure(new CancelledFailure("TIMED_OUT"))).toBe("timed_out");
+  });
+
+  it("forgets the last failure once a spec is written", async () => {
+    const { config } = setup();
+    const project = await generating();
+    await db.update(projects).set({ specError: "unknown" }).where(eq(projects.id, project.id));
+    const activities = createActivities(deps, config, fakeQuery([]));
+    await new MockActivityEnvironment().run(activities.generateSpec, project.id);
+    expect(await after(project.id)).toMatchObject({ status: "spec_ready", specError: null });
+  });
+});
+
 describe("a suspended business", () => {
   // A build of a project whose business is suspended after the build was started.
   const suspendedBuild = async () => {
@@ -746,7 +807,7 @@ describe("a suspended business", () => {
     ).rejects.toThrow("This business is suspended");
     expect(calls).toEqual([]);
     const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
-    expect(after.status).toBe("draft");
+    expect(after).toMatchObject({ status: "draft", specError: "suspended" });
   });
 });
 

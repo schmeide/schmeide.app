@@ -116,6 +116,23 @@ describe("ProjectPage", () => {
     expect(screen.getByLabelText(copy.project.requestLabel(3))).toHaveFocus();
   });
 
+  it("says why the last spec run failed on a fresh load, and points at make doctor for the login", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject({ features: "Clients", specError: "claude_login" }) })
+    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(copy.project.specFailed.claude_login);
+    expect(alert).toHaveTextContent("make doctor");
+    expect(alert).not.toHaveTextContent("Check your requests");
+  });
+
+  it("says nothing about a spec run when the last one did not fail", async () => {
+    renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject({ features: "a" }) }));
+    expect(await screen.findByText(copy.status.draft.hint)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("says the spec is being written while it is", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
