@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNod
 
 import { copy } from "../data/copy";
 import { currentLocation, navigate, subscribe } from "../utils/navigation";
-import { guard, matchRoute } from "../utils/routes";
+import { entryRoutes, guard, matchRoute } from "../utils/routes";
+import { EntryFrame } from "./EntryFrame";
 import { RoutePage } from "./RoutePage";
 import { RouteProblem } from "./RouteProblem";
 import { useSession } from "./SessionProvider";
@@ -46,15 +47,18 @@ export function Routes({ banner }: { readonly banner?: ReactNode }) {
     (heading ?? main)?.focus();
   }, [pathname]);
 
+  const page = !match ? (
+    <RouteProblem kind="notFound" />
+  ) : redirect ? null : match.route.access === "business" && business?.suspended ? (
+    <SuspendedPage />
+  ) : (
+    <RoutePage name={match.route.name} params={match.params} />
+  );
+  // Before a person has a business, the entry pages sit outside the app shell.
+  if (match && entryRoutes.has(match.route.name)) return <EntryFrame>{page}</EntryFrame>;
   return (
     <Shell current={match?.route.name ?? null} banner={banner}>
-      {!match ? (
-        <RouteProblem kind="notFound" />
-      ) : redirect ? null : match.route.access === "business" && business?.suspended ? (
-        <SuspendedPage />
-      ) : (
-        <RoutePage name={match.route.name} params={match.params} />
-      )}
+      {page}
     </Shell>
   );
 }

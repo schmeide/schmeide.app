@@ -15,6 +15,7 @@ import { ProjectList } from "./ProjectList";
 import { ProjectPage } from "./ProjectPage";
 import { SetPasswordPage } from "./SetPasswordPage";
 import { SignInPage } from "./SignInPage";
+import { SignUpPage } from "./SignUpPage";
 import { StartPage } from "./StartPage";
 import { TodayPage } from "./TodayPage";
 
@@ -44,6 +45,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   adminAudit: () => <AdminAuditPage />,
   help: placeholder("help"),
   signIn: () => <SignInPage />,
+  signUp: () => <SignUpPage />,
   setPassword: () => <SetPasswordPage />,
   terms: placeholder("terms"),
   privacy: placeholder("privacy"),

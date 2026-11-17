@@ -3,8 +3,8 @@ import { pathTo } from "../utils/routes";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
 
-// What a person sees when an address leads nowhere or to another business: one sentence and one
-// way forward. The fuller pages are #45.
+// What a person sees when an address leads nowhere or to another business: one sentence and a
+// way forward, or back to schmeide.com. The fuller pages are #45.
 export function RouteProblem({ kind }: { readonly kind: "notFound" | "noAccess" }) {
   const { session } = useSession();
   return (
@@ -17,6 +17,11 @@ export function RouteProblem({ kind }: { readonly kind: "notFound" | "noAccess" 
       <p>
         <Link to={pathTo("apps")}>{copy.problems.action}</Link>
       </p>
+      {kind === "noAccess" && (
+        <p>
+          <a href={copy.outbound.marketingSite}>{copy.problems.toMarketingSite}</a>
+        </p>
+      )}
     </>
   );
 }

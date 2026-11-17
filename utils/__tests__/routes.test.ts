@@ -1,4 +1,14 @@
-import { guard, matchRoute, nextPath, pathTo, routes, type RouteName } from "../routes";
+import {
+  carryPlan,
+  entryRoutes,
+  guard,
+  matchRoute,
+  nextPath,
+  pathTo,
+  planFrom,
+  routes,
+  type RouteName,
+} from "../routes";
 import { signedOut, type Session } from "../session";
 
 const person = { name: "Ada", email: "ada@example.com" };
@@ -50,6 +60,24 @@ describe("guard", () => {
   it("lets anyone open a public page", () => {
     expect(guard(route("terms"), signedOut, at("/terms"))).toEqual({ kind: "page" });
     expect(guard(route("signIn"), signedOut, at("/sign-in"))).toEqual({ kind: "page" });
+    expect(guard(route("signUp"), signedOut, at("/sign-up", "?plan=starter"))).toEqual({
+      kind: "page",
+    });
+  });
+
+  it("sends a signed-in person on from sign up, as from sign in", () => {
+    expect(guard(route("signUp"), owner, at("/sign-up", "?plan=starter"))).toEqual({
+      kind: "redirect",
+      to: "/",
+    });
+    expect(guard(route("signUp"), owner, at("/sign-up", "?next=%2Fbilling"))).toEqual({
+      kind: "redirect",
+      to: "/billing",
+    });
+    expect(guard(route("signUp"), newcomer, at("/sign-up"))).toEqual({ kind: "redirect", to: "/" });
+    expect(
+      guard(route("signUp"), owner, at("/sign-up", "?next=https%3A%2F%2Fevil.example"))
+    ).toEqual({ kind: "redirect", to: "/" });
   });
 
   it("returns a signed-in person from sign in to the page they asked for", () => {
@@ -95,6 +123,68 @@ describe("viewing as a customer", () => {
   it("has no page of its own: it starts from a person's row in the admin area", () => {
     expect(routes.map((entry) => entry.path)).not.toContain("/admin/view-as");
     expect(matchRoute("/admin/view-as")).toBeNull();
+  });
+});
+
+const PLANS = ["starter", "business"];
+
+describe("a plan chosen on schmeide.com", () => {
+  it("is read from the address only when it is a known plan", () => {
+    expect(planFrom("?plan=starter", PLANS)).toBe("starter");
+    expect(planFrom("?next=%2F&plan=business", PLANS)).toBe("business");
+    expect(planFrom("?plan=enterprise", PLANS)).toBeNull();
+    expect(planFrom("?plan=%3Cscript%3E", PLANS)).toBeNull();
+    expect(planFrom("?plan=", PLANS)).toBeNull();
+    expect(planFrom("", PLANS)).toBeNull();
+  });
+
+  it("is unknown until the server exposes the plans (#119)", () => {
+    expect(planFrom("?plan=starter")).toBeNull();
+    expect(carryPlan("/", "?plan=starter")).toBe("/");
+  });
+
+  it("is carried onto the next address, keeping that address's own query", () => {
+    expect(carryPlan("/", "?plan=starter", PLANS)).toBe("/?plan=starter");
+    expect(carryPlan("/billing?paid=1", "?plan=starter", PLANS)).toBe(
+      "/billing?paid=1&plan=starter"
+    );
+    expect(carryPlan("/", "?plan=enterprise", PLANS)).toBe("/");
+    expect(carryPlan("/go?plan=business", "?plan=starter", PLANS)).toBe("/go?plan=business");
+  });
+
+  it("travels through each redirect on the way in", () => {
+    expect(guard(route("signIn"), owner, at("/sign-in", "?plan=starter"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/?plan=starter",
+    });
+    expect(
+      guard(route("signUp"), owner, at("/sign-up", "?next=%2Fbilling&plan=starter"), PLANS)
+    ).toEqual({ kind: "redirect", to: "/billing?plan=starter" });
+    expect(guard(route("apps"), newcomer, at("/", "?plan=starter"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/welcome?plan=starter",
+    });
+    expect(guard(route("welcome"), owner, at("/welcome", "?plan=starter"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/?plan=starter",
+    });
+    expect(guard(route("signIn"), owner, at("/sign-in", "?plan=enterprise"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/",
+    });
+  });
+
+  it("rides inside next for a signed-out person, with nothing stored", () => {
+    expect(guard(route("apps"), signedOut, at("/", "?plan=starter"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/sign-in?next=%2F%3Fplan%3Dstarter",
+    });
+  });
+});
+
+describe("entryRoutes", () => {
+  it("are the pages a person arriving from schmeide.com sees before they have a business", () => {
+    expect([...entryRoutes].sort()).toEqual(["setPassword", "signIn", "signUp", "welcome"]);
   });
 });
 

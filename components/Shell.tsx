@@ -5,13 +5,13 @@ import { pathTo, type RouteName } from "../utils/routes";
 import { isAdmin } from "../utils/session";
 import { AccountMenu } from "./AccountMenu";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { LegalFooter } from "./LegalFooter";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
 
 import styles from "./Shell.module.css";
 
 const PRIMARY: readonly RouteName[] = ["apps", "usage", "billing", "help"];
-const LEGAL: readonly RouteName[] = ["terms", "privacy", "acceptableUse", "report"];
 
 type Props = {
   // The route being shown, marked in the navigation; null on a page that is no route.
@@ -110,17 +110,7 @@ export function Shell({ current, banner, children }: Props) {
       <main id="main" tabIndex={-1} className={styles.main}>
         {children}
       </main>
-      <footer className={styles.footer}>
-        <nav aria-label={copy.shell.legalNav}>
-          <ul>
-            {LEGAL.map((name) => (
-              <li key={name}>
-                <Link to={pathTo(name)}>{copy.routes[name]}</Link>
-              </li>
-            ))}
-          </ul>
-        </nav>
-      </footer>
+      <LegalFooter />
     </div>
   );
 }
