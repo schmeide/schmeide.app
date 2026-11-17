@@ -1,0 +1,32 @@
+.form {
+  display: grid;
+  gap: var(--space-s);
+  max-width: 26rem;
+  margin-top: var(--space-s);
+}
+
+.field {
+  display: grid;
+  gap: var(--space-s);
+}
+
+.form button {
+  margin-top: var(--space-s);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
+
+.result {
+  display: grid;
+  gap: var(--space-s);
+}
+
+/* A set-password link is one long word: it wraps rather than widening the page. */
+.link {
+  overflow-wrap: anywhere;
+  user-select: all;
+}

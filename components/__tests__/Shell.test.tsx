@@ -335,3 +335,55 @@ describe("viewing as a customer", () => {
     expect(calls.filter(({ path }) => path === "impersonation.stop")).toHaveLength(1);
   });
 });
+
+describe("a suspended business", () => {
+  const suspended: Session = {
+    person,
+    businesses: [{ id: 1, name: "Ada's bakery", suspended: true }],
+  };
+
+  it("shows its members a plain page saying so, with a way to get in touch", () => {
+    open("/", suspended);
+    expect(
+      screen.getByRole("heading", { level: 1, name: copy.suspended.title })
+    ).toBeInTheDocument();
+    expect(screen.getByText(copy.suspended.body)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("main")).getByRole("link", { name: copy.suspended.contact })
+    ).toHaveAttribute("href", "/help");
+    // Not an error, and none of its pages.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByRole("heading", { name: copy.list.title })).toBeNull();
+  });
+
+  it("is what every page of the business shows, while signing out is still offered", async () => {
+    open("/projects/7", suspended);
+    expect(
+      screen.getByRole("heading", { level: 1, name: copy.suspended.title })
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Ada Lovelace" }));
+    expect(screen.getByRole("button", { name: copy.shell.signOut })).toBeInTheDocument();
+  });
+
+  it("leaves a member of two in the other one, and switching to it shows the page", async () => {
+    open("/", {
+      person,
+      businesses: [
+        { id: 1, name: "Ada's bakery", suspended: true },
+        { id: 2, name: "Byron's books" },
+      ],
+    });
+    const switcher = screen.getByRole("combobox", { name: copy.shell.businessLabel });
+    expect(switcher).toHaveValue("2");
+    expect(screen.queryByRole("heading", { name: copy.suspended.title })).toBeNull();
+    await userEvent.selectOptions(switcher, "1");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: copy.suspended.title })
+    ).toBeInTheDocument();
+  });
+
+  it("does not stand in for pages outside the business", () => {
+    open("/help", suspended);
+    expect(screen.queryByRole("heading", { name: copy.suspended.title })).toBeNull();
+  });
+});

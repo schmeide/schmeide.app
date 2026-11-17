@@ -8,6 +8,7 @@ export type ApiProblem =
   | "conflict"
   | "badRequest"
   | "unavailable"
+  | "suspended"
   | "other";
 
 // An error with no tRPC code never reached the server: it is down, or this is the static site.
@@ -23,5 +24,7 @@ export const classifyError = (error: unknown): ApiProblem => {
   if (code === "BAD_REQUEST") return "badRequest";
   // The server answered, but something it relies on (the model) did not.
   if (code === "SERVICE_UNAVAILABLE") return "unavailable";
+  // The business is suspended (server/src/router.ts `callerOf`).
+  if (code === "PRECONDITION_FAILED") return "suspended";
   return "other";
 };

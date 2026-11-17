@@ -1,15 +1,16 @@
 // `make access/approve|list|remove|admin`: manages the prelaunch approved list and who has the
-// platform admin role. There is no operator console yet, so this is how a person is let in, how
-// their set-password link is made, and how the first admin is made. `make db/seed` (`seed`) makes
-// the two local logins.
+// platform admin role. The admin area (/admin) does the same; this is how the first admin is made,
+// and how access is managed with no admin able to sign in. Every change is in the audit log.
+// `make db/seed` (`seed`) makes the two local logins.
 import { createDb } from "../db/client.ts";
 import {
-  approveEmail,
+  approveAccess,
   grantAdmin,
   INVITE_DAYS,
   listApproved,
-  removeApproval,
+  removeAccess,
 } from "../services/access.ts";
+import { COMMAND_LINE, withAudit } from "../services/audit.ts";
 import { authConfigFromEnv, createAuth, publicUrlFromEnv } from "../services/auth.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 import { DEV_LOGINS, DEV_PASSWORD, refuseUnlessLocal, seedDevLogins } from "../services/seed.ts";
@@ -28,7 +29,10 @@ try {
   if (command === "approve") {
     const { publicUrl } = authConfigFromEnv(process.env);
     const tenantId = tenant ? await findTenantBySlug(db, tenant) : undefined;
-    const approved = await approveEmail(db, needEmail(), { tenantId });
+    // Recorded in the audit log as done from the command line, as the admin area records its own.
+    const approved = await withAudit(db, COMMAND_LINE, "access.approve", (tx, audit) =>
+      approveAccess(tx, audit, needEmail(), { tenantId })
+    );
     console.log(
       `${approved.email} is approved. They can sign in with Google, Microsoft, or Apple.`
     );
@@ -40,7 +44,9 @@ try {
     console.log(`To set a password, send them this link (one use, ${INVITE_DAYS} days):`);
     console.log(`${publicUrl}/set-password?token=${approved.token}`);
   } else if (command === "remove") {
-    const removed = await removeApproval(db, needEmail());
+    const { removed } = await withAudit(db, COMMAND_LINE, "access.remove", (tx, audit) =>
+      removeAccess(tx, audit, needEmail())
+    );
     console.log(
       removed ? `${email} is removed and signed out.` : `${email} was not on the approved list.`
     );

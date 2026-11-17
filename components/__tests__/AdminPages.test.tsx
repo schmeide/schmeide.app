@@ -5,6 +5,7 @@ import { copy } from "../../data/copy";
 import type {
   AuditEntry,
   BusinessEntry,
+  BusinessPage,
   HostedProject,
   PersonEntry,
   ProjectResources,
@@ -19,7 +20,7 @@ import { AdminPeoplePage } from "../AdminPeoplePage";
 import { AdminProjectsPage } from "../AdminProjectsPage";
 import { AdminUsagePage } from "../AdminUsagePage";
 import { ViewAsForm } from "../ViewAsForm";
-import { renderWithApi } from "./fakeApi";
+import { ApiFailure, renderWithApi, type Call } from "./fakeApi";
 
 const admin: Session = {
   person: { name: "Grace", email: "grace@example.com", role: "admin" },
@@ -195,10 +196,27 @@ const aBusiness = (overrides: Partial<BusinessEntry> = {}): BusinessEntry => ({
   id: 4,
   name: "Ada's bakery",
   slug: "ada",
+  state: "active",
   members: 2,
   projects: 3,
   createdAt: created,
   ...overrides,
+});
+
+// One business's page as the server answers it, active unless overridden.
+const aBusinessPage = (business: Partial<BusinessPage["business"]> = {}): BusinessPage => ({
+  business: {
+    id: 4,
+    name: "Ada's bakery",
+    slug: "ada",
+    state: "active",
+    stateReason: null,
+    stateChangedAt: null,
+    createdAt: created,
+    ...business,
+  },
+  members: [{ name: "Ada", email: "ada@example.com", role: "owner", admin: false }],
+  projects: [{ id: 7, name: "Invoices", status: "live" }],
 });
 
 const aPerson = (overrides: Partial<PersonEntry> = {}): PersonEntry => ({
@@ -206,6 +224,7 @@ const aPerson = (overrides: Partial<PersonEntry> = {}): PersonEntry => ({
   email: "ada@example.com",
   approved: true,
   admin: false,
+  hasAccount: true,
   businesses: [{ id: 4, name: "Ada's bakery" }],
   ...overrides,
 });
@@ -224,7 +243,14 @@ describe("AdminBusinessesPage", () => {
     );
     const table = await screen.findByRole("table", { name: copy.businesses.caption });
     const [row] = within(table).getAllByRole("row").slice(1);
-    expect(cellsOf(row)).toEqual(["Ada's bakery", "ada", "2", "3", "Nov 1, 2026"]);
+    expect(cellsOf(row)).toEqual([
+      "Ada's bakery",
+      "ada",
+      copy.business.states.active,
+      "2",
+      "3",
+      "Nov 1, 2026",
+    ]);
     expect(within(row).getByRole("link", { name: "Ada's bakery" })).toHaveAttribute(
       "href",
       "/admin/businesses/4"
@@ -279,9 +305,7 @@ describe("AdminBusinessPage", () => {
       <AdminBusinessPage id={4} />,
       {
         "admin.businesses.get": () => ({
-          business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
-          members: [{ name: "Ada", email: "ada@example.com", role: "owner", admin: false }],
-          projects: [{ id: 7, name: "Invoices", status: "live" }],
+          ...aBusinessPage(),
         }),
         "admin.projects.resources": () => [figures()],
         "admin.usage.summary": noSummary,
@@ -309,7 +333,7 @@ describe("AdminBusinessPage", () => {
       <AdminBusinessPage id={4} />,
       {
         "admin.businesses.get": () => ({
-          business: { id: 4, name: "", slug: "ada", createdAt: created },
+          ...aBusinessPage({ name: "" }),
           members: [],
           projects: [],
         }),
@@ -448,13 +472,14 @@ describe("AdminPeoplePage", () => {
       admin
     );
     await userEvent.click(await screen.findByText(copy.people.viewAs("Ada")));
+    const form = screen.getByText(copy.people.viewAs("Ada")).closest("details") as HTMLElement;
     // The email is the row's; only the reason is asked.
-    expect(screen.queryByLabelText(copy.viewAs.emailLabel)).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(copy.viewAs.reasonNeeded);
+    expect(within(form).queryByLabelText(copy.viewAs.emailLabel)).toBeNull();
+    await userEvent.click(within(form).getByRole("button", { name: copy.viewAs.action }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(copy.viewAs.reasonNeeded);
     expect(calls.filter(({ path }) => path === "admin.impersonation.start")).toEqual([]);
-    await userEvent.type(screen.getByLabelText(copy.viewAs.reasonLabel), "Ticket 42");
-    await userEvent.click(screen.getByRole("button", { name: copy.viewAs.action }));
+    await userEvent.type(within(form).getByLabelText(copy.viewAs.reasonLabel), "Ticket 42");
+    await userEvent.click(within(form).getByRole("button", { name: copy.viewAs.action }));
     await waitFor(() =>
       expect(calls.find(({ path }) => path === "admin.impersonation.start")?.input).toEqual({
         email: "ada@example.com",
@@ -558,7 +583,7 @@ describe("AdminProjectsPage", () => {
 
 describe("AdminBusinessPage's resources", () => {
   const business = (projects: readonly { readonly id: number }[]) => () => ({
-    business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+    business: aBusinessPage().business,
     members: [],
     projects: projects.map(({ id }) => ({ id, name: `App ${id}`, status: "live" })),
   });
@@ -669,7 +694,7 @@ describe("AdminBusinessPage's usage", () => {
       <AdminBusinessPage id={4} />,
       {
         "admin.businesses.get": () => ({
-          business: { id: 4, name: "Ada's bakery", slug: "ada", createdAt: created },
+          business: aBusinessPage().business,
           members: [],
           projects: [],
         }),
@@ -682,6 +707,301 @@ describe("AdminBusinessPage's usage", () => {
     expect(region.getByText("1,200")).toBeInTheDocument();
     expect(calls.find(({ path }) => path === "admin.usage.summary")?.input).toEqual({
       tenantId: 4,
+    });
+  });
+});
+
+// Opens the disclosure named `summary` and answers its form.
+const openForm = async (summary: string) => {
+  await userEvent.click(await screen.findByText(summary));
+  return screen.getByText(summary).closest("details") as HTMLElement;
+};
+const submit = (form: HTMLElement, action: string) =>
+  userEvent.click(within(form).getByRole("button", { name: action }));
+const callsTo = (calls: readonly Call[], path: string) =>
+  calls.filter((call) => call.path === path);
+
+describe("suspending and restoring a business", () => {
+  it("shows the state and why in the list and on the page", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () =>
+          aBusinessPage({
+            state: "suspended",
+            stateReason: "Ticket 9",
+            stateChangedAt: created,
+          }),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+      },
+      admin
+    );
+    const header = (await screen.findByRole("heading", { level: 1, name: "Ada's bakery" })).closest(
+      "header"
+    );
+    expect(header).toHaveTextContent(copy.business.states.suspended);
+    expect(header).toHaveTextContent("Ticket 9");
+    expect(within(header as HTMLElement).getByText(copy.business.restore)).toBeInTheDocument();
+    expect(screen.queryByText(copy.business.suspend)).toBeNull();
+  });
+
+  it("needs a reason, then suspends with it", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => aBusinessPage(),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+        "admin.businesses.suspend": () => ({ id: 4, state: "suspended" }),
+      },
+      admin
+    );
+    const form = await openForm(copy.business.suspend);
+    await submit(form, copy.business.suspendAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    expect(callsTo(calls, "admin.businesses.suspend")).toEqual([]);
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Abuse");
+    await submit(form, copy.business.suspendAction);
+    await waitFor(() =>
+      expect(callsTo(calls, "admin.businesses.suspend")).toEqual([
+        { path: "admin.businesses.suspend", input: { id: 4, reason: "Abuse" } },
+      ])
+    );
+    expect(await within(form).findByText(copy.adminActions.done)).toBeInTheDocument();
+  });
+
+  it("restores a suspended one", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => aBusinessPage({ state: "suspended", stateReason: "x" }),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+        "admin.businesses.restore": () => ({ id: 4, state: "active" }),
+      },
+      admin
+    );
+    const form = await openForm(copy.business.restore);
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Paid");
+    await submit(form, copy.business.restoreAction);
+    await waitFor(() =>
+      expect(callsTo(calls, "admin.businesses.restore")[0]?.input).toEqual({
+        id: 4,
+        reason: "Paid",
+      })
+    );
+  });
+
+  it("is shown in the businesses list", async () => {
+    renderWithApi(
+      <AdminBusinessesPage />,
+      {
+        "admin.businesses.list": () => ({
+          entries: [aBusiness({ state: "suspended" })],
+          nextCursor: null,
+        }),
+      },
+      admin
+    );
+    const table = await screen.findByRole("table", { name: copy.businesses.caption });
+    expect(cellsOf(within(table).getAllByRole("row")[1])[2]).toBe(copy.business.states.suspended);
+  });
+});
+
+describe("removing a member", () => {
+  it("needs a reason, then removes that member", async () => {
+    const calls = renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => aBusinessPage(),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+        "admin.businesses.removeMember": () => ({ removed: true }),
+      },
+      admin
+    );
+    const form = await openForm(copy.business.removeMember("Ada"));
+    await submit(form, copy.business.removeMemberAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Left");
+    await submit(form, copy.business.removeMemberAction);
+    await waitFor(() =>
+      expect(callsTo(calls, "admin.businesses.removeMember")[0]?.input).toEqual({
+        id: 4,
+        email: "ada@example.com",
+        reason: "Left",
+      })
+    );
+  });
+
+  it("says why when the server refuses", async () => {
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => aBusinessPage(),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+        "admin.businesses.removeMember": () => {
+          throw new ApiFailure(
+            "CONFLICT",
+            "The last owner of a business cannot be removed from it"
+          );
+        },
+      },
+      admin
+    );
+    const form = await openForm(copy.business.removeMember("Ada"));
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Left");
+    await submit(form, copy.business.removeMemberAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent("last owner");
+  });
+});
+
+describe("creating a business", () => {
+  it("asks for a name, the first owner's email, and a reason, then shows the link once", async () => {
+    window.history.replaceState(null, "", "/admin/businesses");
+    const calls = renderWithApi(
+      <AdminBusinessesPage />,
+      {
+        "admin.businesses.list": () => ({ entries: [], nextCursor: null }),
+        "admin.businesses.create": () => ({
+          id: 9,
+          created: true,
+          email: "bea@example.com",
+          hasAccount: false,
+          token: "the-token",
+        }),
+      },
+      admin
+    );
+    const form = await openForm(copy.businesses.create);
+    await userEvent.type(within(form).getByLabelText(copy.businesses.nameLabel), "Bea's bakes");
+    await userEvent.type(
+      within(form).getByLabelText(copy.businesses.ownerLabel),
+      "bea@example.com"
+    );
+    await submit(form, copy.businesses.createAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Phone");
+    await submit(form, copy.businesses.createAction);
+    expect(
+      await within(form).findByText(`${window.location.origin}/set-password?token=the-token`)
+    ).toBeInTheDocument();
+    expect(callsTo(calls, "admin.businesses.create")[0]?.input).toEqual({
+      name: "Bea's bakes",
+      ownerEmail: "bea@example.com",
+      reason: "Phone",
+    });
+  });
+});
+
+describe("a person's access", () => {
+  it("lists an approved email that has not signed in yet", async () => {
+    renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({
+          entries: [
+            aPerson({ name: null, email: "new@example.com", hasAccount: false, businesses: [] }),
+          ],
+          nextCursor: null,
+        }),
+      },
+      admin
+    );
+    const table = await screen.findByRole("table", { name: copy.people.caption });
+    const row = within(table).getAllByRole("row")[1];
+    expect(cellsOf(row)[0]).toBe(copy.people.notSignedIn);
+    // Nobody to view as yet.
+    expect(within(row).queryByText(copy.people.viewAs(copy.people.notSignedIn))).toBeNull();
+  });
+
+  it("is removed with a reason, and not offered for an admin or yourself", async () => {
+    const calls = renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({
+          entries: [aPerson(), aPerson({ name: "Grace", email: "grace@example.com", admin: true })],
+          nextCursor: null,
+        }),
+        "admin.access.remove": () => ({ removed: true }),
+      },
+      admin
+    );
+    expect(await screen.findAllByText(copy.people.removeAccess("Ada"))).toHaveLength(1);
+    expect(screen.queryByText(copy.people.removeAccess("Grace"))).toBeNull();
+    const form = await openForm(copy.people.removeAccess("Ada"));
+    await submit(form, copy.people.removeAction);
+    expect(await within(form).findByRole("alert")).toHaveTextContent(
+      copy.adminActions.reasonNeeded
+    );
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Left");
+    await submit(form, copy.people.removeAction);
+    await waitFor(() =>
+      expect(callsTo(calls, "admin.access.remove")[0]?.input).toEqual({
+        email: "ada@example.com",
+        reason: "Left",
+      })
+    );
+  });
+
+  it("is given back with a reason, showing a link only when the server sends one", async () => {
+    const calls = renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({
+          entries: [aPerson({ approved: false })],
+          nextCursor: null,
+        }),
+        "admin.access.approve": () => ({
+          email: "ada@example.com",
+          hasAccount: true,
+          token: null,
+        }),
+      },
+      admin
+    );
+    const form = await openForm(copy.people.restoreAccess("Ada"));
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Back");
+    await submit(form, copy.people.restoreAction);
+    expect(await within(form).findByText(copy.adminActions.done)).toBeInTheDocument();
+    expect(within(form).queryByText(/set-password/)).toBeNull();
+    expect(callsTo(calls, "admin.access.approve")[0]?.input).toEqual({
+      email: "ada@example.com",
+      reason: "Back",
+    });
+  });
+
+  it("is given to someone new by email, with their link", async () => {
+    const calls = renderWithApi(
+      <AdminPeoplePage />,
+      {
+        "admin.people.list": () => ({ entries: [], nextCursor: null }),
+        "admin.access.approve": (input) => ({
+          email: input.email,
+          hasAccount: false,
+          token: "tok",
+        }),
+      },
+      admin
+    );
+    const form = await openForm(copy.people.approve);
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.emailLabel), "n@e.com");
+    await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "New");
+    await submit(form, copy.people.approveAction);
+    expect(
+      await within(form).findByText(`${window.location.origin}/set-password?token=tok`)
+    ).toBeInTheDocument();
+    expect(callsTo(calls, "admin.access.approve")[0]?.input).toEqual({
+      email: "n@e.com",
+      reason: "New",
     });
   });
 });

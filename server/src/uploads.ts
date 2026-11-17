@@ -12,7 +12,7 @@ import {
 } from "./router.ts";
 import type { Person } from "./services/auth.ts";
 import { assertProjectIn } from "./services/businesses.ts";
-import { NotFoundError, UploadRefusedError } from "./services/errors.ts";
+import { BUSINESS_SUSPENDED, NotFoundError, UploadRefusedError } from "./services/errors.ts";
 import { declaredType } from "./services/fileTypes.ts";
 import {
   REFUSAL_STATUS,
@@ -67,11 +67,14 @@ export const registerUploads = (
           (error: unknown) => {
             if (error instanceof TRPCError && error.code === "FORBIDDEN")
               return "forbidden" as const;
+            if (error instanceof TRPCError && error.code === "PRECONDITION_FAILED")
+              return "suspended" as const;
             throw error;
           }
         );
         if (!caller) return refusal(reply, 401, "unauthorized", SIGN_IN_FIRST);
         if (caller === "forbidden") return refusal(reply, 403, "forbidden", NOT_IN_A_BUSINESS);
+        if (caller === "suspended") return refusal(reply, 403, "suspended", BUSINESS_SUSPENDED);
         // An upload is a write: while an admin views as the person, it is on record first.
         await recordWrite(context, caller, "files.upload");
         const projectId = Number(request.params.id);

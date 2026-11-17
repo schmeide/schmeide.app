@@ -1,6 +1,7 @@
 // `role` is there only for a person with the platform admin role.
 export type Person = { readonly name: string; readonly email: string; readonly role?: "admin" };
-export type Business = { readonly id: number; readonly name: string };
+// `suspended`: its members see the suspended page in place of its pages (components/Routes.tsx).
+export type Business = { readonly id: number; readonly name: string; readonly suspended?: boolean };
 export type Provider = "google" | "microsoft" | "apple";
 
 // The admin behind a session that views the app as `person`.

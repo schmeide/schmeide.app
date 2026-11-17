@@ -71,6 +71,17 @@ export const copy = {
     action: "View as this person",
     starting: "Starting…",
   },
+  // The form behind every admin action that changes something: a reason the audit log keeps.
+  adminActions: {
+    emailLabel: "Email",
+    reasonLabel: "Reason",
+    reasonHint: "Why, for example a ticket number. Kept in the audit log.",
+    reasonNeeded: "Give a reason first.",
+    working: "Saving…",
+    done: "Done.",
+    linkIntro:
+      "Send them this link to set a password. It works once, for 7 days, and is not shown again.",
+  },
   // The search box and paging every admin list shares.
   adminSearch: {
     label: "Search",
@@ -81,31 +92,62 @@ export const copy = {
     intro: "Every business, newest first.",
     searchHint: "A business name, or the email of someone in it.",
     caption: "Businesses",
-    columns: ["Business", "Slug", "Members", "Apps", "Created"],
+    columns: ["Business", "Slug", "State", "Members", "Apps", "Created"],
     empty: "No business matches.",
+    create: "Create a business",
+    createHint:
+      "Its first owner is approved. Someone with no account yet gets a link to set a password; someone with one is its owner at once. The same name and owner again gives back the business already made.",
+    nameLabel: "Business name",
+    ownerLabel: "First owner's email",
+    createAction: "Create",
   },
   // One business, in the admin area.
   business: {
     slug: "Slug",
     created: "Created",
     membersTitle: "Members",
-    memberColumns: ["Name", "Email", "Role", "View as"],
+    memberColumns: ["Name", "Email", "Role", "Actions"],
     roles: { owner: "Owner", editor: "Editor" },
+    state: "State",
+    states: { active: "Active", suspended: "Suspended" },
+    stateWhy: (reason: string, when: string) => `${reason} (${when})`,
+    suspend: "Suspend this business",
+    suspendHint:
+      "Its members cannot open it and nothing in it builds. A build already running stops after its current step. Its live apps keep running.",
+    suspendAction: "Suspend",
+    restore: "Restore this business",
+    restoreHint: "Its members can open it and build again.",
+    restoreAction: "Restore",
+    removeMember: (name: string) => `Remove ${name}`,
+    removeMemberHint:
+      "They lose this business at once and stay signed in. The last owner cannot be removed.",
+    removeMemberAction: "Remove from this business",
     noMembers: "Nobody is in this business.",
     projectsTitle: "Apps",
     projectColumns: ["App", "State"],
     noProjects: "This business has no apps.",
   },
   people: {
-    intro:
-      "Everyone with an account, newest first. An approved email that has never signed in is not listed here; make access/list shows those.",
+    intro: "Everyone with an account, and every approved email, newest first.",
     searchHint: "A name or an email.",
     caption: "People",
-    columns: ["Name", "Email", "Businesses", "Approved", "Admin", "View as"],
+    columns: ["Name", "Email", "Businesses", "Approved", "Admin", "Actions"],
     yes: "Yes",
     no: "No",
     empty: "Nobody matches.",
+    notSignedIn: "Not signed in yet",
     viewAs: (name: string) => `View as ${name}`,
+    removeAccess: (name: string) => `Remove access for ${name}`,
+    removeHint:
+      "Takes them off the approved list and signs them out everywhere. Their account and apps stay.",
+    removeAction: "Remove access",
+    restoreAccess: (name: string) => `Give ${name} access again`,
+    restoreHint: "Puts them back on the approved list. Everything they had is still there.",
+    restoreAction: "Give access",
+    approve: "Approve someone new",
+    approveHint:
+      "They can sign in with Google, Microsoft, or Apple, or set a password with the link shown. They get a business of their own on first sign-in.",
+    approveAction: "Approve",
   },
   // Every hosted project, in the admin area.
   hosting: {
@@ -215,6 +257,12 @@ export const copy = {
     dead: "It was already used, it is more than 7 days old, or a newer link replaced it. Ask the person who invited you for a new one.",
     toSignIn: "Go to sign in",
     savedButSignedOut: "Your password is saved. Sign in with it to continue.",
+  },
+  // What a member of a suspended business sees in place of its pages.
+  suspended: {
+    title: "This business is suspended",
+    body: "Its apps keep running, but nothing in it can be opened or changed for now. Get in touch and we will help.",
+    contact: "Get in touch",
   },
   problems: {
     notFound: {
@@ -558,6 +606,7 @@ export const copy = {
     conflict: "That cannot be done right now:",
     badRequest: "That was not accepted:",
     unavailable: "That is not available right now. Wait a moment, then try again.",
+    suspended: "This business is suspended. Get in touch through Help.",
     other: "Something went wrong:",
   },
   duration: (minutes: number, seconds: number) =>

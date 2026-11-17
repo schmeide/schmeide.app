@@ -1,12 +1,22 @@
 // The prelaunch approved list and the one-time links that let an approved person set a password.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, eq, exists, gt, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { ADMIN_ROLE, approvedEmails, emailSchema, invites, sessions, users } from "../db/schema.ts";
-import { COMMAND_LINE, withAudit } from "./audit.ts";
+import {
+  ADMIN_ROLE,
+  approvedEmails,
+  emailSchema,
+  invites,
+  memberships,
+  sessions,
+  tenants,
+  users,
+} from "../db/schema.ts";
+import { COMMAND_LINE, withAudit, type AuditTarget } from "./audit.ts";
 import type { Auth } from "./auth.ts";
 import { joinBusiness } from "./businesses.ts";
-import { NotFoundError } from "./errors.ts";
+import { ConflictError, NotFoundError } from "./errors.ts";
+import { slugify } from "./projects.ts";
 
 export const INVITE_DAYS = 7;
 const INVITE_MS = INVITE_DAYS * 24 * 60 * 60 * 1000;
@@ -120,6 +130,116 @@ export const grantAdmin = async (db: Db, rawEmail: string): Promise<{ readonly e
     audit({ targetUserId: granted.id, detail: email });
     return { email };
   });
+};
+
+type Audit = (target: AuditTarget) => void;
+
+const userIdOf = async (db: Db, email: string): Promise<string | undefined> =>
+  (await db.select({ id: users.id }).from(users).where(eq(users.email, email)))[0]?.id;
+
+// Who an access change was about and why, for the audit log: the address names a person who has
+// no account yet. Never the link's token.
+const detailOf = (email: string, reason?: string) => (reason ? `${email}: ${reason}` : email);
+
+// Approves the address as `approveEmail` does, recording it with `audit`: `make access/approve`
+// (cli/access.ts) and the admin area both run this inside `withAudit`. Answers the link's token for
+// the one answer that shows it, and whether the person already has an account.
+export const approveAccess = async (
+  db: Db,
+  audit: Audit,
+  rawEmail: string,
+  { tenantId, reason }: { readonly tenantId?: number; readonly reason?: string } = {}
+): Promise<{
+  readonly email: string;
+  readonly token: string;
+  readonly expiresAt: Date;
+  readonly hasAccount: boolean;
+}> => {
+  const approved = await approveEmail(db, rawEmail, { tenantId });
+  const userId = await userIdOf(db, approved.email);
+  audit({
+    targetUserId: userId,
+    targetTenantId: tenantId,
+    detail: detailOf(approved.email, reason),
+  });
+  return { ...approved, hasAccount: userId !== undefined };
+};
+
+// Takes the address off the list and signs the person out, as `removeApproval` does, recording it
+// with `audit`: `make access/remove` and the admin area both run this inside `withAudit`.
+export const removeAccess = async (
+  db: Db,
+  audit: Audit,
+  rawEmail: string,
+  reason?: string
+): Promise<{ readonly removed: boolean }> => {
+  const email = emailSchema.parse(rawEmail);
+  const removed = await removeApproval(db, email);
+  audit({ targetUserId: await userIdOf(db, email), detail: detailOf(email, reason) });
+  return { removed };
+};
+
+// A new business with a first owner, whose address is approved naming it: an owner with an account
+// is its owner at once, anyone else on first sign-in. Asked again for the same name (ignoring case)
+// and owner, it answers the business already made: that pair is the key. Two such requests at
+// once wait for each other on a lock taken on the owner's address.
+export const createBusiness = async (
+  db: Db,
+  audit: Audit,
+  input: { readonly name: string; readonly ownerEmail: string; readonly reason: string }
+) => {
+  const email = emailSchema.parse(input.ownerEmail);
+  const name = input.name.trim();
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${`business.create ${email}`}))`);
+  const [existing] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(
+      and(
+        sql`lower(${tenants.name}) = lower(${name})`,
+        or(
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(memberships)
+              .innerJoin(users, eq(users.id, memberships.userId))
+              .where(
+                and(
+                  eq(memberships.tenantId, tenants.id),
+                  eq(memberships.role, "owner"),
+                  eq(users.email, email)
+                )
+              )
+          ),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(approvedEmails)
+              .where(and(eq(approvedEmails.email, email), eq(approvedEmails.tenantId, tenants.id)))
+          )
+        )
+      )
+    )
+    .orderBy(asc(tenants.id))
+    .limit(1);
+  const id = existing?.id ?? (await insertTenant(db, name));
+  const approved = await approveAccess(db, audit, email, { tenantId: id, reason: input.reason });
+  return { id, created: !existing, ...approved };
+};
+
+// A slug from the name, as a project's is made (services/projects.ts); a taken one gets a random
+// ending. Slugs are unique in the table, so two at once cannot both take one.
+const insertTenant = async (db: Db, name: string): Promise<number> => {
+  const base = slugify(name);
+  for (const slug of [base, `${base}-${randomBytes(3).toString("hex")}`]) {
+    const [tenant] = await db
+      .insert(tenants)
+      .values({ slug, name })
+      .onConflictDoNothing({ target: tenants.slug })
+      .returning({ id: tenants.id });
+    if (tenant) return tenant.id;
+  }
+  throw new ConflictError("No free slug for that name. Try again.");
 };
 
 const liveInvite = async (db: Db, token: string, now: Date) => {

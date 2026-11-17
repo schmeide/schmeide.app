@@ -39,6 +39,7 @@ export const listBusinesses = async (db: Db, query: ListQuery) => {
       id: tenants.id,
       name: tenants.name,
       slug: tenants.slug,
+      state: tenants.state,
       members: db.$count(memberships, eq(memberships.tenantId, tenants.id)),
       projects: db.$count(projects, eq(projects.tenantId, tenants.id)),
       createdAt: tenants.createdAt,
@@ -71,6 +72,9 @@ export const getBusiness = async (db: Db, id: number) => {
       id: tenants.id,
       name: tenants.name,
       slug: tenants.slug,
+      state: tenants.state,
+      stateReason: tenants.stateReason,
+      stateChangedAt: tenants.stateChangedAt,
       createdAt: tenants.createdAt,
     })
     .from(tenants)
@@ -95,25 +99,28 @@ export const getBusiness = async (db: Db, id: number) => {
   return { business, members, projects: owned };
 };
 
-// Every person with an account, newest first, found by name or email. Two queries a page: the
-// people, then all of their businesses at once.
+// Every person with an account, and every approved address with none yet (`hasAccount` false,
+// no name), newest first, found by name or email. Two queries a page: the people, then all of
+// their businesses at once.
 export const listPeople = async (db: Db, query: ListQuery) => {
   const pattern = query.search ? containing(query.search) : undefined;
+  const email = sql<string>`coalesce(${users.email}, ${approvedEmails.email})`;
   const rows = await db
     .select({
       id: users.id,
       name: users.name,
-      email: users.email,
+      email,
       approved: sql<boolean>`${approvedEmails.email} is not null`,
       admin: sql<boolean>`coalesce(${users.role} = ${ADMIN_ROLE}, false)`,
+      hasAccount: sql<boolean>`${users.id} is not null`,
     })
     .from(users)
-    .leftJoin(approvedEmails, eq(approvedEmails.email, users.email))
-    .where(pattern ? or(ilike(users.name, pattern), ilike(users.email, pattern)) : undefined)
-    .orderBy(desc(users.createdAt), desc(users.id))
+    .fullJoin(approvedEmails, eq(approvedEmails.email, users.email))
+    .where(pattern ? or(ilike(users.name, pattern), ilike(email, pattern)) : undefined)
+    .orderBy(desc(sql`coalesce(${users.createdAt}, ${approvedEmails.createdAt})`), desc(email))
     .limit(query.limit + 1)
     .offset(query.cursor ?? 0);
-  const ids = rows.map(({ id }) => id);
+  const ids = rows.flatMap(({ id }) => (id === null ? [] : [id]));
   const joined =
     ids.length === 0
       ? []

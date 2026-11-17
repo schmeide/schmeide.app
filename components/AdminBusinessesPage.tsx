@@ -2,8 +2,9 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { copy } from "../data/copy";
-import { useTRPC } from "../trpc";
+import { useTRPC, useTRPCClient } from "../trpc";
 import { pathTo } from "../utils/routes";
+import { AdminActionForm } from "./AdminActionForm";
 import { AdminSearch } from "./AdminSearch";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
@@ -13,9 +14,10 @@ import styles from "./AdminTable.module.css";
 
 const day = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 
-// Every business, newest first, found by its name or a member's email.
+// Every business, newest first, found by its name or a member's email, and a new one made.
 export function AdminBusinessesPage() {
   const trpc = useTRPC();
+  const client = useTRPCClient();
   const [search, setSearch] = useState("");
   const list = useInfiniteQuery(
     trpc.admin.businesses.list.infiniteQueryOptions(
@@ -31,6 +33,22 @@ export function AdminBusinessesPage() {
         <h1>{copy.routes.adminBusinesses}</h1>
         <p className={styles.intro}>{copy.businesses.intro}</p>
       </header>
+      <details className={styles.action}>
+        <summary>{copy.businesses.create}</summary>
+        <AdminActionForm
+          hint={copy.businesses.createHint}
+          fields={[
+            { name: "name", label: copy.businesses.nameLabel },
+            { name: "ownerEmail", label: copy.businesses.ownerLabel, email: true },
+          ]}
+          action={copy.businesses.createAction}
+          run={({ name, ownerEmail, reason }) =>
+            client.admin.businesses.create
+              .mutate({ name, ownerEmail, reason })
+              .then(({ token }) => token)
+          }
+        />
+      </details>
       <AdminSearch hint={copy.businesses.searchHint} onSearch={setSearch} />
       <ErrorNote error={list.error} />
       {list.isPending && <p>{copy.loading}</p>}
@@ -45,6 +63,7 @@ export function AdminBusinessesPage() {
                 </Link>
               </td>
               <td>{business.slug}</td>
+              <td>{copy.business.states[business.state]}</td>
               <td className={styles.number}>{business.members}</td>
               <td className={styles.number}>{business.projects}</td>
               <td className={styles.number}>

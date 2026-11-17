@@ -19,12 +19,22 @@ import { z } from "zod";
 
 // Tables are the single source: validation and API types derive from them.
 
+// `suspended`: its members cannot open it and nothing in it builds, while its live apps keep
+// running (docs/auth.md). An admin suspends one with a reason; #82 suspends an unpaid one the same
+// way, with its own reason.
+export const TENANT_STATES = ["active", "suspended"] as const;
+export const tenantState = pgEnum("tenant_state", TENANT_STATES);
+
 // A business, in customer copy. Everything a person makes belongs to one; `memberships` says who
 // may work in it. The seeded `demo` tenant holds what was built before sign-in existed.
 export const tenants = pgTable("tenants", {
   id: serial("id").primaryKey(),
   slug: varchar("slug", { length: 64 }).notNull().unique(),
   name: varchar("name", { length: 120 }).notNull().default(""),
+  state: tenantState("state").notNull().default("active"),
+  // Why and when the state last changed; null for a business that has never changed state.
+  stateReason: text("state_reason"),
+  stateChangedAt: timestamp("state_changed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -564,10 +574,27 @@ export const readWebsiteSchema = z.object({
 
 export const emailSchema = z.string().trim().toLowerCase().pipe(z.email().max(254));
 
-// Starting to view the app as a person: whom, and why, which the audit log keeps.
-export const impersonateSchema = z.object({
+// Why an admin acts on a person or a business, which the audit log keeps.
+const reasonSchema = z.string().trim().min(1).max(500);
+
+// Starting to view the app as a person: whom, and why.
+export const impersonateSchema = z.object({ email: emailSchema, reason: reasonSchema });
+
+// Approving an address, or taking it off the approved list.
+export const accessChangeSchema = impersonateSchema;
+
+export const businessStateSchema = tenantIdSchema.extend({ reason: reasonSchema });
+
+export const removeMemberSchema = tenantIdSchema.extend({
   email: emailSchema,
-  reason: z.string().trim().min(1).max(500),
+  reason: reasonSchema,
+});
+
+export const newBusinessSchema = z.object({
+  // As long as `tenants.name` holds.
+  name: z.string().trim().min(1).max(120),
+  ownerEmail: emailSchema,
+  reason: reasonSchema,
 });
 
 export const inviteTokenSchema = z.object({ token: z.string().min(1).max(200) });

@@ -174,7 +174,9 @@ describe("a business", () => {
   it("is made for a new person, who then sees only what is in it", async () => {
     const ada = await aSignedInPerson(app, deps, { name: "Ada Example" });
     const bob = await aSignedInPerson(app, deps, { name: "Bob Example" });
-    expect(ada.businesses).toEqual([{ id: ada.tenantId, name: "Ada Example’s business" }]);
+    expect(ada.businesses).toEqual([
+      { id: ada.tenantId, name: "Ada Example’s business", suspended: false },
+    ]);
     expect(bob.tenantId).not.toBe(ada.tenantId);
 
     const created = await callApi(app, "projects.create", { name: "Invoices" }, ada.cookie);
@@ -198,7 +200,7 @@ describe("a business", () => {
     const demo = await findTenantBySlug(db, "demo");
     const teammate = await aSignedInPerson(app, deps, { joins: demo });
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, demo));
-    expect(teammate.businesses).toEqual([{ id: demo, name: tenant.name }]);
+    expect(teammate.businesses).toEqual([{ id: demo, name: tenant.name, suspended: false }]);
     expect(tenant.name).toBe("Demo business");
   });
 

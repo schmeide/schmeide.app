@@ -4,11 +4,13 @@ import superjson from "superjson";
 import type { z } from "zod";
 import {
   acceptInviteSchema,
+  accessChangeSchema,
   adminListSchema,
   ADMIN_ROLE,
   answerQuestionSchema,
   auditQuerySchema,
   buildIdSchema,
+  businessStateSchema,
   changeRequestSchema,
   editChangeSchema,
   editPlanItemSchema,
@@ -16,12 +18,14 @@ import {
   fileIdSchema,
   impersonateSchema,
   inviteTokenSchema,
+  newBusinessSchema,
   newPlanItemSchema,
   newProjectSchema,
   planItemIdSchema,
   projectIdSchema,
   projectIdsSchema,
   readWebsiteSchema,
+  removeMemberSchema,
   renameFileSchema,
   setFeaturesSchema,
   sessions,
@@ -29,7 +33,13 @@ import {
   usageQuerySchema,
   users,
 } from "./db/schema.ts";
-import { acceptInvite, getInvite } from "./services/access.ts";
+import {
+  acceptInvite,
+  approveAccess,
+  createBusiness,
+  getInvite,
+  removeAccess,
+} from "./services/access.ts";
 import { auditFilters, listAdminActions, withAudit, type Actor } from "./services/audit.ts";
 import {
   currentPerson,
@@ -38,7 +48,13 @@ import {
   type Person,
   type Provider,
 } from "./services/auth.ts";
-import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
+import {
+  assertBuildIn,
+  assertProjectIn,
+  businessesOf,
+  removeMember,
+  setBusinessState,
+} from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
 import {
   getBusiness,
@@ -48,6 +64,8 @@ import {
   listPeople,
 } from "./services/directory.ts";
 import {
+  BUSINESS_SUSPENDED,
+  BusinessSuspendedError,
   ConflictError,
   InterviewUnavailableError,
   NotFoundError,
@@ -115,6 +133,7 @@ const procedure = t.procedure.use(async ({ next }) => {
       throw new TRPCError({ code: "NOT_FOUND", message: cause.message });
     if (cause instanceof ConflictError)
       throw new TRPCError({ code: "CONFLICT", message: cause.message, cause });
+    if (cause instanceof BusinessSuspendedError) throw suspended();
     // The UI falls back to typed requests, or offers to try again.
     if (cause instanceof InterviewUnavailableError || cause instanceof ReaderUnavailableError)
       throw new TRPCError({ code: "SERVICE_UNAVAILABLE", message: cause.message, cause });
@@ -126,13 +145,19 @@ const procedure = t.procedure.use(async ({ next }) => {
 const noProcedure = (path: string) =>
   new TRPCError({ code: "NOT_FOUND", message: `No procedure found on path "${path}"` });
 
+// What a member of a suspended business is answered: a code of its own, so the client shows the
+// suspended page rather than an error.
+const suspended = () => new TRPCError({ code: "PRECONDITION_FAILED", message: BUSINESS_SUSPENDED });
+
 const actorOf = (admin: Impersonator): Actor => ({ id: admin.id, label: admin.email });
 
 // The header a person in several businesses names the one they are working in with.
 export const BUSINESS_HEADER = "x-schmeide-business";
 
 // Everything below `open` needs a signed-in, approved caller, and acts inside one of their
-// businesses: the one the header names when they belong to it, otherwise their first.
+// businesses: the one the header names when they belong to it, otherwise their first that is not
+// suspended. A suspended one is refused here, for tRPC and the uploads route alike, and so for an
+// admin viewing the app as a member too.
 const open = procedure;
 export const SIGN_IN_FIRST = "Sign in to continue";
 export const NOT_IN_A_BUSINESS = "You are not in a business";
@@ -145,9 +170,13 @@ export const callerOf = async (
   if (!person) return null;
   const businesses = await businessesOf(ctx.db, person);
   const asked = Number(headers.get(BUSINESS_HEADER));
-  const business = businesses.find(({ id }) => id === asked) ?? businesses[0];
-  // Only an admin can have none (businessesOf). The uploads route answers this with a 403.
+  const business =
+    businesses.find(({ id }) => id === asked) ??
+    businesses.find(({ suspended }) => !suspended) ??
+    businesses[0];
+  // Only an admin can have none (businessesOf). The uploads route answers both with a 403.
   if (!business) throw new TRPCError({ code: "FORBIDDEN", message: NOT_IN_A_BUSINESS });
+  if (business.suspended) throw suspended();
   return { person, tenantId: business.id };
 };
 
@@ -259,9 +288,59 @@ export const appRouter = t.router({
     businesses: t.router({
       list: admin.input(adminListSchema).query(({ ctx, input }) => listBusinesses(ctx.db, input)),
       get: admin.input(tenantIdSchema).query(({ ctx, input }) => getBusiness(ctx.db, input.id)),
+      // The owner's set-password link is answered here once, only when they have no account yet.
+      create: adminMutation("business.create")
+        .input(newBusinessSchema)
+        .mutation(async ({ ctx, input }) => {
+          const { id, created, email, hasAccount, token } = await createBusiness(
+            ctx.db,
+            ctx.audit,
+            input
+          );
+          return { id, created, email, hasAccount, token: hasAccount ? null : token };
+        }),
+      removeMember: adminMutation("business.removeMember")
+        .input(removeMemberSchema)
+        .mutation(({ ctx, input }) => removeMember(ctx.db, ctx.audit, input)),
+      // Its members cannot open it and nothing in it builds; its live apps keep running.
+      suspend: adminMutation("business.suspend")
+        .input(businessStateSchema)
+        .mutation(({ ctx, input }) => setBusinessState(ctx.db, ctx.audit, input, "suspended")),
+      restore: adminMutation("business.restore")
+        .input(businessStateSchema)
+        .mutation(({ ctx, input }) => setBusinessState(ctx.db, ctx.audit, input, "active")),
     }),
     people: t.router({
       list: admin.input(adminListSchema).query(({ ctx, input }) => listPeople(ctx.db, input)),
+    }),
+    // The approved list, as `make access/approve` and `access/remove` change it.
+    access: t.router({
+      // Approves an address, again or for the first time. The set-password link is answered here
+      // once, only for someone with no account yet; anyone else signs in as before.
+      approve: adminMutation("access.approve")
+        .input(accessChangeSchema)
+        .mutation(async ({ ctx, input }) => {
+          const { email, hasAccount, token } = await approveAccess(ctx.db, ctx.audit, input.email, {
+            reason: input.reason,
+          });
+          return { email, hasAccount, token: hasAccount ? null : token };
+        }),
+      // Takes the address off the list and signs them out everywhere. Not an admin, the caller
+      // included: that would take the admin area from them without the checks of taking the role.
+      remove: adminMutation("access.remove")
+        .input(accessChangeSchema)
+        .mutation(async ({ ctx, input }) => {
+          const [target] = await ctx.db
+            .select({ role: users.role })
+            .from(users)
+            .where(eq(users.email, input.email));
+          if (target?.role === ADMIN_ROLE)
+            throw new TRPCError({
+              code: "FORBIDDEN",
+              message: "An admin's access cannot be removed here",
+            });
+          return removeAccess(ctx.db, ctx.audit, input.email, input.reason);
+        }),
     }),
     // The list answers from the database alone; what each project takes up is a second call, so
     // a slow or missing container runtime never holds the list back.

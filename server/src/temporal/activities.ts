@@ -37,6 +37,8 @@ import {
   usageRows,
   type Query,
 } from "../services/builds.ts";
+import { businessSuspended } from "../services/businesses.ts";
+import { BUSINESS_SUSPENDED } from "../services/errors.ts";
 import { createLocalFileStore, type FileStore } from "../services/fileStore.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
@@ -367,6 +369,20 @@ export const createActivities = (
     return { build, project: await findProject(db, build.projectId) };
   };
 
+  // Refuses work for a suspended business, checked as each step starts. A build already running
+  // when its business is suspended finishes the step it is in and stops there, failed, as a cancel
+  // does; finishBuild, which records that, is never refused. Not retried: restoring the business
+  // does not resume it, a new change does.
+  const refuseIfSuspended = async (project: Project) => {
+    if (await businessSuspended(db, project.tenantId))
+      throw ApplicationFailure.nonRetryable(BUSINESS_SUSPENDED);
+  };
+  const stepOfBuild = async (buildId: number) => {
+    const found = await projectOfBuild(buildId);
+    await refuseIfSuspended(found.project);
+    return found;
+  };
+
   // Heartbeats while `work` runs and reports Temporal cancellation through the signal.
   const withHeartbeat = async <T>(work: (signal: AbortSignal) => Promise<T>): Promise<T> => {
     const context = Context.current();
@@ -518,6 +534,7 @@ export const createActivities = (
       );
       await mkdir(config.dataDir, { recursive: true });
       try {
+        await refuseIfSuspended(project);
         const spec = config.agentCmd
           ? await runAgentCmd(project, "spec", prompt, config.dataDir)
           : await withHeartbeat(async (signal) => {
@@ -555,7 +572,7 @@ export const createActivities = (
     },
 
     async prepareWorkspace(buildId: number): Promise<void> {
-      const { project } = await projectOfBuild(buildId);
+      const { project } = await stepOfBuild(buildId);
       const workspace = workspaceOf(project);
       if (await stat(join(workspace, ".git")).catch(() => undefined)) {
         await event(buildId, "step", "Reusing the project workspace");
@@ -595,7 +612,7 @@ export const createActivities = (
       resume?: string;
       feedback?: string;
     }): Promise<string> {
-      const { build, project } = await projectOfBuild(input.buildId);
+      const { build, project } = await stepOfBuild(input.buildId);
       const retried = Context.current().info.attempt > 1;
       const runKind: RoutedKind = build.kind === "initial" ? "initial" : "change";
       const attachments = await stageAttachments(project, input.buildId);
@@ -687,7 +704,7 @@ export const createActivities = (
 
     // ponytail: checks run on the host via the project Makefile; a Kubernetes Job in production
     async runChecks(buildId: number): Promise<{ ok: boolean; output: string }> {
-      const { project } = await projectOfBuild(buildId);
+      const { project } = await stepOfBuild(buildId);
       for (const target of ["check", "test", "build"]) {
         await event(buildId, "check", `Running make ${target}`);
         const result = await run(config.makeBin, [target], {
@@ -707,7 +724,7 @@ export const createActivities = (
     // Writes the page title and icon into the app and commits them, before every deploy, so they
     // cost no agent run and a change by the agent cannot drop them. `make up` builds the frontend.
     async applySite(buildId: number): Promise<void> {
-      const { project } = await projectOfBuild(buildId);
+      const { project } = await stepOfBuild(buildId);
       const workspace = workspaceOf(project);
       const frontend = join(workspace, "frontend");
       const html = await readFile(join(frontend, "index.html"), "utf8").catch(() => undefined);
@@ -756,7 +773,7 @@ export const createActivities = (
 
     // ponytail: `make up` with Docker Compose on this machine; an AKS namespace per tenant plus object storage and CDN in production
     async deploy(buildId: number): Promise<void> {
-      const { project } = await projectOfBuild(buildId);
+      const { project } = await stepOfBuild(buildId);
       await event(buildId, "deploy", "Starting the app (make up)");
       const result = await run(config.makeBin, ["up"], {
         cwd: workspaceOf(project),

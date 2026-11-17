@@ -42,6 +42,8 @@ make access/admin EMAIL=person@example.com     # give an approved person who has
   made before sign-in existed). Without it, a new person gets an empty business of their own.
 - These commands act on the database in `DATABASE_URL`. To approve someone on a hosted server, run them where that
   database is reachable, with `SCHMEIDE_PUBLIC_URL` set so the printed link has the right address.
+- `access/approve` and `access/remove` are recorded in the audit log as done by `command line`, through the same
+  functions the admin area uses. The link's token is never in the log.
 
 ## Admins
 
@@ -59,7 +61,8 @@ procedure that does not exist.
 - `access/remove` takes an admin's access away like anyone else's: the role is kept but does nothing while the address
   is off the list.
 - `/admin/businesses` lists every business and its members and apps, and `/admin/people` every person with an
-  account. Both are read-only, and no admin procedure answers a password hash, session, provider, or invite token.
+  account and every approved email that has not signed in yet. No admin procedure answers a password hash, session,
+  or provider token; an invite token only in the one answer that shows its link ([Changing access](#changing-access)).
 - `/admin/projects` lists every hosted app with what it takes up: containers running, memory and CPU from `docker ps`
   and `docker stats`, and its workspace on disk from `du`. They are read when the page asks and never stored; a read
   that fails or takes over five seconds shows as unknown.
@@ -68,6 +71,44 @@ procedure that does not exist.
   deletes its usage rows with it, so the sums leave deleted apps out.
 - The role comes from Better Auth's admin plugin. Its own `/api/auth/admin/*` endpoints all answer 404; admin actions
   go through the `admin.*` procedures instead.
+
+## Changing access
+
+Each of these asks the admin for a reason, and is one transaction with its audit row: both are stored or neither.
+The row names the person (by email when they have no account yet), the business, and the reason.
+
+- Remove access (`access.remove`), from a person's row at `/admin/people`: what `access/remove` does. Not offered,
+  and refused, for an admin: their access goes with the role ([Admins](#admins)).
+- Give access (`access.approve`), from the row of someone taken off the list, or "Approve someone new" by email: what
+  `access/approve` does. The set-password link is shown once, and only to someone with no account yet; anyone else
+  signs in as before, with nothing reset.
+- Remove a person from a business (`business.removeMember`), from their row on the business's page. They lose it on
+  their next request; their sessions are kept, since they may work in other businesses, and the business they had
+  chosen falls back to their first other one. An approval that named the business stops naming it, so signing in
+  again does not put them back. The last owner cannot be removed. Someone left with no business gets an empty one of
+  their own on their next request, as any new person does.
+- Create a business (`business.create`), at `/admin/businesses`, with a name and a first owner's email. The owner is
+  approved naming the business: someone with an account is its owner at once, anyone else on first sign-in, and
+  their set-password link is shown once. The same name (ignoring case) and owner again answers the business already
+  made instead of a second one, with a fresh link that replaces the last.
+
+### Suspending a business
+
+Suspend and restore (`business.suspend`, `business.restore`) are in the header of a business's page, each with a
+reason. The state, its reason, and when it changed are kept on the business (`tenants.state`, `state_reason`,
+`state_changed_at`), and shown in the list and on the page. Unpaid businesses (#82) are to use the same state.
+
+While a business is suspended:
+
+- Its members cannot open it. Every call made in it, uploads included, is refused with a code of its own
+  (`PRECONDITION_FAILED`, 403 `suspended` for an upload), and its pages show a plain "suspended" page with a link to
+  Help in their place. Members can still sign out and switch to another business; one who belongs to another is put
+  in that one by default.
+- An admin viewing the app as a member sees the same: the view gets no way around it.
+- Nothing in it builds or runs a model. A queued change does not start when a build passes, and a spec run that was
+  waiting does not run. A build already running finishes the step it is in and stops there as failed, like a cancel;
+  restoring does not resume it, a new change does.
+- Its live apps keep running: nothing is stopped or taken down.
 
 ## Viewing as a customer
 
