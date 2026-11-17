@@ -16,6 +16,7 @@ import { AdminSearch } from "./AdminSearch";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
+import { useSession } from "./SessionProvider";
 
 import styles from "./AdminTable.module.css";
 
@@ -26,6 +27,7 @@ const day = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 export function AdminProjectsPage() {
   const trpc = useTRPC();
   const [search, setSearch] = useState("");
+  const { session } = useSession();
   const list = useInfiniteQuery(
     trpc.admin.projects.list.infiniteQueryOptions(
       { search: search || undefined },
@@ -60,6 +62,7 @@ export function AdminProjectsPage() {
       <header>
         <h1>{copy.routes.adminProjects}</h1>
         <p className={styles.intro}>{copy.hosting.intro}</p>
+        {session.buildsOff && <p className={styles.intro}>{copy.resources.buildsOff}</p>}
       </header>
       <AdminSearch hint={copy.hosting.searchHint} onSearch={setSearch} />
       <ErrorNote error={list.error} />

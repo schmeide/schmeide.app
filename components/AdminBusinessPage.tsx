@@ -13,6 +13,7 @@ import { NO_USAGE } from "../utils/usage";
 import { AdminActionForm } from "./AdminActionForm";
 import { AdminTable } from "./AdminTable";
 import { ErrorNote } from "./ErrorNote";
+import { useSession } from "./SessionProvider";
 import { UsageSummary } from "./UsageSummary";
 import { ViewAsDisclosure } from "./ViewAsDisclosure";
 
@@ -26,6 +27,7 @@ const day = new Intl.DateTimeFormat("en-US", { dateStyle: "medium" });
 export function AdminBusinessPage({ id }: { readonly id: number }) {
   const trpc = useTRPC();
   const client = useTRPCClient();
+  const { session } = useSession();
   const query = useQuery(trpc.admin.businesses.get.queryOptions({ id }));
   const ids = query.data?.projects.map((project) => project.id).slice(0, 100) ?? [];
   const resources = useQuery(
@@ -165,7 +167,9 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
 
       <section aria-labelledby="business-resources" className={styles.section}>
         <h2 id="business-resources">{copy.resources.title}</h2>
-        <p className={styles.note}>{copy.resources.intro}</p>
+        <p className={styles.note}>
+          {session.buildsOff ? copy.resources.buildsOff : copy.resources.intro}
+        </p>
         <dl className={styles.tiles}>
           {tiles.map(([label, value]) => (
             <div key={label}>

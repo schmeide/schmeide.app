@@ -184,8 +184,13 @@ export const listHostedProjects = async (db: Db, query: ListQuery) => {
 };
 
 // What the projects take up, in the order asked; an id with no project is left out.
+// With builds off nothing is hosted, so neither the runtime nor the disk is asked: unknown.
 export const hostedResources = async (
-  { db, resources }: { readonly db: Db; readonly resources: ResourceReader },
+  {
+    db,
+    resources,
+    buildsOff,
+  }: { readonly db: Db; readonly resources: ResourceReader; readonly buildsOff?: boolean },
   ids: readonly number[]
 ) => {
   const found =
@@ -196,5 +201,13 @@ export const hostedResources = async (
           .from(projects)
           .where(inArray(projects.id, [...ids]));
   const ordered = ids.flatMap((id) => found.filter((project) => project.id === id));
-  return readResources(resources, ordered);
+  return buildsOff
+    ? ordered.map(({ id }) => ({
+        id,
+        containers: null,
+        memoryBytes: null,
+        cpuPercent: null,
+        workspaceBytes: null,
+      }))
+    : readResources(resources, ordered);
 };
