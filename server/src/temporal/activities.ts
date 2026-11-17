@@ -17,7 +17,7 @@ import { join, relative } from "node:path";
 import { query as sdkQuery, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure } from "@temporalio/common";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
 import {
@@ -934,8 +934,9 @@ export const createActivities = (
       await event(buildId, "deploy", "Set the page title and icon");
     },
 
-    // Deploys the build's commit to staging, from the workspace. Every passed build is then put
-    // live as well, as before staging existed.
+    // Deploys the build's commit to staging, from the workspace. Production changes only when a
+    // person promotes, except for an app's first build: with nothing live to protect, it is put
+    // live at once, as every build was before staging existed.
     async deploy(buildId: number): Promise<void> {
       const { project } = await stepOfBuild(buildId);
       const commit = await commitAll(project, buildId);
@@ -946,7 +947,12 @@ export const createActivities = (
         .where(eq(projects.id, project.id));
       await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
       await event(buildId, "deploy", `The version being worked on is at ${url}`);
-      await promote(project, commit, buildId);
+      const [live] = await db
+        .select({ id: builds.id })
+        .from(builds)
+        .where(and(eq(builds.projectId, project.id), eq(builds.release, "promoted")))
+        .limit(1);
+      if (!live) await promote(project, commit, buildId);
     },
 
     // A `promote` build makes production run its commit; a `discard` build returns staging to its

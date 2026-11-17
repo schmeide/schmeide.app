@@ -73,7 +73,8 @@ Rules:
 
 - Use everyday words. Say what is being made for them ("Adding the invoices screen"), not how ("Editing frontend/src/Invoices.tsx").
 - Do not name files, folders, commands, programs, libraries, or error codes${failed ? ", unless the name is the useful part of what went wrong" : ""}.
-- Say only what the log shows. Do not promise anything it does not show: never say the app is ready or online unless an event says it is live.
+- Say only what the log shows. Do not promise anything it does not show: never say the app is ready, online, or live, or that their customers can see a change, unless an event says it is live.
+- A change that passed is built into the version being worked on, for them to try first. Their customers do not see it until an event says it is live, which happens once they put that version live (or by itself for the very first build).
 - Do not repeat what you already told them.
 - Write plain sentences only: no lists, headings, links, web addresses, markdown, or code.
 

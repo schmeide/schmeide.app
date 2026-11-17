@@ -23,11 +23,21 @@ const isBoolean = (value: unknown): value is boolean => typeof value === "boolea
 
 type Props = {
   readonly name: string;
-  readonly url: string;
+  // The version being worked on, which the frame shows; null for an app live before it had one,
+  // which shows the live app.
+  readonly stagingUrl: string | null;
+  // The live app, null while it is offline.
+  readonly liveUrl: string | null;
+  // The build that last changed what staging runs; null when the latest build did not.
   readonly version: number | null;
 };
 
-export function AppFrame({ name, url, version }: Props) {
+export function AppFrame({ name, stagingUrl, liveUrl, version }: Props) {
+  const url = stagingUrl ?? liveUrl ?? "";
+  const links = [
+    { href: stagingUrl, label: copy.project.openStaging },
+    { href: liveUrl, label: copy.project.openLive },
+  ].flatMap(({ href, label }) => (href === null ? [] : [{ href, label }]));
   const [width, setWidth] = useState(() => readStored(WIDTH_KEY, isWidth, "computer"));
   const [reloadOnBuild, setReloadOnBuild] = useState(() =>
     readStored(RELOAD_KEY, isBoolean, false)
@@ -80,9 +90,17 @@ export function AppFrame({ name, url, version }: Props) {
         <button type="button" onClick={reload}>
           {copy.project.designer.reload}
         </button>
-        <a href={url} target="_blank" rel="noreferrer" className={styles.open}>
-          {copy.project.open} <span className={styles.hint}>{copy.project.opensInNewTab}</span>
-        </a>
+        {links.map((link) => (
+          <a
+            key={link.label}
+            href={link.href}
+            target="_blank"
+            rel="noreferrer"
+            className={styles.open}
+          >
+            {link.label} <span className={styles.hint}>{copy.project.opensInNewTab}</span>
+          </a>
+        ))}
       </div>
       <div className={styles.viewport} data-width={width}>
         {/* Always rendered so the live region exists before the notice is put in it. */}

@@ -77,19 +77,38 @@ const waitForBuild = async (projectId: number, buildId: number, afterId = 0) => 
   }
 };
 
-const checkSite = async (projectId: number, url: string) => {
+// The title and icon land on the version being worked on (staging), then on the live app once it
+// is put live. Each answers at its own address.
+const checkSite = async (projectId: number) => {
   const log = logAs(projectId);
   await api.projects.setSite.mutate({ id: projectId, title: TITLE, icon: ICON });
   const { latestBuild } = await api.projects.get.query({ id: projectId });
   if (latestBuild?.kind !== "site") throw new Error("saving the title and icon started no build");
   log(`page title and icon saved; build ${latestBuild.id} applies them`);
   await waitForBuild(projectId, latestBuild.id);
+  const staged = await api.projects.get.query({ id: projectId });
+  if (!staged.project.stagingUrl || !staged.project.previewUrl)
+    throw new Error("the app has no staging or live address");
+  await expectSite(projectId, staged.project.stagingUrl, true);
+  await expectSite(projectId, staged.project.previewUrl, false);
+  const { build } = await api.projects.promote.mutate({ id: projectId });
+  log(`build ${build.id} puts the version being worked on live`);
+  await waitForBuild(projectId, build.id);
+  await expectSite(projectId, staged.project.previewUrl, true);
+};
+
+const expectSite = async (projectId: number, url: string, applied: boolean) => {
   const page = await (await fetch(`${url}/`)).text();
-  if (!page.includes("<title>E2E &lt;title&gt; &amp; icon</title>"))
-    throw new Error(`the page title was not applied: ${/<title>.*<\/title>/.exec(page)?.[0]}`);
-  const icon = Buffer.from(await (await fetch(`${url}/site-icon.png`)).arrayBuffer());
-  if (!icon.equals(Buffer.from(ICON, "base64"))) throw new Error("the icon was not served");
-  log(`GET ${url}/ has the page title; ${url}/site-icon.png is the icon`);
+  if (page.includes("<title>E2E &lt;title&gt; &amp; icon</title>") !== applied)
+    throw new Error(
+      `the page title was ${applied ? "not " : ""}applied at ${url}: ${/<title>.*<\/title>/.exec(page)?.[0]}`
+    );
+  if (applied) {
+    const icon = Buffer.from(await (await fetch(`${url}/site-icon.png`)).arrayBuffer());
+    if (!icon.equals(Buffer.from(ICON, "base64")))
+      throw new Error(`the icon was not served at ${url}`);
+  }
+  logAs(projectId)(`GET ${url}/ ${applied ? "has" : "does not have yet"} the page title`);
 };
 
 const run = async (projectId: number, queueChange: boolean) => {
@@ -139,7 +158,7 @@ const run = async (projectId: number, queueChange: boolean) => {
     log(`GET ${project.previewUrl}${path} -> ${response.status}`);
     if (response.status !== 200) throw new Error(`${path} returned ${response.status}`);
   }
-  if (concurrent && !queueChange) await checkSite(projectId, project.previewUrl);
+  if (concurrent && !queueChange) await checkSite(projectId);
   return project.previewUrl;
 };
 

@@ -81,7 +81,7 @@ export function AdminProjectsPage() {
                   </Link>
                 </td>
                 <td>{copy.status[project.status].label}</td>
-                <td className={styles.number}>{project.webPort}</td>
+                <td>{copy.hosting.ports(project.webPort, project.stagingWebPort)}</td>
                 <td>
                   {project.lastBuild ? (
                     <>

@@ -507,13 +507,14 @@ const aHostedProject = (overrides: Partial<HostedProject> = {}): HostedProject =
   slug: "invoices",
   status: "live",
   webPort: 8101,
+  stagingWebPort: 18101,
   business: { id: 4, name: "Ada's bakery" },
   lastBuild: { kind: "change", status: "passed", startedAt: created },
   ...overrides,
 });
 
 describe("AdminProjectsPage", () => {
-  it("lists every project with its business, port, last build, and what it takes up", async () => {
+  it("lists every project with its business, both copies' ports, last build, and what both take up", async () => {
     const calls = renderWithApi(
       <AdminProjectsPage />,
       {
@@ -529,7 +530,7 @@ describe("AdminProjectsPage", () => {
       "Invoices",
       "Ada's bakery",
       copy.status.live.label,
-      "8101",
+      copy.hosting.ports(8101, 18101),
       `${copy.project.buildStatus.passed}Nov 1, 2026`,
       "2",
       "3.0 MiB",
