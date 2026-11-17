@@ -12,8 +12,7 @@ On localhost, `make serve` runs `make db/seed` after the migrations, so there is
 leaves two approved logins, both with the password `schmeide-local-only`, and prints them:
 
 - `admin@schmeide.localhost`: the platform admin role, in no business. Its grant is in the audit log like any other.
-- `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role. The seed makes `demo` too: the
-  migrations leave no `demo` business in a fresh database, so a deployed one never has it.
+- `owner@schmeide.localhost`: the owner of the `demo` business, with no admin role.
 
 To work on customer screens, sign in as the admin, open Admin, then Businesses, then "Demo business" (`demo`), and
 press "View as Local Owner" on `owner@schmeide.localhost`'s row ([Viewing as a customer](#viewing-as-a-customer)).
@@ -234,31 +233,68 @@ They need to share their real address, or be approved under the relay address.
 
 ## Connect the hosted site to a server
 
-schmeide.app is static files on GitHub Pages. Until it is built with an API address it shows "Coming soon".
+schmeide.app is static files on GitHub Pages. Until it is built with an API address it shows "Coming soon". The API
+runs on AKS at `https://api.schmeide.app`, a subdomain of `schmeide.app` so the session cookie reaches it.
 
-1. Run the server somewhere with an https address on the same site as the UI, for example `api.schmeide.app`. It
-   must be a subdomain of `schmeide.app`: the session cookie is not sent to an unrelated domain.
-2. Put a proxy that ends https in front of it, forwarding to the server's port and passing the caller's address in
-   `X-Forwarded-For` (sign-in attempts are limited per address).
-3. Set on the server: `SCHMEIDE_PUBLIC_URL=https://schmeide.app`, `SCHMEIDE_API_URL=https://api.schmeide.app`,
-   `SCHMEIDE_AUTH_SECRET`, and the provider values. Use the `api.schmeide.app` return addresses with each provider.
-4. Run the migrations against its database, and approve yourself. `node src/migrate.ts` (in `server/`, with
-   `DATABASE_URL` set) needs only the runtime dependencies, so the production image runs it before each deploy and
-   stops the deploy when it fails; `make db/migrate` runs the same file.
-5. In the GitHub repository, set the Actions variable `VITE_API_URL` to `https://api.schmeide.app`, and run the
-   Continuous Deployment workflow. Removing the variable and deploying again turns the hosted app back off.
+The cluster side lives in [schmeide/iac](https://github.com/schmeide/iac); its
+[gitops README](https://github.com/schmeide/iac/blob/main/gitops/README.md) covers deploying schmeide.app and setting
+its secrets. In short:
 
-Before step 5, check:
+- The Argo CD application `schmeide-app` runs the Deployment `schmeide-app-api` in the namespace `schmeide-app`, with
+  `SCHMEIDE_PUBLIC_URL=https://schmeide.app`, `SCHMEIDE_API_URL=https://api.schmeide.app` and `SCHMEIDE_BUILDS=off`.
+- Traefik ends https with a Let's Encrypt certificate on the static address `74.249.191.146` and passes the caller's
+  address in `X-Forwarded-For` (sign-in attempts are limited per address).
+- The environment comes from the Key Vault `kv-schmeide` through External Secrets, into the Secret
+  `schmeide-app/schmeide-app`. `SCHMEIDE_AUTH_SECRET` and the database login are made there; the provider and
+  Anthropic values are set by hand.
+- Each sync runs the migrations first (`node src/migrate.ts`, an Argo PreSync Job), so there is no `make db/migrate`
+  step.
+- The image `schmeide.azurecr.io/schmeide-app:<sha>` is built and pushed on every merge to `main`. Moving the tag in
+  schmeide/iac is a manual pull request for now.
 
-- `https://api.schmeide.app/api/healthz` answers from outside.
-- An unapproved address cannot sign in, by a provider or by password.
-- Signed out, `https://api.schmeide.app/api/trpc/projects.list` answers 401.
+### Go-live checklist
+
+1. At Porkbun, add an `A` record for `api` pointing at `74.249.191.146`. The `schmeide.app` apex stays on GitHub
+   Pages.
+2. Register these return addresses with each provider ([Register with each provider](#register-with-each-provider)):
+   - Google: `https://api.schmeide.app/api/auth/callback/google`
+   - Microsoft: `https://api.schmeide.app/api/auth/callback/microsoft`
+   - Apple: `https://api.schmeide.app/api/auth/callback/apple`, with `api.schmeide.app` as the domain
+3. Put the provider values and the Anthropic key in Key Vault, reading each from standard input so it stays out of the
+   shell history:
+
+   ```sh
+   az keyvault secret set --vault-name kv-schmeide --name schmeide-app-google-client-id --file /dev/stdin
+   ```
+
+   The names are `schmeide-app-<google|microsoft|apple>-client-<id|secret>` and `schmeide-app-anthropic-api-key`.
+
+4. Force External Secrets to sync the Secret and restart `schmeide-app-api` so it reads the new values (the gitops
+   README has the commands).
+5. Set the image tag in schmeide/iac to a `main` commit and let Argo CD sync.
+6. Approve yourself and make yourself admin, from inside the pod:
+
+   ```sh
+   kubectl -n schmeide-app exec deploy/schmeide-app-api -- node src/cli/access.ts approve you@example.com
+   ```
+
+   Sign in once, then run the same command with `admin you@example.com`.
+
+7. Check from outside the cluster:
+   - `https://api.schmeide.app/api/healthz` answers with a valid certificate.
+   - Signed out, `https://api.schmeide.app/api/trpc/projects.list` answers 401.
+   - An unapproved address cannot sign in, by a provider or by password.
+8. In the GitHub repository, set the Actions variable `VITE_API_URL` to `https://api.schmeide.app`, and run the
+   Continuous Deployment workflow.
+9. From `https://schmeide.app`, sign in and out with Google, Microsoft and Apple, each in a fresh browser profile.
+10. Take an interview through to a proposal. Starting a build shows the "not open yet" message.
+
+To roll back, remove `VITE_API_URL` and run Continuous Deployment again; the site shows "Coming soon".
 
 What this does not do:
 
-- It limits who can spend, not how much. One approved person can still start many builds; a spending limit is #83.
-- The server still builds and runs apps on its own machine with the local `claude` login (#5). "Hosted" means that
-  machine behind an https address until that changes. Built apps are served from the server's own ports and have no
-  sign-in of their own (#84), so do not put business information in one yet.
+- It limits who can spend, not how much. One approved person can still run up model tokens; a spending limit is #83.
+- Production does not build apps: `SCHMEIDE_BUILDS=off`, so people can describe a project and get a proposal, and
+  starting a build says it is not open yet. Building and hosting apps on the cluster is Stage 2 (#165).
 - The session cookie belongs to the API's host only. Built apps must stay on another domain, as decided, so they
   never see it.

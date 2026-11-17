@@ -1,18 +1,21 @@
 # Security Policy
 
-This repository is a static site. It has no backend, no database, and no
-accounts.
+The site at <https://schmeide.app> is static files on GitHub Pages. It talks to
+an API at <https://api.schmeide.app>, which runs on Azure Kubernetes Service and
+keeps accounts, sign-in sessions, and projects in a Postgres database. Sign-in
+is limited to approved email addresses during prelaunch.
 
 ## Supported Versions
 
-Only what is currently deployed at <https://schmeide.app> is supported. The
-site is rebuilt and republished from `main` on every merge, so fixes ship as
-soon as they land. There are no maintained release branches.
+Only what is currently deployed at <https://schmeide.app> and
+<https://api.schmeide.app> is supported. Both are built from `main`, so fixes
+ship soon after they land. There are no maintained release branches.
 
 ## Reporting a Vulnerability
 
 For anything exploitable — a supply-chain compromise in a dependency, a way to
-inject content into the published page, a misconfigured Pages deployment —
+inject content into the published page, a way to sign in without approval or
+reach another person's data, a misconfigured deployment —
 **file a private advisory**, not a public issue:
 
 <https://github.com/schmeide/schmeide.app/security/advisories/new>
