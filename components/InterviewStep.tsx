@@ -46,14 +46,15 @@ type QuestionProps = {
 // handed to Schmeide with “You decide”.
 function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
   const errorId = useId();
-  const legend = useRef<HTMLLegendElement>(null);
+  const questionId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
   const fields = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<readonly string[]>([]);
   const [other, setOther] = useState(false);
   const [words, setWords] = useState("");
   const [missing, setMissing] = useState(false);
   useEffect(() => {
-    if (focus) legend.current?.focus();
+    if (focus) heading.current?.focus();
   }, [focus]);
 
   const many = question.kind === "pick_many";
@@ -95,11 +96,12 @@ function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
       <fieldset
         className={styles.question}
         disabled={busy}
+        aria-labelledby={questionId}
         aria-describedby={missing ? errorId : undefined}
       >
-        <legend ref={legend} tabIndex={-1}>
+        <h3 id={questionId} ref={heading} tabIndex={-1} className={styles.questionHeading}>
           {question.text}
-        </legend>
+        </h3>
         <div ref={fields} className={styles.choices}>
           {question.kind === "text" ? (
             <textarea
@@ -298,7 +300,9 @@ export function InterviewStep({
 
   return (
     <section aria-labelledby="features" className={stepStyles.step}>
-      <h2 id="features">{copy.project.featuresTitle}</h2>
+      <h2 id="features" className={styles.stepTitle}>
+        {copy.project.featuresTitle}
+      </h2>
       {/* One polite announcement per answer, so the plan's changes are heard as well as seen. */}
       <p role="status" className={styles.announce}>
         {added.length > 0 && copy.interview.added(added)}

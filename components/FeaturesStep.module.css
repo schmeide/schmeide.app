@@ -1,3 +1,13 @@
+/* Context above the requests, matching the interview so the two describe modes share one title. */
+.stepTitle {
+  margin-top: 0;
+  margin-bottom: var(--space-m);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 /* The request boxes: one input per request, a quiet remove beside each, and an add button below. */
 .requests {
   display: grid;

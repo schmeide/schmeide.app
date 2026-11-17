@@ -108,7 +108,9 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
 
   return (
     <section aria-labelledby="features" className={stepStyles.step}>
-      <h2 id="features">{copy.project.featuresTitle}</h2>
+      <h2 id="features" className={styles.stepTitle}>
+        {copy.project.featuresTitle}
+      </h2>
       <form onSubmit={onWriteSpec} className={stepStyles.form}>
         <p className={stepStyles.muted}>{copy.project.featuresIntro}</p>
         {specFailed && <p role="alert">{copy.project.specFailed}</p>}

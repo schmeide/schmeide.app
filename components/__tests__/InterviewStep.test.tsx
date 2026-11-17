@@ -39,6 +39,20 @@ const plan = (items: number) =>
   screen.getByRole("region", { name: copy.interview.planTitle(items) });
 
 describe("InterviewStep", () => {
+  it("sets the question one heading level under the step title, which is not numbered like a question", async () => {
+    setup(anInterview({ current: WHO }));
+
+    const title = await screen.findByRole("heading", {
+      level: 2,
+      name: copy.project.featuresTitle,
+    });
+    expect(title).toBeVisible();
+    expect(title.textContent ?? "").not.toMatch(/^\d/);
+    expect(screen.getByRole("heading", { level: 3, name: WHO.text })).toBeVisible();
+    expect(screen.queryByRole("heading", { level: 2, name: WHO.text })).toBeNull();
+    expect(screen.getByRole("group", { name: WHO.text })).toBeVisible();
+  });
+
   it("shows what the app replaces only when something was named, with no progress beside it", async () => {
     const withReplaces = anInterview({
       current: aQuestion(),
@@ -270,6 +284,9 @@ describe("InterviewStep", () => {
     expect(await screen.findByLabelText(copy.project.requestLabel(1))).toHaveValue(
       "Keep a list of clients"
     );
+    const title = screen.getByRole("heading", { level: 2, name: copy.project.featuresTitle });
+    expect(title).toBeVisible();
+    expect(title.textContent ?? "").not.toMatch(/^\d/);
   });
 
   // Setup shows one step at a time, so the build replaces the plan and its questions.
