@@ -1,0 +1,56 @@
+.looks {
+  display: grid;
+  gap: var(--space-s);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.looks legend {
+  margin-bottom: var(--space-s);
+  padding: 0;
+  font-weight: 600;
+}
+
+/* A whole row is the target, not just the small control. */
+.look {
+  display: flex;
+  gap: var(--space-m);
+  align-items: center;
+  min-height: var(--hit-target);
+  padding: var(--space-s) var(--space-m);
+  background: var(--color-field);
+  border: 2px solid var(--color-field-border);
+  border-radius: var(--radius-input);
+  cursor: pointer;
+}
+
+.look:has(input:checked) {
+  border-color: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.look:has(input:focus-visible) {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+.looks:disabled .look {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* The global input rule sizes text fields; a radio keeps its own size. */
+.look input {
+  flex: none;
+  width: 1.25rem;
+  height: 1.25rem;
+  min-height: 0;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+.look input:focus-visible {
+  outline: none;
+}

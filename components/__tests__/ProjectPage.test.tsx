@@ -799,6 +799,61 @@ describe("ProjectPage designer", () => {
     expect(screen.queryByText(copy.project.designer.noChanges)).toBeNull();
   });
 
+  it("says which look the app has and why, and restyles it with another the person picks", async () => {
+    const looks = [
+      { id: "calm", name: "Calm", summary: "Calm and spacious." },
+      { id: "ledger", name: "Ledger", summary: "Dense and orderly." },
+    ];
+    const server = projectServer({
+      project: live,
+      latestBuild: passed,
+      hasBeenLive: true,
+      design: {
+        enabled: true,
+        current: {
+          style: "ledger",
+          name: "Ledger",
+          summary: "Dense and orderly.",
+          chosenBy: "lead",
+          reason: "Staff work through many orders a day.",
+        },
+        styles: looks,
+      },
+    });
+    const calls = renderWithApi(<ProjectPage id={7} />, {
+      ...server,
+      "design.pick": () => null,
+    });
+
+    const section = await screen.findByRole("region", { name: copy.project.look.title });
+    expect(
+      within(section).getByText(copy.project.look.current("Ledger"), { exact: false })
+    ).toBeVisible();
+    expect(
+      within(section).getByText(copy.project.look.why.lead("Staff work through many orders a day."))
+    ).toBeVisible();
+    const use = within(section).getByRole("button", { name: copy.project.look.use });
+    expect(within(section).getByRole("radio", { name: /Ledger/ })).toBeChecked();
+    expect(use).toBeDisabled();
+
+    await userEvent.click(within(section).getByRole("radio", { name: /Calm/ }));
+    await userEvent.click(use);
+
+    await waitFor(() =>
+      expect(calls).toContainEqual({ path: "design.pick", input: { id: 7, style: "calm" } })
+    );
+  });
+
+  it("shows nothing about looks while the design team is off", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+
+    await screen.findByRole("region", { name: copy.project.builtFrom });
+    expect(screen.queryByRole("region", { name: copy.project.look.title })).toBeNull();
+  });
+
   it("calls the spec the one the app started from, and says nothing changed since", async () => {
     renderWithApi(
       <ProjectPage id={7} />,

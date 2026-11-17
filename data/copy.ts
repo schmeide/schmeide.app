@@ -496,6 +496,20 @@ export const copy = {
       "Your app has changed since this was written. The spec is kept as it was; the changes built after it are listed here, oldest first.",
     changesSince: "Changes built since",
     showSpec: "Show the spec",
+    // The app's look (#159), shown while the design team is on.
+    look: {
+      title: "Look",
+      current: (name: string) => `Your app has the ${name} look.`,
+      why: {
+        lead: (reason: string) => `Why Schmeide chose it: ${reason}`,
+        fallback: () => "It is Schmeide's default look.",
+        person: () => "You picked it.",
+      },
+      none: "Your app has no set look yet. Pick one and Schmeide restyles your app to it.",
+      pickLabel: "Pick a look",
+      note: "Picking another look restyles your app as a change. It goes live once the change passes, like any other.",
+      use: "Use this look",
+    },
     buildTitle: "3. Build",
     changeTitle: "Latest change",
     retryBuildTitle: "3. Build, another try",

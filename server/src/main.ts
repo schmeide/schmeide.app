@@ -198,6 +198,7 @@ const startApi = (authConfig: AuthConfig) => {
       resources: createResourceReader(config.dataDir),
       auth: createAuth(db, authConfig),
       providers,
+      designTeam: config.designTeam,
       buildsAdminsOnly: builds === "admins",
     },
     { logger: true, allowOrigin: authConfig.publicUrl }

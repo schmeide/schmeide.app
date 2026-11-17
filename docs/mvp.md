@@ -620,7 +620,14 @@ on by default (#83). With it off, builds run exactly as above: no extra runs, th
   stylesheet and the screens under `frontend/src/` and judges from the markup and CSS. It cannot see overflow,
   rendering, or contrast as drawn.
 - **Apps built without a brief** (before the design team, or with it off) keep their look: a change build makes no
-  brief and gets none.
+  brief and gets none. Such an app gets a brief only when the person picks a look.
+- **The person sees the look and can pick another.** While the design team is on, the app's home shows a "Look"
+  section under the spec it was built from: the look in plain words, why it was chosen (the lead's reason, the
+  default, or "You picked it"), and every style to pick from (`design.get`, `design.pick` in `server/src/router.ts`,
+  `server/src/services/designs.ts`). Picking another stores it as the brief, chosen by `person`, keeping the screens
+  the lead laid out. Before the first build that is all; the first build keeps it. On an app that has been built it
+  also starts a restyle change (queued behind a running build), whose request asks the builder to set the stylesheet's
+  tokens to the new brief and restyle the shared pieces; it is reviewed like any change that touches the interface.
 
 ## Dev-mode substitutions
 
