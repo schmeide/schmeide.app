@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { memberships, tenants, usage, users, websiteReads } from "../../db/schema.ts";
+import { memberships, projects, tenants, usage, users, websiteReads } from "../../db/schema.ts";
 import { ConflictError, ReaderUnavailableError } from "../errors.ts";
 import type { PageDigest } from "../htmlText.ts";
 import { createProject } from "../projects.ts";
@@ -215,6 +215,30 @@ describe("readWebsite", () => {
         features: [{ section: "does", text: "Customers can order ahead" }],
       },
     });
+  });
+
+  it("keeps the colors of the business's own site for the app's look, and no one else's", async () => {
+    const { caller, project } = await aCaller("acme.example");
+    const brandColors = async () =>
+      (await db.select().from(projects).where(eq(projects.id, project.id)))[0].brandColors;
+
+    await readWebsite(
+      reads(FOUND, OTHERS).deps,
+      { id: project.id, address: "acme.example", whose: "someone_else" },
+      caller
+    );
+    expect(await brandColors()).toEqual([]);
+
+    await readWebsite(reads(FOUND).deps, { id: project.id, address: "acme.example" }, caller);
+    expect(await brandColors()).toEqual(["#c0392b"]);
+
+    // A later read of their site that finds no colors leaves the ones already kept.
+    await readWebsite(
+      reads(FOUND, { ...MINE, colors: [] }).deps,
+      { id: project.id, address: "acme.example" },
+      caller
+    );
+    expect(await brandColors()).toEqual(["#c0392b"]);
   });
 
   it("reads a site as someone else's when the caller says so, even on their own domain", async () => {

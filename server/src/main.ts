@@ -133,6 +133,8 @@ const config = {
   agentCmd: env.SCHMEIDE_AGENT_CMD,
   claudeBin,
   builderPlugin: join(import.meta.dirname, "..", "builder-plugin"),
+  // ponytail: off until the design team is measured on the to-do fixture (#159, #83).
+  designTeam: env.SCHMEIDE_DESIGN_TEAM === "1",
 } as const;
 
 // The worker needs none of the sign-in settings or secrets.
@@ -228,7 +230,7 @@ console.log(
     : `Builds are on${builds === "admins" ? " for admins only (SCHMEIDE_BUILDS=admins)" : ""}: apps build with GNU make and Docker on this host.`
 );
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}, design team ${config.designTeam ? "on" : "off (SCHMEIDE_DESIGN_TEAM=1 turns it on)"}`
 );
 if (runner)
   console.log(

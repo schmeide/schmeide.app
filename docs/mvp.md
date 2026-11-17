@@ -391,6 +391,7 @@ What the server does with a file:
 | `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
 | `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only   |
 | `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only     |
+| `SCHMEIDE_DESIGN_TEAM`     | unset (off)                                | `1` turns on the design team (below) |
 
 ### Building on the cluster
 
@@ -419,9 +420,10 @@ decides, and the run kind is its only input.
 | `spec`    | Writing the plain-language spec                      | `SCHMEIDE_AGENT_MODEL_SPEC`    |
 | `initial` | The first build from the spec, and its fix-up runs   | `SCHMEIDE_AGENT_MODEL_INITIAL` |
 | `change`  | A change request on a built app, and its fix-up runs | `SCHMEIDE_AGENT_MODEL_CHANGE`  |
+| `design`  | The design lead choosing an app's look               | `SCHMEIDE_AGENT_MODEL_DESIGN`  |
 
-- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`. With none of the three set, every run uses that
-  one model, as before.
+- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`, except `design`, which uses `sonnet`: it judges
+  and writes no code, so a mid-size model does. With none of them set, every build run uses that one model, as before.
 - The server prints the resolved table at startup. Each build run adds an event with the model and the reason, for
   example `Model sonnet for this change run (SCHMEIDE_AGENT_MODEL_CHANGE routes change runs)`, just before
   `Agent started (...)`, which shows the model the SDK resolved it to.
@@ -430,7 +432,8 @@ decides, and the run kind is its only input.
   `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table. Reading a website is a fifth, `website`, on
   `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`. A build's
   running summary is a seventh, `summary`, on `SCHMEIDE_SUMMARY_MODEL`; it is Schmeide's cost, left out of what a
-  project or business is shown or counted against, and shown in the admin area's usage by kind of run.
+  project or business is shown or counted against, and shown in the admin area's usage by kind of run. The design
+  lead's runs are `design`.
 - Every run that reaches the model also gets one `agent_runs` row with how long it ran (`duration_ms` from the SDK's
   result), and its `usage` rows name it in `run_id`. The time is kept once per run, not per model, so summing it never
   counts a run twice. Rows from before runs were recorded have no `run_id`, and their time is not known.
@@ -574,6 +577,33 @@ stacks only, spacing, radii, and how the page frame, menu, table, form, button a
 8px between them) and WCAG AA contrast in both themes: 4.5:1 for text, links, the text on the
 accent and the danger color, 3:1 for control edges and the focus ring (`contrastRatio` in
 `server/src/services/contrast.ts`).
+
+### The design team
+
+Off unless `SCHMEIDE_DESIGN_TEAM=1`, so it can be merged dark and measured on the to-do fixture before it is turned
+on by default (#83). With it off, builds run exactly as above: no extra runs, the same prompts.
+
+- **The design lead** (`planDesign` in `server/src/temporal/activities.ts`, run kind `design`) runs before the builder
+  on a project's first build. It is one model answer with no tools and no project settings, given only the spec
+  (fenced off as material, never instructions) and the style library. Its answer is held to a JSON schema: the style's
+  id, a one or two sentence reason, and the layout of each screen in the spec. An answer that does not fit, names a
+  style not in the library, or does not come at all gives the default style, recorded as `fallback`, and the build
+  goes on.
+- **Brand colors.** Reading the business's own website keeps the colors it found on the project (`brand_colors`).
+  The first one that is a `#rrggbb` color, reads at 4.5:1 on the style's background and surface, and has a text color
+  that reads on it at 4.5:1 becomes the accent, in each theme separately. A color that fails is not used. The logo is
+  not used yet.
+- **The brief** is stored in `project_designs`: the style, who chose it (`lead`, `fallback`, or `person`), the reason,
+  the resolved tokens, the brand colors used, and the screens. It is made once: a rebuild of the same spec keeps it,
+  and every later change reads it.
+- **Design applied up front.** The builder's prompt carries the brief. On a first build it says to lay the foundation
+  before any screen: the shared stylesheet with exactly the brief's tokens (as a `:root` block, dark values under
+  `prefers-color-scheme`), then each shared piece once (page frame, menu, form, table or list, button, empty state)
+  styled as the style says, then the screens from those pieces only. This is prompt instructions in the one build
+  run, not a run of its own: a separate run would read the whole project again and hand its work over through git,
+  for no gain the checks could see. On a change the prompt says to keep to the brief and not change the look.
+- **Apps built without a brief** (before the design team, or with it off) keep their look: a change build makes no
+  brief and gets none.
 
 ## Dev-mode substitutions
 

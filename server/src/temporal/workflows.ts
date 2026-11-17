@@ -41,13 +41,21 @@ const { prepareWorkspace, runChecks, deploy, release } = proxyActivities<Activit
   ...longRunning,
   startToCloseTimeout: "30 minutes",
 });
+// A single model answer with no tools; a retry reuses a brief already stored.
+const { planDesign } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: "10 minutes",
+});
 
 // Fix-up rounds after the first independent check run fails.
 export const MAX_FIX_ATTEMPTS = 3;
 
-// The agent builds, then the server's own checks run, with fix-up rounds while they fail. Each run
-// is told its round, which names its Job on the cluster.
+// The design lead chooses the look (a no-op unless the design team is on), the agent builds, then
+// the server's own checks run, with fix-up rounds while they fail. Each run is told its round,
+// which names its Job on the cluster.
 async function buildAndCheck(buildId: number): Promise<void> {
+  // patched: a build already running when the design team was added replays without it.
+  if (patched("design-team")) await planDesign(buildId);
   let session = await runAgent({ buildId, round: 0 });
   for (let attempt = 0; ; attempt++) {
     const checks = await runChecks(buildId, attempt);

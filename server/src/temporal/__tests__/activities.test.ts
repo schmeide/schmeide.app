@@ -24,6 +24,7 @@ import {
   buildFiles,
   builds,
   files,
+  projectDesigns,
   projectIcons,
   projects,
   tenants,
@@ -33,6 +34,8 @@ import {
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createSummaries, listSummaries } from "../../services/summaries.ts";
 import type { Summarizer } from "../../services/summarizer.ts";
+import { briefPrompt } from "../../services/designBrief.ts";
+import { DEFAULT_STYLE } from "../../services/designStyles.ts";
 import { JPEG, PNG, WEBP } from "../../services/__tests__/fileFixtures.ts";
 import { createLocalFileStore } from "../../services/fileStore.ts";
 import { createProject, transition } from "../../services/projects.ts";
@@ -1087,5 +1090,197 @@ describe("the two copies", () => {
     ])
       expect(isCommit(text)).toBe(false);
     expect(isCommit("0123456789abcdef0123456789abcdef01234567; rm -rf /")).toBe(false);
+  });
+});
+
+// Stands in for the design lead: answers with `answer` as its structured output, or fails.
+const leadQuery = (
+  calls: { prompt: string; options: Options }[],
+  answer: unknown,
+  fail = false
+): Query =>
+  ((params: { prompt: string; options: Options }) => {
+    calls.push(params);
+    return (async function* (): AsyncGenerator<SDKMessage> {
+      if (answer instanceof Error) throw answer;
+      yield {
+        type: "result",
+        subtype: fail ? "error_max_turns" : "success",
+        is_error: fail,
+        num_turns: 1,
+        total_cost_usd: 0.02,
+        duration_ms: 1200,
+        session_id: "lead",
+        result: JSON.stringify(answer),
+        structured_output: answer,
+        permission_denials: [],
+        modelUsage: {
+          "claude-lead": {
+            inputTokens: 5,
+            outputTokens: 6,
+            cacheReadInputTokens: 0,
+            cacheCreationInputTokens: 0,
+            costUSD: 0.02,
+          },
+        },
+      } as unknown as SDKMessage;
+    })();
+  }) as unknown as Query;
+
+const LEAD = {
+  style: "ledger",
+  reason: "Staff work through many orders a day, so a dense, orderly look fits.",
+  screens: [{ name: "Orders", layout: "A table of open orders with New order top right." }],
+};
+
+const designOf = async (projectId: number) =>
+  (await db.select().from(projectDesigns).where(eq(projectDesigns.projectId, projectId)))[0];
+
+describe("the design lead", () => {
+  const designing = (answer: unknown = LEAD, fail = false) => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(
+      deps,
+      { ...config, designTeam: true },
+      leadQuery(calls, answer, fail)
+    );
+    return { activities, calls, env: new MockActivityEnvironment() };
+  };
+
+  it("chooses a look from the spec before the first build, records why, and keeps it for a rebuild", async () => {
+    const { activities, calls, env } = designing();
+    const { project, build } = await newBuild();
+
+    await env.run(activities.planDesign, build.id);
+    const [, again] = await db
+      .insert(builds)
+      .values([
+        { projectId: project.id, kind: "initial", request: "spec", status: "failed" },
+        { projectId: project.id, kind: "initial", request: "spec" },
+      ])
+      .returning();
+    await env.run(activities.planDesign, again.id);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toContain("BEGIN SPEC");
+    expect(calls[0].prompt).toContain("## Features\n- notes");
+    expect(calls[0].options).toMatchObject({
+      model: "sonnet",
+      tools: [],
+      settingSources: [],
+      persistSession: false,
+      outputFormat: { type: "json_schema" },
+    });
+    expect(await designOf(project.id)).toMatchObject({
+      style: "ledger",
+      chosenBy: "lead",
+      brief: { reason: LEAD.reason, screens: LEAD.screens },
+    });
+    expect(await messages(build.id)).toContain(`Design: the Ledger look. ${LEAD.reason}`);
+    expect(await messages(again.id)).toContain("Design: keeping the Ledger look chosen before");
+    expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([
+      expect.objectContaining({ runKind: "design", model: "claude-lead", costUsd: 0.02 }),
+    ]);
+  });
+
+  it.each([
+    ["names a style that is not in the library", { ...LEAD, style: "neon" }, false],
+    ["answers in the wrong form", "ledger, I think", false],
+    ["fails", LEAD, true],
+    ["cannot be reached", new Error("network down"), false],
+  ])("uses the default look, and says so, when the lead %s", async (_what, answer, fail) => {
+    const { activities, env } = designing(answer, fail);
+    const { project, build } = await newBuild();
+
+    await env.run(activities.planDesign, build.id);
+
+    expect(await designOf(project.id)).toMatchObject({
+      style: DEFAULT_STYLE,
+      chosenBy: "fallback",
+    });
+    expect(await messages(build.id)).toContain(
+      "Design: the design lead's answer could not be used, so the app gets the default Calm look"
+    );
+  });
+
+  it("adapts the look to the business's colors only where they pass contrast", async () => {
+    const { activities, env } = designing();
+    const { project, build } = await newBuild();
+    await db
+      .update(projects)
+      .set({ brandColors: ["#ffe14d", "#a3201a"] })
+      .where(eq(projects.id, project.id));
+
+    await env.run(activities.planDesign, build.id);
+
+    // The yellow is unreadable on white but reads on the dark surfaces; the red the other way.
+    const { brief } = await designOf(project.id);
+    expect(brief.brand).toEqual({ light: "#a3201a", dark: "#ffe14d" });
+    expect(brief.tokens.light["--accent"]).toBe("#a3201a");
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Design: the business's color #a3201a is the accent in light mode",
+        "Design: the business's color #ffe14d is the accent in dark mode",
+      ])
+    );
+  });
+
+  it("leaves an app built without a brief as it is on a change", async () => {
+    const { activities, calls, env } = designing();
+    const { project, build } = await newBuild("change");
+
+    await env.run(activities.planDesign, build.id);
+
+    expect(calls).toHaveLength(0);
+    expect(await designOf(project.id)).toBeUndefined();
+  });
+
+  it("gives the builder the brief: the foundation first on a first build, keep to it on a change", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const lead: { prompt: string; options: Options }[] = [];
+    const builder = fakeQuery(calls);
+    const query = ((params: { prompt: string; options: Options }) =>
+      params.options.outputFormat
+        ? leadQuery(lead, LEAD)(params)
+        : builder(params)) as unknown as Query;
+    const activities = createActivities(deps, { ...config, designTeam: true }, query);
+    const env = new MockActivityEnvironment();
+    const { project, build } = await newBuild();
+    await env.run(activities.prepareWorkspace, build.id);
+    await env.run(activities.planDesign, build.id);
+    const [change] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "change", request: "add due dates" })
+      .returning();
+
+    await env.run(activities.runAgent, { buildId: build.id });
+    await env.run(activities.runAgent, { buildId: change.id });
+
+    const brief = (await designOf(project.id)).brief;
+    expect(calls[0].prompt).toContain(briefPrompt(brief, "initial"));
+    expect(calls[1].prompt).toContain(briefPrompt(brief, "change"));
+  });
+});
+
+describe("with the design team off", () => {
+  it("runs no design lead and gives the builder the same prompt as before", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    const { project, build } = await newBuild();
+    await env.run(activities.prepareWorkspace, build.id);
+
+    await env.run(activities.planDesign, build.id);
+    await env.run(activities.runAgent, { buildId: build.id });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toBe(buildPrompt("initial", "## Features\n- notes", "spec"));
+    expect(await designOf(project.id)).toBeUndefined();
+    expect(await messages(build.id)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^Design/)])
+    );
   });
 });

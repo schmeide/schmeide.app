@@ -5,11 +5,20 @@ import type { RunKind } from "./db/schema.ts";
 // summary are run kinds too, for their usage rows, but their models are SCHMEIDE_INTERVIEW_MODEL
 // (questions and file reads), SCHMEIDE_WEBSITE_MODEL and SCHMEIDE_SUMMARY_MODEL and are not decided
 // here.
-export const ROUTED_KINDS = ["spec", "initial", "change"] as const satisfies readonly RunKind[];
+export const ROUTED_KINDS = [
+  "spec",
+  "initial",
+  "change",
+  "design",
+] as const satisfies readonly RunKind[];
 export type RoutedKind = (typeof ROUTED_KINDS)[number];
 
 export const FALLBACK_MODEL_ENV = "SCHMEIDE_AGENT_MODEL";
 export const DEFAULT_MODEL = "opus";
+
+// Kinds that start on their own model rather than the fallback: the design team's runs judge and
+// write little code, so a mid-size model does (#159).
+const KIND_DEFAULTS: Readonly<Partial<Record<RoutedKind, string>>> = { design: "sonnet" };
 
 // A model per run kind; a kind without one uses the fallback. Names go to the Claude Agent SDK as
 // they are, so each must be an alias or a deployment name that every tenant's resource serves.
@@ -42,12 +51,18 @@ export const routingFromEnv = (
 // resumes the session on the model that started it; nothing escalates to a stronger model.
 export const pickModel = (routing: ModelRouting, kind: RoutedKind): ModelChoice => {
   const routed = routing.byKind[kind];
+  const byDefault = KIND_DEFAULTS[kind];
   return routed
     ? { model: routed, reason: `${modelEnvVar(kind)} routes ${kind} runs` }
-    : {
-        model: routing.fallback,
-        reason: `${FALLBACK_MODEL_ENV} fallback, ${modelEnvVar(kind)} is not set`,
-      };
+    : byDefault
+      ? {
+          model: byDefault,
+          reason: `${byDefault} by default for ${kind} runs, ${modelEnvVar(kind)} is not set`,
+        }
+      : {
+          model: routing.fallback,
+          reason: `${FALLBACK_MODEL_ENV} fallback, ${modelEnvVar(kind)} is not set`,
+        };
 };
 
 export const describeRouting = (routing: ModelRouting): string =>

@@ -1,7 +1,7 @@
 import { and, count, eq, gt, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
-import { ITEM_MAX, planSection, websiteReads } from "../db/schema.ts";
+import { ITEM_MAX, planSection, projects, websiteReads } from "../db/schema.ts";
 import type { Person } from "./auth.ts";
 import { recordUsage, type RunUsage } from "./builds.ts";
 import { ConflictError, ReaderUnavailableError } from "./errors.ts";
@@ -236,6 +236,13 @@ export const readWebsite = async (
   await recordUsage(deps.db, usage);
   const proposals = proposalsFrom(parseReading(whose, reading), site.pages);
   if (foundNothing(proposals)) return { status: "failed", reason: "nothing_found" };
+  // The business's own colors, for the app's look (services/designBrief.ts).
+  if (proposals.whose === "mine" && proposals.colors.length > 0) {
+    await deps.db
+      .update(projects)
+      .set({ brandColors: proposals.colors })
+      .where(eq(projects.id, input.id));
+  }
   return {
     status: "read",
     address: site.url,
