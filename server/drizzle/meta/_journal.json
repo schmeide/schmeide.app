@@ -113,6 +113,13 @@
       "when": 1794884987434,
       "tag": "0015_pending_admin",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1794903223492,
+      "tag": "0016_drop_unused_demo_tenant",
+      "breakpoints": true
     }
   ]
 }

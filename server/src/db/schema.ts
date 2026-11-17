@@ -26,7 +26,7 @@ export const TENANT_STATES = ["active", "suspended"] as const;
 export const tenantState = pgEnum("tenant_state", TENANT_STATES);
 
 // A business, in customer copy. Everything a person makes belongs to one; `memberships` says who
-// may work in it. The seeded `demo` tenant holds what was built before sign-in existed.
+// may work in it. `demo` (made by `make db/seed`) holds what was built before sign-in existed.
 export const tenants = pgTable("tenants", {
   id: serial("id").primaryKey(),
   slug: varchar("slug", { length: 64 }).notNull().unique(),

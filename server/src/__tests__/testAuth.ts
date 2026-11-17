@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { inject } from "vitest";
 import type { buildApp } from "../app.ts";
 import type { Db } from "../db/client.ts";
 import { appRouter } from "../router.ts";
@@ -8,8 +9,8 @@ import { createAuth, type Auth, type AuthConfig } from "../services/auth.ts";
 
 type App = ReturnType<typeof buildApp>;
 
-// The tenant the migrations seed (`demo`), for tests below the API that only need some business.
-export const DEMO_TENANT_ID = 1;
+// The `demo` business globalSetup.ts makes, for tests below the API that only need some business.
+export const DEMO_TENANT_ID = inject("demoTenantId");
 
 export const TEST_ORIGIN = "http://localhost:5173";
 export const PASSWORD = "correct horse battery";
