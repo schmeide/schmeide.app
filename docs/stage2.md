@@ -398,8 +398,9 @@ does not change). Same image, two Deployments in `schmeide-app`:
 | worker     | 1                          | `schmeide-worker`, workload ID | specs, builds, provisioning         |
 
 The API's PVC goes away once `FileStore` (`server/src/services/fileStore.ts`) has a Blob implementation (slice 2);
-build logs (`logs/build-<id>.log`) and session transcripts go to the same account. Until then the worker has its
-own small PVC for logs and the API keeps `/data`.
+build logs (`logs/build-<id>.log`) and session transcripts go to the same account. Until then the worker mounts the
+API's ReadWriteOnce disk at `/data` and is required on the API pod's node: a delete runs in the worker and removes
+uploads the API wrote, and both roles need a writable `/data` for claude (#201, schmeide/iac#39).
 
 **Task queues: keep one queue; drop "a task queue per tenant" from #5.** Builds now spend their time in pods, so
 the worker only waits; per-tenant queues would need a worker polling each one, which Temporal does not make
