@@ -554,6 +554,27 @@ Three things, all in this repo, so they reach every build whatever the workspace
   `width` with a `max-width` in the same rule is fine). It reads files only; nothing opens the app
   in a browser yet.
 
+## How built apps get their look
+
+The phone rules above are the floor. On top of them, a built app gets one of a small library of
+styles (`server/src/services/designStyles.ts`), authored here and reviewed by a person:
+
+| Style       | For                                                          | Not for                             |
+| ----------- | ------------------------------------------------------------ | ----------------------------------- |
+| `calm`      | Booking, client portals, services: room and one action       | Long lists of numbers               |
+| `ledger`    | Inventory, orders, invoices: dense rows, aligned numbers     | Members of the public using it once |
+| `friendly`  | Clubs, classes, small shops: warm colors, pill buttons       | Money and formal records            |
+| `bold`      | Field work, check-ins, warehouses: big type, high contrast   | Long reading                        |
+| `editorial` | Catalogs, menus, directories: serif headings, hairline rules | Form-heavy work                     |
+
+Each is exact: color tokens for light and dark (the token names of the mobile-first skill's
+`base.css`, plus `--control-border` for the edge of a form control), a type scale with system font
+stacks only, spacing, radii, and how the page frame, menu, table, form, button and empty state look.
+`calm` is the default. A test checks every style against the phone floor (16px text, 44px taps,
+8px between them) and WCAG AA contrast in both themes: 4.5:1 for text, links, the text on the
+accent and the danger color, 3:1 for control edges and the focus ring (`contrastRatio` in
+`server/src/services/contrast.ts`).
+
 ## Dev-mode substitutions
 
 Each is marked in code with a `ponytail:` comment.
