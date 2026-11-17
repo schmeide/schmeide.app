@@ -84,6 +84,8 @@ export const builds = pgTable("builds", {
   request: text("request").notNull(),
   status: buildStatus("status").notNull().default("running"),
   error: text("error"),
+  // The full commit of the project's repository this build deployed; null until it has.
+  commit: varchar("commit", { length: 40 }),
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   finishedAt: timestamp("finished_at", { withTimezone: true }),
 });

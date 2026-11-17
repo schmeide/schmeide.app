@@ -105,6 +105,9 @@ const newBuild = async (kind: "initial" | "change" = "initial") => {
   return { project, build };
 };
 
+// Stands in for the app answering on its address, so deploy needs no running app.
+const answering: typeof fetch = async () => new Response("ok");
+
 const messages = (buildId: number) =>
   listEvents(db, buildId, 0).then((events) => events.map((event) => event.message));
 
@@ -410,6 +413,27 @@ describe("build activities", () => {
       `<html>\n  <head>\n    <title>${project.name}</title>\n  </head>\n</html>\n`
     );
     expect(existsSync(join(workspace, "frontend", "public", "site-icon.png"))).toBe(false);
+  });
+
+  it("deploys the workspace as one commit, and records that commit on the build", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, { ...config, fetch: answering });
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const workspace = join(dataDir, "projects", project.slug);
+    // Work the builder did not commit still ships, so it goes into the commit.
+    writeFileSync(join(workspace, "leftover.ts"), "export const left = 1;\n");
+
+    await env.run(activities.deploy, build.id);
+
+    const [after] = await db.select().from(builds).where(eq(builds.id, build.id));
+    expect(after.commit).toMatch(/^[0-9a-f]{40}$/);
+    expect(after.commit).toBe(git(workspace, "rev-parse", "HEAD").trim());
+    expect(git(workspace, "status", "--porcelain")).toBe("");
+    expect(git(workspace, "log", "-1", "--format=%s").trim()).toBe(
+      "keep what the builder left uncommitted"
+    );
   });
 });
 

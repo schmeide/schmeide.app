@@ -214,8 +214,9 @@ Print an invoice as a clean page I can save as a PDF
       `make test`, and `make build` pass, then commits.
    3. `runChecks`: the server runs the three targets itself. On failure the output goes back to the
       same agent session, up to 3 fix rounds, then the build fails with the last output.
-   4. `deploy`: `make up`, then waits for `/` and `/api/healthz` on the web port to answer 200.
-      Status `live` with `previewUrl`.
+   4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, then
+      `make up`, then waits for `/` and `/api/healthz` on the web port to answer 200. Status `live`
+      with `previewUrl`; the build records the commit it deployed (`builds.commit`).
 5. `projects.requestChange({ id, request })` on a `live`, `failed`, or `stopped` project runs the
    same workflow as a change build. On a `building` project it is queued instead (build status
    `queued`). When a build passes, its last step starts the oldest queued change of the project. A
