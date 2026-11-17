@@ -2,7 +2,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, asc, eq, gt, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { approvedEmails, emailSchema, invites, sessions, users } from "../db/schema.ts";
+import { ADMIN_ROLE, approvedEmails, emailSchema, invites, sessions, users } from "../db/schema.ts";
 import type { Auth } from "./auth.ts";
 import { joinBusiness } from "./businesses.ts";
 import { NotFoundError } from "./errors.ts";
@@ -68,13 +68,41 @@ export const removeApproval = async (db: Db, rawEmail: string): Promise<boolean>
 
 export const listApproved = (
   db: Db
-): Promise<readonly { readonly email: string; readonly hasAccount: boolean }[]> =>
+): Promise<
+  readonly { readonly email: string; readonly hasAccount: boolean; readonly admin: boolean }[]
+> =>
   db
-    .select({ email: approvedEmails.email, userId: users.id })
+    .select({ email: approvedEmails.email, userId: users.id, role: users.role })
     .from(approvedEmails)
     .leftJoin(users, eq(users.email, approvedEmails.email))
     .orderBy(asc(approvedEmails.email))
-    .then((rows) => rows.map((row) => ({ email: row.email, hasAccount: row.userId !== null })));
+    .then((rows) =>
+      rows.map((row) => ({
+        email: row.email,
+        hasAccount: row.userId !== null,
+        admin: row.role === ADMIN_ROLE,
+      }))
+    );
+
+// Gives an approved person who has an account the platform admin role. Throws with what to run
+// next when the address is not approved or has no account yet.
+export const grantAdmin = async (db: Db, rawEmail: string): Promise<{ readonly email: string }> => {
+  const email = emailSchema.parse(rawEmail);
+  if (!(await isApproved(db, email)))
+    throw new Error(
+      `${email} is not approved. Run \`make access/approve EMAIL=${email}\` first, then this again once they have signed in.`
+    );
+  const granted = await db
+    .update(users)
+    .set({ role: ADMIN_ROLE })
+    .where(eq(users.email, email))
+    .returning({ id: users.id });
+  if (granted.length === 0)
+    throw new Error(
+      `${email} has not signed in yet. Send them the link \`make access/approve EMAIL=${email}\` prints, then run this again once they have signed in.`
+    );
+  return { email };
+};
 
 const liveInvite = async (db: Db, token: string, now: Date) => {
   // The join drops a link whose address was taken off the list (the row cascades away anyway).

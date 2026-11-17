@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { buildApp } from "../app.ts";
 import type { Db } from "../db/client.ts";
 import { appRouter } from "../router.ts";
-import { acceptInvite, approveEmail } from "../services/access.ts";
+import { acceptInvite, approveEmail, grantAdmin } from "../services/access.ts";
 import { createAuth, type Auth, type AuthConfig } from "../services/auth.ts";
 
 type App = ReturnType<typeof buildApp>;
@@ -30,6 +30,8 @@ const procedures = appRouter._def.procedures as unknown as Readonly<
   Record<string, { readonly _def: { readonly type: string } }>
 >;
 export const procedurePaths = Object.keys(procedures);
+// The procedures on the admin base (router.ts): everything under `admin`.
+export const adminPaths = procedurePaths.filter((path) => path.startsWith("admin."));
 
 // Calls one procedure over HTTP as the browser would, with the session cookie when given.
 export const callApi = async (
@@ -39,7 +41,8 @@ export const callApi = async (
   cookie = "",
   headers: Readonly<Record<string, string>> = {}
 ) => {
-  const isQuery = procedures[path]._def.type === "query";
+  // A path with no procedure is asked as a query, as a link to it would be.
+  const isQuery = (procedures[path]?._def.type ?? "query") === "query";
   const query = `?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
   const response = await app.inject({
     method: isQuery ? "GET" : "POST",
@@ -82,4 +85,13 @@ export const aSignedInPerson = async (
   const businesses: readonly { readonly id: number; readonly name: string }[] =
     session.data.businesses;
   return { email, cookie, tenantId: businesses[0].id, businesses };
+};
+
+// An approved person with the platform admin role, signed in, and in no business.
+export const aSignedInAdmin = async (app: App, deps: { readonly auth: Auth; readonly db: Db }) => {
+  const { email, token } = await approveEmail(deps.db, anEmail());
+  await acceptInvite(deps, { token, name: "Grace Admin", password: PASSWORD });
+  await grantAdmin(deps.db, email);
+  const { cookie } = await signIn(app, email);
+  return { email, cookie };
 };

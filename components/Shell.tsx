@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import { copy } from "../data/copy";
 import { pathTo, type RouteName } from "../utils/routes";
+import { isAdmin } from "../utils/session";
 import { AccountMenu } from "./AccountMenu";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
@@ -20,10 +21,16 @@ type Props = {
 };
 
 // The frame around every signed-in page: header, navigation, a banner slot, and the footer.
-// What it offers follows the session: signed out, signed in with no business yet, or in a business.
+// What it offers follows the session: signed out, signed in with no business yet, or in a business,
+// and the admin area to an admin.
 export function Shell({ current, banner, children }: Props) {
   const { session, business, chooseBusiness } = useSession();
   const [menuOpen, setMenuOpen] = useState(false);
+  // The business pages need a business; the admin area is offered only to admins.
+  const primary: readonly RouteName[] = [
+    ...(business ? PRIMARY : []),
+    ...(isAdmin(session) ? (["admin"] as const) : []),
+  ];
 
   return (
     <div className={styles.shell}>
@@ -53,7 +60,7 @@ export function Shell({ current, banner, children }: Props) {
               <span className={styles.business}>{business.name}</span>
             ))}
           <span className={styles.spacer} />
-          {business && (
+          {primary.length > 0 && (
             <>
               <button
                 type="button"
@@ -71,7 +78,7 @@ export function Shell({ current, banner, children }: Props) {
                 data-open={menuOpen || undefined}
               >
                 <ul>
-                  {PRIMARY.map((name) => (
+                  {primary.map((name) => (
                     <li key={name}>
                       <Link
                         to={pathTo(name)}

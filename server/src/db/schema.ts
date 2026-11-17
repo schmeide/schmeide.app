@@ -347,12 +347,21 @@ export const users = pgTable("users", {
   email: text("email").notNull().unique(),
   emailVerified: boolean("email_verified").notNull().default(false),
   image: text("image"),
+  // The platform role, separate from what a person is in a business (`memberships.role`):
+  // ADMIN_ROLE for the people who run Schmeide, null for everyone else. Better Auth's admin
+  // plugin owns this and the `ban*` columns; nobody can set them about themselves.
+  role: text("role"),
+  banned: boolean("banned").default(false),
+  banReason: text("ban_reason"),
+  banExpires: timestamp("ban_expires", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
+
+export const ADMIN_ROLE = "admin";
 
 export const sessions = pgTable(
   "sessions",
@@ -365,6 +374,8 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
+    // The admin acting as this session's person, when one is (Better Auth's admin plugin).
+    impersonatedBy: text("impersonated_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()

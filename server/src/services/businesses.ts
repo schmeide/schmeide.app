@@ -18,10 +18,11 @@ const membershipsOf = (db: Db, userId: string): Promise<Business[]> =>
     .orderBy(asc(memberships.createdAt), asc(tenants.id));
 
 // The person's businesses, oldest first. A person with none gets one on the spot: the business
-// their approval names, or a new one of their own. So a signed-in person always has a business.
+// their approval names, or a new one of their own. So a signed-in person always has a business,
+// except an admin, who works from the admin area and is given none.
 export const businessesOf = async (db: Db, person: Person): Promise<readonly Business[]> => {
   const existing = await membershipsOf(db, person.id);
-  if (existing.length > 0) return existing;
+  if (existing.length > 0 || person.admin) return existing;
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;
     // Two first requests at once must not make two businesses: the second waits here.

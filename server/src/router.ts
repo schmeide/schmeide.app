@@ -96,6 +96,7 @@ export const BUSINESS_HEADER = "x-schmeide-business";
 // businesses: the one the header names when they belong to it, otherwise their first.
 const open = procedure;
 export const SIGN_IN_FIRST = "Sign in to continue";
+export const NOT_IN_A_BUSINESS = "You are not in a business";
 
 export const callerOf = async (
   ctx: Pick<AppContext, "auth" | "db">,
@@ -106,6 +107,8 @@ export const callerOf = async (
   const businesses = await businessesOf(ctx.db, person);
   const asked = Number(headers.get(BUSINESS_HEADER));
   const business = businesses.find(({ id }) => id === asked) ?? businesses[0];
+  // Only an admin can have none (businessesOf). The uploads route answers this with a 403.
+  if (!business) throw new TRPCError({ code: "FORBIDDEN", message: NOT_IN_A_BUSINESS });
   return { person, tenantId: business.id };
 };
 
@@ -113,6 +116,16 @@ const signedIn = procedure.use(async ({ ctx, next }) => {
   const caller = await callerOf(ctx, ctx.headers);
   if (!caller) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
   return next({ ctx: { ...ctx, ...caller } });
+});
+
+// The only procedures that read across businesses, for people with the platform role. Anyone
+// else, signed out included, gets exactly what tRPC answers for a path with no procedure, so the
+// admin area cannot be found by asking. It runs before input is read, so input reveals nothing.
+const admin = procedure.use(async ({ ctx, path, next }) => {
+  const person = await currentPerson(ctx, ctx.headers);
+  if (!person?.admin)
+    throw new TRPCError({ code: "NOT_FOUND", message: `No procedure found on path "${path}"` });
+  return next({ ctx: { ...ctx, person } });
 });
 
 // A procedure about one project (`id`) or one build (`buildId`). Either in another business
@@ -134,11 +147,19 @@ export const appRouter = t.router({
     get: open.query(async ({ ctx }) => {
       const person = await currentPerson(ctx, ctx.headers);
       return {
-        person: person && { name: person.name, email: person.email },
+        person: person && {
+          name: person.name,
+          email: person.email,
+          ...(person.admin && { role: "admin" as const }),
+        },
         businesses: person ? await businessesOf(ctx.db, person) : [],
         providers: ctx.providers,
       };
     }),
+  }),
+  // Every procedure here is built on `admin`; admin.test.ts walks them all as a customer.
+  admin: t.router({
+    whoami: admin.query(({ ctx }) => ({ name: ctx.person.name, email: ctx.person.email })),
   }),
   // One-time links that let an approved person set a password; see services/access.ts.
   invites: t.router({

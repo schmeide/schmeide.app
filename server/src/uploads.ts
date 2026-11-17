@@ -1,8 +1,9 @@
+import { TRPCError } from "@trpc/server";
 import { fromNodeHeaders } from "better-auth/node";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { FILE_OWNERS, FILE_PURPOSES, type FileType } from "./db/schema.ts";
-import { callerOf, SIGN_IN_FIRST, type AppContext } from "./router.ts";
+import { callerOf, NOT_IN_A_BUSINESS, SIGN_IN_FIRST, type AppContext } from "./router.ts";
 import type { Person } from "./services/auth.ts";
 import { assertProjectIn } from "./services/businesses.ts";
 import { NotFoundError, UploadRefusedError } from "./services/errors.ts";
@@ -56,8 +57,15 @@ export const registerUploads = (
       url: UPLOAD_PATH,
       bodyLimit: limits.fileBytes,
       onRequest: async (request, reply) => {
-        const caller = await callerOf(context, fromNodeHeaders(request.headers));
+        const caller = await callerOf(context, fromNodeHeaders(request.headers)).catch(
+          (error: unknown) => {
+            if (error instanceof TRPCError && error.code === "FORBIDDEN")
+              return "forbidden" as const;
+            throw error;
+          }
+        );
         if (!caller) return refusal(reply, 401, "unauthorized", SIGN_IN_FIRST);
+        if (caller === "forbidden") return refusal(reply, 403, "forbidden", NOT_IN_A_BUSINESS);
         const projectId = Number(request.params.id);
         try {
           if (!Number.isSafeInteger(projectId) || projectId < 1)

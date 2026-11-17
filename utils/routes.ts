@@ -1,8 +1,9 @@
 import { copy } from "../data/copy";
-import type { Session } from "./session";
+import { isAdmin, type Session } from "./session";
 
-// Who may open a route: anyone, a signed-in person, or a signed-in person with a business.
-export type Access = "public" | "signedIn" | "business";
+// Who may open a route: anyone, a signed-in person, a signed-in person with a business, or a
+// person with the platform admin role. The server checks again; this only picks the page.
+export type Access = "public" | "signedIn" | "business" | "admin";
 
 // The one route table. A `:name` segment is a numeric id. Paths, not hashes: sign-in links,
 // invitations, and payment returns arrive as full addresses with query values.
@@ -18,6 +19,7 @@ const table = {
   business: { path: "/business", access: "business" },
   account: { path: "/account", access: "signedIn" },
   welcome: { path: "/welcome", access: "signedIn" },
+  admin: { path: "/admin", access: "admin" },
   help: { path: "/help", access: "public" },
   signIn: { path: "/sign-in", access: "public" },
   setPassword: { path: "/set-password", access: "public" },
@@ -95,8 +97,10 @@ export const guard = (
     );
   }
   if (route.name === "signIn") return redirect(nextPath(location.search));
+  if (route.access === "admin" && !isAdmin(session)) return redirect(pathTo("apps"));
   const hasBusiness = session.businesses.length > 0;
-  if (route.access === "business" && !hasBusiness) return redirect(pathTo("welcome"));
+  if (route.access === "business" && !hasBusiness)
+    return redirect(pathTo(isAdmin(session) ? "admin" : "welcome"));
   if (route.name === "welcome" && hasBusiness) return redirect(pathTo("apps"));
   return { kind: "page" };
 };

@@ -33,6 +33,7 @@ export const copy = {
     business: "Business",
     account: "Account",
     welcome: "Your business",
+    admin: "Admin",
     help: "Help",
     signIn: "Sign in",
     setPassword: "Set your password",

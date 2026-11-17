@@ -9,7 +9,7 @@ import { approveEmail } from "../services/access.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 import { approveSpec, createProject, transition } from "../services/projects.ts";
 import { finishBuild } from "../services/builds.ts";
-import { aSignedInPerson, callApi, procedurePaths, testAuth } from "./testAuth.ts";
+import { adminPaths, aSignedInPerson, callApi, procedurePaths, testAuth } from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -43,9 +43,11 @@ beforeEach(() => {
 
 // The procedures anyone may call. Everything else needs a signed-in, approved caller.
 const OPEN = ["session.get", "invites.get", "invites.accept"];
+// Every procedure but the admin ones, which admin.test.ts walks on their own.
+const customerPaths = procedurePaths.filter((path) => !adminPaths.includes(path));
 
-// One call of every procedure, aimed at the given project and build. A procedure added to the
-// router must be added here, or the first test fails.
+// One call of every customer procedure, aimed at the given project and build. A procedure added
+// to the router must be added here, or the first test fails.
 const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown>> => ({
   "session.get": undefined,
   "invites.get": { token: "no-such-token" },
@@ -87,7 +89,7 @@ const aBuiltProject = async (tenantId: number) => {
 
 describe("every procedure", () => {
   it("is covered by the walk below", () => {
-    expect(Object.keys(everyCall(1, 1)).sort()).toEqual([...procedurePaths].sort());
+    expect(Object.keys(everyCall(1, 1)).sort()).toEqual([...customerPaths].sort());
   });
 
   it("answers UNAUTHORIZED to a signed-out caller, except the three open ones", async () => {
@@ -96,8 +98,8 @@ describe("every procedure", () => {
     start.mockClear();
     try {
       const calls = everyCall(project.id, build.id);
-      const closed = procedurePaths.filter((path) => !OPEN.includes(path));
-      expect(closed).toHaveLength(procedurePaths.length - OPEN.length);
+      const closed = customerPaths.filter((path) => !OPEN.includes(path));
+      expect(closed).toHaveLength(customerPaths.length - OPEN.length);
       for (const path of closed)
         expect([path, (await callApi(app, path, calls[path])).code]).toEqual([
           path,
@@ -124,7 +126,7 @@ describe("every procedure", () => {
     start.mockClear();
     try {
       const calls = everyCall(project.id, build.id);
-      const scoped = procedurePaths.filter(
+      const scoped = customerPaths.filter(
         (path) => !OPEN.includes(path) && takesAnId(calls[path]) && path !== "projects.create"
       );
       expect(scoped.length).toBeGreaterThan(15);

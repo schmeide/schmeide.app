@@ -1,7 +1,14 @@
-// `make access/approve|list|remove`: manages the prelaunch approved list. There is no operator
-// console, so this is how a person is let in and how their set-password link is made.
+// `make access/approve|list|remove|admin`: manages the prelaunch approved list and who has the
+// platform admin role. There is no operator console yet, so this is how a person is let in, how
+// their set-password link is made, and how the first admin is made.
 import { createDb } from "../db/client.ts";
-import { approveEmail, INVITE_DAYS, listApproved, removeApproval } from "../services/access.ts";
+import {
+  approveEmail,
+  grantAdmin,
+  INVITE_DAYS,
+  listApproved,
+  removeApproval,
+} from "../services/access.ts";
 import { authConfigFromEnv } from "../services/auth.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 
@@ -11,7 +18,7 @@ const db = createDb(
 );
 
 const needEmail = (): string => {
-  if (!email) throw new Error("An email address is needed: EMAIL=person@example.com");
+  if (!email) throw new Error(`Usage: make access/${command} EMAIL=person@example.com`);
   return email;
 };
 
@@ -35,13 +42,20 @@ try {
     console.log(
       removed ? `${email} is removed and signed out.` : `${email} was not on the approved list.`
     );
+  } else if (command === "admin") {
+    const granted = await grantAdmin(db, needEmail());
+    console.log(
+      `${granted.email} is an admin. They see the admin area at /admin from their next page load.`
+    );
   } else if (command === "list") {
     const approved = await listApproved(db);
     if (approved.length === 0) console.log("Nobody is approved yet.");
-    for (const { email: address, hasAccount } of approved)
-      console.log(`${address}\t${hasAccount ? "has an account" : "has not signed in yet"}`);
+    for (const { email: address, hasAccount, admin } of approved)
+      console.log(
+        `${address}\t${hasAccount ? "has an account" : "has not signed in yet"}${admin ? "\tadmin" : ""}`
+      );
   } else {
-    throw new Error("Use one of: approve, list, remove");
+    throw new Error("Use one of: approve, list, remove, admin");
   }
 } catch (error) {
   console.error(`Error: ${(error as Error).message}`);
