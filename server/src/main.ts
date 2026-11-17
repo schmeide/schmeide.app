@@ -1,5 +1,5 @@
-// The one process: Fastify + tRPC API and the Temporal worker. With cli/access.ts, the only place
-// that reads the environment.
+// The server: Fastify + tRPC API and the Temporal worker, one process or two by SCHMEIDE_ROLE
+// (role.ts). With cli/access.ts, the only place that reads the environment.
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +9,12 @@ import { NativeConnection, Worker } from "@temporalio/worker";
 import { describeRouting, routingFromEnv } from "./agentModel.ts";
 import { buildApp } from "./app.ts";
 import { createDb } from "./db/client.ts";
-import { authConfigFromEnv, createAuth, enabledProviders } from "./services/auth.ts";
+import {
+  authConfigFromEnv,
+  createAuth,
+  enabledProviders,
+  type AuthConfig,
+} from "./services/auth.ts";
 import { claudeEnv } from "./services/claudeEnv.ts";
 import { createFileReader } from "./services/fileReader.ts";
 import { createLocalFileStore } from "./services/fileStore.ts";
@@ -20,6 +25,7 @@ import { createSiteFetcher } from "./services/siteFetcher.ts";
 import { createSummaries } from "./services/summaries.ts";
 import { createSummarizer } from "./services/summarizer.ts";
 import { createWebsiteReader } from "./services/websiteReader.ts";
+import { createHealthServer, parseRole } from "./role.ts";
 import { createActivities, GIT_CONFIG, gitConfigFile, shimDir } from "./temporal/activities.ts";
 
 const env = process.env;
@@ -27,6 +33,14 @@ const databaseUrl = env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:
 const temporalAddress = env.TEMPORAL_ADDRESS ?? "localhost:7233";
 const port = Number(env.PORT ?? 3100);
 const taskQueue = env.SCHMEIDE_TASK_QUEUE ?? "schmeide";
+const role = (() => {
+  try {
+    return parseRole(env.SCHMEIDE_ROLE);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+})();
 const onPath = (name: string) =>
   (env.PATH ?? "")
     .split(delimiter)
@@ -65,7 +79,8 @@ if (builds !== "on" && builds !== "off") {
 const buildsOff = builds === "off";
 
 const makeBin = [onPath("gmake"), onPath("make")].find((bin) => bin && isGnuMake4(bin));
-if (!makeBin && !buildsOff) {
+// Only the worker builds.
+if (!makeBin && !buildsOff && role.runWorker) {
   console.error(
     "GNU make 4 or newer is required (Apple's make is 3.81). Install it: brew install make, or set SCHMEIDE_BUILDS=off to run without building apps."
   );
@@ -73,11 +88,16 @@ if (!makeBin && !buildsOff) {
 }
 
 const dataDir = env.SCHMEIDE_DATA_DIR ?? join(homedir(), ".schmeide");
-// Project runs and the agent's own Bash calls find GNU make as `make` through this directory.
-mkdirSync(shimDir(dataDir), { recursive: true });
-rmSync(join(shimDir(dataDir), "make"), { force: true });
-if (makeBin) symlinkSync(makeBin, join(shimDir(dataDir), "make"));
-writeFileSync(gitConfigFile(dataDir), GIT_CONFIG);
+// The API's model calls run in the data dir.
+mkdirSync(dataDir, { recursive: true });
+// Only the worker's activities use these, and an API sharing the disk must not race it for them.
+if (role.runWorker) {
+  // Project runs and the agent's own Bash calls find GNU make as `make` through this directory.
+  mkdirSync(shimDir(dataDir), { recursive: true });
+  rmSync(join(shimDir(dataDir), "make"), { force: true });
+  if (makeBin) symlinkSync(makeBin, join(shimDir(dataDir), "make"));
+  writeFileSync(gitConfigFile(dataDir), GIT_CONFIG);
+}
 
 const config = {
   dataDir,
@@ -93,14 +113,17 @@ const config = {
   claudeBin,
 } as const;
 
-const authConfig = (() => {
-  try {
-    return authConfigFromEnv(env);
-  } catch (error) {
-    console.error((error as Error).message);
-    process.exit(1);
-  }
-})();
+// The worker needs none of the sign-in settings or secrets.
+const authConfig = role.serveApi
+  ? (() => {
+      try {
+        return authConfigFromEnv(env);
+      } catch (error) {
+        console.error((error as Error).message);
+        process.exit(1);
+      }
+    })()
+  : undefined;
 
 const db = createDb(databaseUrl);
 const connection = await Connection.connect({ address: temporalAddress }).catch(
@@ -115,50 +138,60 @@ const connection = await Connection.connect({ address: temporalAddress }).catch(
 const client = new Client({ connection });
 const deps = { db, workflows: client.workflow, taskQueue, buildsOff } as const;
 
-const worker = await Worker.create({
-  connection: await NativeConnection.connect({ address: temporalAddress }),
-  taskQueue,
-  workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
-  activities: createActivities(
-    deps,
-    config,
-    undefined,
-    undefined,
-    createSummaries(db, createSummarizer({ ...config, model: config.summaryModel }))
-  ),
-});
+const startWorker = async () => {
+  const worker = await Worker.create({
+    connection: await NativeConnection.connect({ address: temporalAddress }),
+    taskQueue,
+    workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
+    activities: createActivities(
+      deps,
+      config,
+      undefined,
+      undefined,
+      createSummaries(db, createSummarizer({ ...config, model: config.summaryModel }))
+    ),
+  });
+  await failOrphanedBuilds(deps);
+  return worker;
+};
 
-await failOrphanedBuilds(deps);
-const interviewer = createInterviewer({ ...config, model: config.interviewModel });
-const reader = createFileReader({ ...config, model: config.interviewModel });
-const files = createLocalFileStore(config.dataDir);
-const websiteReader = createWebsiteReader({ ...config, model: config.websiteModel });
-const siteFetcher = createSiteFetcher();
-const providers = enabledProviders(authConfig);
-const app = buildApp(
-  {
-    ...deps,
-    interviewer,
-    siteFetcher,
-    reader,
-    files,
-    websiteReader,
-    resources: createResourceReader(config.dataDir),
-    auth: createAuth(db, authConfig),
-    providers,
-  },
-  { logger: true, allowOrigin: authConfig.publicUrl }
-);
+const startApi = (authConfig: AuthConfig) => {
+  const providers = enabledProviders(authConfig);
+  const app = buildApp(
+    {
+      ...deps,
+      interviewer: createInterviewer({ ...config, model: config.interviewModel }),
+      siteFetcher: createSiteFetcher(),
+      reader: createFileReader({ ...config, model: config.interviewModel }),
+      files: createLocalFileStore(config.dataDir),
+      websiteReader: createWebsiteReader({ ...config, model: config.websiteModel }),
+      resources: createResourceReader(config.dataDir),
+      auth: createAuth(db, authConfig),
+      providers,
+    },
+    { logger: true, allowOrigin: authConfig.publicUrl }
+  );
+  console.log(
+    `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
+  );
+  return app;
+};
+
+const worker = role.runWorker ? await startWorker() : undefined;
+const app = authConfig ? startApi(authConfig) : undefined;
+// A worker on its own answers only /healthz on PORT, for its probes.
+const health = app ? undefined : createHealthServer(() => worker?.getState() === "RUNNING");
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    worker.shutdown();
-    void app.close();
+    worker?.shutdown();
+    health?.close();
+    void app?.close().then(() => (worker ? undefined : connection.close()));
   });
 }
 
 console.log(
-  `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
+  `Role ${env.SCHMEIDE_ROLE ?? "all"}: ${[app && "API", worker && "Temporal worker"].filter(Boolean).join(" and ")}.`
 );
 console.log(
   buildsOff
@@ -169,6 +202,10 @@ console.log(
   `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}`
 );
 // Loopback unless told otherwise: a hosted server sits behind a proxy that ends https.
-await app.listen({ host: env.SCHMEIDE_HOST ?? "127.0.0.1", port });
-await worker.run();
-await connection.close();
+const host = env.SCHMEIDE_HOST ?? "127.0.0.1";
+await app?.listen({ host, port });
+health?.listen(port, host);
+if (worker) {
+  await worker.run();
+  await connection.close();
+}
