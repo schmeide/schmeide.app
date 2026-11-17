@@ -166,7 +166,7 @@ describe("StartPage", () => {
     await userEvent.type(field(), "I need to track jobs");
     await submit();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(copy.errors.serverDown);
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.errors.serverDownLocal);
     expect(field()).toHaveValue("I need to track jobs");
     expect(window.location.pathname).toBe("/new");
   });

@@ -1,14 +1,18 @@
 import { copy } from "../data/copy";
 import { classifyError } from "../utils/apiError";
+import { hasHostedApi } from "../utils/apiUrl";
 
 import styles from "./ErrorNote.module.css";
+
+// Customers on the hosted site never see how to start the server; a developer does.
+export const serverDownText = hasHostedApi ? copy.errors.serverDown : copy.errors.serverDownLocal;
 
 type ApiError = { readonly message: string };
 
 const describe = (error: ApiError): string => {
   switch (classifyError(error)) {
     case "unreachable":
-      return copy.errors.serverDown;
+      return serverDownText;
     case "signedOut":
       return copy.errors.signedOut;
     case "notFound":
