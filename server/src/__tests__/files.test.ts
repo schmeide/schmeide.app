@@ -587,19 +587,22 @@ describe("reading a file into proposals", () => {
     });
     reader.mockResolvedValue({
       reading: { outcome: "read", items: [{ section: "does", text: "Take an order" }] },
-      usage: [
-        {
-          projectId: project.id,
-          buildId: null,
-          runKind: "read",
-          model: "claude-test",
-          inputTokens: 1,
-          outputTokens: 2,
-          cacheReadTokens: 3,
-          cacheCreationTokens: 4,
-          costUsd: 0.03,
-        },
-      ],
+      usage: {
+        run: { projectId: project.id, buildId: null, runKind: "read", durationMs: 4000 },
+        models: [
+          {
+            projectId: project.id,
+            buildId: null,
+            runKind: "read",
+            model: "claude-test",
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 3,
+            cacheCreationTokens: 4,
+            costUsd: 0.03,
+          },
+        ],
+      },
     });
 
     const result = await read(cookie, project.id, file?.id);
@@ -632,7 +635,7 @@ describe("reading a file into proposals", () => {
   ] as const)("returns a %s picture as a stated reason, not an error", async (outcome, reason) => {
     const { cookie, project } = await anOwner();
     const { file } = await upload(cookie, project.id, PNG);
-    reader.mockResolvedValue({ reading: { outcome, items: [] }, usage: [] });
+    reader.mockResolvedValue({ reading: { outcome, items: [] }, usage: null });
 
     const result = await read(cookie, project.id, file?.id);
 

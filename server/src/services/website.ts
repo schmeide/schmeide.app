@@ -1,9 +1,9 @@
 import { and, count, eq, gt, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
-import { ITEM_MAX, planSection, websiteReads, type NewUsage } from "../db/schema.ts";
+import { ITEM_MAX, planSection, websiteReads } from "../db/schema.ts";
 import type { Person } from "./auth.ts";
-import { recordUsage } from "./builds.ts";
+import { recordUsage, type RunUsage } from "./builds.ts";
 import { ConflictError, ReaderUnavailableError } from "./errors.ts";
 import type { PageDigest } from "./htmlText.ts";
 import type { ReadFailure, SiteFetcher, Whose } from "./siteFetcher.ts";
@@ -57,7 +57,7 @@ export type WebsiteReader = (input: {
   readonly projectId: number;
   readonly whose: Whose;
   readonly pages: readonly PageDigest[];
-}) => Promise<{ readonly reading: unknown; readonly usage: readonly NewUsage[] }>;
+}) => Promise<{ readonly reading: unknown; readonly usage: RunUsage | null }>;
 
 export type Proposals =
   | {

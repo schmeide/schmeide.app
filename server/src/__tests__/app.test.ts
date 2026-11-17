@@ -76,7 +76,7 @@ describe("the API", () => {
     interviewer
       .mockResolvedValueOnce({
         turn: { ...empty, question: { text: "Who uses it?", kind: "text", choices: [] } },
-        usage: [],
+        usage: null,
       })
       .mockResolvedValueOnce({
         turn: {
@@ -85,7 +85,7 @@ describe("the API", () => {
           ready: ["who"],
           question: null,
         },
-        usage: [],
+        usage: null,
       });
     try {
       const started = await call("interview.start", { id: project.id });

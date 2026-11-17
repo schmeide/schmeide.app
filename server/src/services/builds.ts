@@ -2,12 +2,14 @@ import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, asc, eq, gt } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import {
+  agentRuns,
   buildEvents,
   builds,
   usage,
   type Build,
   type BuildEvent,
   type BuildEventKind,
+  type NewAgentRun,
   type NewUsage,
   type RunKind,
 } from "../db/schema.ts";
@@ -53,21 +55,31 @@ export const finishBuild = async (db: Db, buildId: number, error?: string): Prom
   return build;
 };
 
-export const recordUsage = async (db: Db, rows: readonly NewUsage[]): Promise<void> => {
-  if (rows.length > 0) await db.insert(usage).values([...rows]);
+// One agent run as its SDK result reports it: the run with its time, and one usage row per model.
+export type RunUsage = { readonly run: NewAgentRun; readonly models: readonly NewUsage[] };
+
+// null when nothing ran: a fake agent command stands in for the model.
+export const recordUsage = async (db: Db, used: RunUsage | null): Promise<void> => {
+  if (!used) return;
+  await db.transaction(async (tx) => {
+    const [run] = await tx.insert(agentRuns).values(used.run).returning({ id: agentRuns.id });
+    if (used.models.length > 0)
+      await tx.insert(usage).values(used.models.map((row) => ({ ...row, runId: run.id })));
+  });
 };
 
 // The Claude Agent SDK entry point; tests pass a stand-in.
 export type Query = typeof query;
 
 // buildId is null for model calls made outside a build: writing a spec, asking an interview question.
-export const usageRows = (
+export const runUsage = (
   message: Extract<SDKMessage, { type: "result" }>,
   projectId: number,
   buildId: number | null,
   runKind: RunKind
-): readonly NewUsage[] =>
-  Object.entries(message.modelUsage).map(([model, used]) => ({
+): RunUsage => ({
+  run: { projectId, buildId, runKind, durationMs: Math.round(message.duration_ms) },
+  models: Object.entries(message.modelUsage).map(([model, used]) => ({
     projectId,
     buildId,
     runKind,
@@ -77,4 +89,5 @@ export const usageRows = (
     cacheReadTokens: used.cacheReadInputTokens,
     cacheCreationTokens: used.cacheCreationInputTokens,
     costUsd: used.costUSD,
-  }));
+  })),
+});

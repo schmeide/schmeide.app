@@ -18,6 +18,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
 import {
+  agentRuns,
   buildFiles,
   builds,
   files,
@@ -131,6 +132,7 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
         type: "result",
         subtype: fail ? "error_max_turns" : "success",
         is_error: fail,
+        duration_ms: 12_000,
         num_turns: 3,
         total_cost_usd: 0.5,
         session_id: "session-1",
@@ -258,6 +260,9 @@ describe("build activities", () => {
         costUsd: 0.5,
       }),
     ]);
+    expect(await db.select().from(agentRuns).where(eq(agentRuns.buildId, build.id))).toEqual([
+      expect.objectContaining({ runKind: "initial", durationMs: 12_000 }),
+    ]);
   });
 
   it("routes spec, initial, and change runs to their own models and labels their usage", async () => {
@@ -303,6 +308,8 @@ describe("build activities", () => {
     expect(await kindsOf(drafted.id)).toEqual(["spec"]);
     expect(await kindsOf(initial.project.id)).toEqual(["initial"]);
     expect(await kindsOf(change.project.id)).toEqual(["change", "change"]);
+    const [spec] = await db.select().from(agentRuns).where(eq(agentRuns.projectId, drafted.id));
+    expect(spec).toMatchObject({ runKind: "spec", buildId: null, durationMs: 12_000 });
   });
 
   it("tells the agent about the changes already built, and not about failed or waiting ones", async () => {
@@ -425,6 +432,7 @@ const result = {
   type: "result",
   subtype: "success",
   is_error: false,
+  duration_ms: 1000,
   num_turns: 1,
   total_cost_usd: 0,
   session_id: "session-1",

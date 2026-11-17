@@ -368,6 +368,9 @@ decides, and the run kind is its only input.
   `select run_kind, model, sum(cost_usd) from usage group by 1, 2`. An interview question is a fourth kind there,
   `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table. Reading a website is a fifth, `website`, on
   `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`.
+- Every run that reaches the model also gets one `agent_runs` row with how long it ran (`duration_ms` from the SDK's
+  result), and its `usage` rows name it in `run_id`. The time is kept once per run, not per model, so summing it never
+  counts a run twice. Rows from before runs were recorded have no `run_id`, and their time is not known.
 - The request size, the tenant's plan, and the remaining allowance do not change the model.
 - Nothing escalates. A fix-up run after failed checks resumes the same session on the same model, and a build that
   still fails after its fix-up rounds fails as before.

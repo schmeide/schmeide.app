@@ -34,7 +34,7 @@ import {
   finishBuild as finishBuildRow,
   getBuild,
   recordUsage,
-  usageRows,
+  runUsage,
   type Query,
 } from "../services/builds.ts";
 import { businessSuspended } from "../services/businesses.ts";
@@ -547,7 +547,7 @@ export const createActivities = (
                 },
               })) {
                 if (message.type !== "result") continue;
-                await recordUsage(db, usageRows(message, projectId, null, "spec"));
+                await recordUsage(db, runUsage(message, projectId, null, "spec"));
                 if (message.subtype !== "success" || message.is_error) {
                   throw new Error(`Spec generation failed: ${message.subtype}`);
                 }
@@ -672,7 +672,7 @@ export const createActivities = (
               if (line) await event(input.buildId, "agent", line);
             }
           } else if (message.type === "result") {
-            await recordUsage(db, usageRows(message, project.id, input.buildId, runKind));
+            await recordUsage(db, runUsage(message, project.id, input.buildId, runKind));
             for (const denial of message.permission_denials) {
               await event(
                 input.buildId,

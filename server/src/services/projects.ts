@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, like, lt, ne, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
+  agentRuns,
   buildEvents,
   buildFiles,
   builds,
@@ -576,6 +577,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
   db.transaction(async (tx) => {
     const ids = tx.select({ id: builds.id }).from(builds).where(eq(builds.projectId, id));
     await tx.delete(usage).where(eq(usage.projectId, id));
+    await tx.delete(agentRuns).where(eq(agentRuns.projectId, id));
     await tx.delete(projectIcons).where(eq(projectIcons.projectId, id));
     await tx.delete(planItems).where(eq(planItems.projectId, id));
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));

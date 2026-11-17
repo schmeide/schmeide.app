@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import { z } from "zod";
 import { PLAN_SECTIONS, type Answer, type PlanItem } from "../db/schema.ts";
-import { usageRows, type Query } from "./builds.ts";
+import { runUsage, type Query } from "./builds.ts";
 import { claudeEnv } from "./claudeEnv.ts";
 import { InterviewUnavailableError } from "./errors.ts";
 import { turnSchema, type AnsweredQuestion, type Interviewer, type Turn } from "./interview.ts";
@@ -177,7 +177,7 @@ export const createInterviewer = (
         }
         return {
           turn: parseTurn(message.structured_output ?? parseJson(message.result)),
-          usage: usageRows(message, projectId, null, "interview"),
+          usage: runUsage(message, projectId, null, "interview"),
         };
       }
       throw new InterviewUnavailableError("Claude ended without a result");
@@ -190,7 +190,7 @@ export const createInterviewer = (
     const prompt = interviewPrompt(input);
     try {
       return config.agentCmd
-        ? { turn: await viaCommand(config.agentCmd, prompt), usage: [] }
+        ? { turn: await viaCommand(config.agentCmd, prompt), usage: null }
         : await viaClaude(prompt, input.project.id);
     } catch (error) {
       if (error instanceof InterviewUnavailableError) throw error;

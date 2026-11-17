@@ -485,19 +485,22 @@ describe("deleting a project", () => {
     const { build } = await approveSpec(deps, ready.id);
     await finishBuild(db, build.id);
     await appendEvent(db, build.id, "step", "hello");
-    await recordUsage(db, [
-      {
-        projectId: ready.id,
-        buildId: build.id,
-        runKind: "initial",
-        model: "m",
-        inputTokens: 1,
-        outputTokens: 1,
-        cacheReadTokens: 0,
-        cacheCreationTokens: 0,
-        costUsd: 0,
-      },
-    ]);
+    await recordUsage(db, {
+      run: { projectId: ready.id, buildId: build.id, runKind: "initial", durationMs: 1000 },
+      models: [
+        {
+          projectId: ready.id,
+          buildId: build.id,
+          runKind: "initial",
+          model: "m",
+          inputTokens: 1,
+          outputTokens: 1,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          costUsd: 0,
+        },
+      ],
+    });
 
     await deleteProjectRows(db, ready.id);
 

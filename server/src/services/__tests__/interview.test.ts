@@ -49,7 +49,7 @@ const WHEN: Asked = { text: "Do invoices have a due date?", kind: "yes_no", choi
 // Stands in for the model: hands back the given turns in order, one per call.
 const scripted = (...turns: readonly Turn[]) => {
   const interviewer = vi.fn<Interviewer>();
-  turns.forEach((next) => interviewer.mockResolvedValueOnce({ turn: next, usage: [] }));
+  turns.forEach((next) => interviewer.mockResolvedValueOnce({ turn: next, usage: null }));
   return { deps: { db, interviewer }, interviewer };
 };
 
@@ -112,19 +112,22 @@ describe("startInterview", () => {
     const project = await newProject();
     const interviewer = vi.fn<Interviewer>(async ({ project: asked }) => ({
       turn: turn({ question: WHO }),
-      usage: [
-        {
-          projectId: asked.id,
-          buildId: null,
-          runKind: "interview",
-          model: "claude-test",
-          inputTokens: 1,
-          outputTokens: 2,
-          cacheReadTokens: 3,
-          cacheCreationTokens: 4,
-          costUsd: 0.01,
-        },
-      ],
+      usage: {
+        run: { projectId: asked.id, buildId: null, runKind: "interview", durationMs: 4000 },
+        models: [
+          {
+            projectId: asked.id,
+            buildId: null,
+            runKind: "interview",
+            model: "claude-test",
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 3,
+            cacheCreationTokens: 4,
+            costUsd: 0.01,
+          },
+        ],
+      },
     }));
 
     await startInterview({ db, interviewer }, project.id);
@@ -139,7 +142,7 @@ describe("startInterview", () => {
     const interviewer = vi
       .fn<Interviewer>()
       .mockRejectedValueOnce(new InterviewUnavailableError("no answer"))
-      .mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: [] });
+      .mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: null });
 
     await expect(startInterview({ db, interviewer }, project.id)).rejects.toBeInstanceOf(
       InterviewUnavailableError
@@ -186,7 +189,7 @@ describe("answerQuestion", () => {
         ready: ["who"],
         question: WHEN,
       }),
-      usage: [],
+      usage: null,
     });
 
     const interview = await answerQuestion(deps, {
@@ -222,7 +225,7 @@ describe("answerQuestion", () => {
     const started = await startInterview(deps, project.id);
     interviewer.mockResolvedValueOnce({
       turn: turn({ add: [{ section: "keeps", text: "A due date", phase: "day_one" }] }),
-      usage: [],
+      usage: null,
     });
 
     const interview = await answerQuestion(deps, {
@@ -257,7 +260,7 @@ describe("answerQuestion", () => {
     const project = await newProject();
     const { deps, interviewer } = scripted(turn({ question: WHO }));
     const started = await startInterview(deps, project.id);
-    interviewer.mockResolvedValueOnce({ turn: turn(), usage: [] });
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
 
     const interview = await answerQuestion(deps, {
       id: project.id,
@@ -312,7 +315,7 @@ describe("answerQuestion", () => {
     await expect(answerQuestion(deps, input)).rejects.toBeInstanceOf(InterviewUnavailableError);
 
     expect((await getInterview(db, project.id)).current).toMatchObject({ answer: null });
-    interviewer.mockResolvedValueOnce({ turn: turn(), usage: [] });
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
     expect((await answerQuestion(deps, input)).questions).toHaveLength(1);
   });
 
@@ -372,7 +375,7 @@ describe("answerQuestion", () => {
 
     interviewer.mockResolvedValueOnce({
       turn: turn({ add: [{ section: "keeps", text: "A due date", phase: "day_one" }] }),
-      usage: [],
+      usage: null,
     });
     const next = await getInterview(db, project.id);
     await answerQuestion(deps, {
