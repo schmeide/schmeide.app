@@ -18,6 +18,8 @@ const start = vi.fn(async () => ({}) as never);
 const interviewer = vi.fn();
 const siteFetcher = vi.fn();
 const websiteReader = vi.fn();
+const reader = vi.fn();
+const stored = { put: vi.fn(), get: vi.fn(), remove: vi.fn(), removeProject: vi.fn() };
 const deps: AppContext = {
   db,
   workflows: { start, getHandle: vi.fn() as never },
@@ -25,6 +27,8 @@ const deps: AppContext = {
   interviewer,
   siteFetcher,
   websiteReader,
+  files: stored,
+  reader,
   auth: testAuth(db),
   providers: [],
 };
@@ -33,6 +37,8 @@ afterAll(() => app.close());
 beforeEach(() => {
   start.mockClear();
   interviewer.mockClear();
+  reader.mockClear();
+  Object.values(stored).forEach((call) => call.mockClear());
 });
 
 // The procedures anyone may call. Everything else needs a signed-in, approved caller.
@@ -61,6 +67,10 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "interview.updateItem": { id, itemId: 1, text: "Take over" },
   "interview.removeItem": { id, itemId: 1 },
   "website.read": { id, address: "https://bakery.example/", whose: "mine" },
+  "files.list": { id },
+  "files.rename": { id, fileId: 1, displayName: "Taken over" },
+  "files.delete": { id, fileId: 1 },
+  "files.read": { id, fileId: 1 },
   "builds.events": { buildId },
   "builds.editQueued": { buildId, request: "Take over" },
   "builds.removeQueued": { buildId },
@@ -99,6 +109,8 @@ describe("every procedure", () => {
       expect(interviewer).not.toHaveBeenCalled();
       expect(siteFetcher).not.toHaveBeenCalled();
       expect(websiteReader).not.toHaveBeenCalled();
+      expect(reader).not.toHaveBeenCalled();
+      Object.values(stored).forEach((call) => expect(call).not.toHaveBeenCalled());
     } finally {
       await finishBuild(db, build.id);
     }
@@ -127,6 +139,8 @@ describe("every procedure", () => {
       expect(interviewer).not.toHaveBeenCalled();
       expect(siteFetcher).not.toHaveBeenCalled();
       expect(websiteReader).not.toHaveBeenCalled();
+      expect(reader).not.toHaveBeenCalled();
+      Object.values(stored).forEach((call) => expect(call).not.toHaveBeenCalled());
     } finally {
       await finishBuild(db, build.id);
     }

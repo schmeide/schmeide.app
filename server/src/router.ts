@@ -9,16 +9,18 @@ import {
   editChangeSchema,
   editPlanItemSchema,
   eventsQuerySchema,
+  fileIdSchema,
   inviteTokenSchema,
   newPlanItemSchema,
   newProjectSchema,
   planItemIdSchema,
   projectIdSchema,
   readWebsiteSchema,
+  renameFileSchema,
   setFeaturesSchema,
 } from "./db/schema.ts";
 import { acceptInvite, getInvite } from "./services/access.ts";
-import { currentPerson, type Auth, type Provider } from "./services/auth.ts";
+import { currentPerson, type Auth, type Person, type Provider } from "./services/auth.ts";
 import { assertBuildIn, assertProjectIn, businessesOf } from "./services/businesses.ts";
 import { listEvents } from "./services/builds.ts";
 import {
@@ -27,6 +29,9 @@ import {
   NotFoundError,
   ReaderUnavailableError,
 } from "./services/errors.ts";
+import type { FileReader } from "./services/fileReader.ts";
+import type { FileStore } from "./services/fileStore.ts";
+import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
   addPlanItem,
   answerQuestion,
@@ -58,6 +63,8 @@ import {
 export type AppContext = Deps &
   Omit<WebsiteDeps, "db"> & {
     readonly interviewer: Interviewer;
+    readonly files: FileStore;
+    readonly reader: FileReader;
     readonly auth: Auth;
     // The sign-in providers that have credentials, for the sign-in page.
     readonly providers: readonly Provider[];
@@ -88,13 +95,24 @@ export const BUSINESS_HEADER = "x-schmeide-business";
 // Everything below `open` needs a signed-in, approved caller, and acts inside one of their
 // businesses: the one the header names when they belong to it, otherwise their first.
 const open = procedure;
-const signedIn = procedure.use(async ({ ctx, next }) => {
-  const person = await currentPerson(ctx, ctx.headers);
-  if (!person) throw new TRPCError({ code: "UNAUTHORIZED", message: "Sign in to continue" });
+export const SIGN_IN_FIRST = "Sign in to continue";
+
+export const callerOf = async (
+  ctx: Pick<AppContext, "auth" | "db">,
+  headers: Headers
+): Promise<{ readonly person: Person; readonly tenantId: number } | null> => {
+  const person = await currentPerson(ctx, headers);
+  if (!person) return null;
   const businesses = await businessesOf(ctx.db, person);
-  const asked = Number(ctx.headers.get(BUSINESS_HEADER));
+  const asked = Number(headers.get(BUSINESS_HEADER));
   const business = businesses.find(({ id }) => id === asked) ?? businesses[0];
-  return next({ ctx: { ...ctx, person, tenantId: business.id } });
+  return { person, tenantId: business.id };
+};
+
+const signedIn = procedure.use(async ({ ctx, next }) => {
+  const caller = await callerOf(ctx, ctx.headers);
+  if (!caller) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
+  return next({ ctx: { ...ctx, ...caller } });
 });
 
 // A procedure about one project (`id`) or one build (`buildId`). Either in another business
@@ -170,6 +188,12 @@ export const appRouter = t.router({
     read: onProject(readWebsiteSchema).mutation(({ ctx, input }) =>
       readWebsite(ctx, input, { person: ctx.person, tenantId: ctx.tenantId })
     ),
+  }),
+  files: t.router({
+    list: onProject(projectIdSchema).query(({ ctx, input }) => listFiles(ctx.db, input.id)),
+    rename: onProject(renameFileSchema).mutation(({ ctx, input }) => renameFile(ctx.db, input)),
+    delete: onProject(fileIdSchema).mutation(({ ctx, input }) => deleteFile(ctx, input)),
+    read: onProject(fileIdSchema).mutation(({ ctx, input }) => readFileIntoProposals(ctx, input)),
   }),
   builds: t.router({
     events: onBuild(eventsQuerySchema).query(({ ctx, input }) =>

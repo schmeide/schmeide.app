@@ -2,15 +2,21 @@ import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import Fastify from "fastify";
 import { appRouter, BUSINESS_HEADER, type AppContext } from "./router.ts";
+import type { UploadLimits } from "./services/files.ts";
+import { registerUploads } from "./uploads.ts";
 
 type Options = {
   readonly logger?: boolean;
   // The address people open the app at. When the API is on another origin (the hosted site),
   // that origin alone may call it from a browser, with the session cookie.
   readonly allowOrigin?: string;
+  readonly uploadLimits?: UploadLimits;
 };
 
-export const buildApp = (context: AppContext, { logger = false, allowOrigin }: Options = {}) => {
+export const buildApp = (
+  context: AppContext,
+  { logger = false, allowOrigin, uploadLimits }: Options = {}
+) => {
   const app = Fastify({ logger });
   // Every answer is about one signed-in person (or one origin), so nothing may keep a copy.
   app.addHook("onRequest", async (_request, reply) => {
@@ -32,6 +38,7 @@ export const buildApp = (context: AppContext, { logger = false, allowOrigin }: O
     });
   }
   app.get("/api/healthz", async () => ({ ok: true }));
+  registerUploads(app, context, uploadLimits);
   app.register(fastifyTRPCPlugin, {
     prefix: "/api/trpc",
     trpcOptions: {

@@ -289,6 +289,39 @@ keeps ticked.
 - The fetch runs in the server process. `createSiteFetcher` in `services/siteFetcher.ts` is the one
   function to move when it gets a network of its own.
 
+## Files
+
+Pictures, PDFs, and spreadsheets a person sends to show what they mean. There is no screen for them yet (#70); the API
+is:
+
+- `POST /api/projects/<id>/files?owner=mine|someone_else&purpose=reference|in_app&name=<file name>` with the file as
+  the request body and its type in `Content-Type` (`application/octet-stream` when unknown). It is not a tRPC call. It
+  needs the session cookie, and takes the business header as tRPC does. It answers `201 { file }`, or
+  `{ error: { code, message } }` with a message written for the person: `401 unauthorized`, `404 not_found` (also for
+  a project in another business), `400 bad_request` or `empty`, `413 too_large`, `415 unsupported_type` or
+  `type_mismatch`, `422 damaged` or `not_yours`, `409 too_many_files` or `business_full`.
+- `files.list({ id })`, `files.rename({ id, fileId, displayName })`, and `files.delete({ id, fileId })`.
+- `files.read({ id, fileId })` returns `{ status: "read", proposals, table }` or
+  `{ status: "failed", reason, message }`. Proposals are plan items by section. Nothing is added to the plan.
+- `projects.requestChange({ id, request, fileIds })` attaches files of the project to the change.
+
+What the server does with a file:
+
+- Accepts PNG, JPEG, WebP, PDF, CSV, and XLSX, decided by the content. A declared type that does not match is refused.
+  HEIC is not accepted. Pictures may be 5 MB, other files 10 MB; a project holds 50 files and a business 500 MB.
+- Removes camera, location, author, and comment details from a picture before storing it, and keeps only which way up
+  it is. A picture it cannot take apart is refused. PDFs and spreadsheets are stored as sent.
+- Stores the bytes under `files/<business id>/<project id>/<file id>` in the data dir. The file name is kept as text
+  only. Files stay until they or their project are deleted.
+- Reads a spreadsheet without the model: the first sheet's column names become proposals for what the app keeps, with
+  up to five sample rows returned beside them. Nothing from a spreadsheet goes to the model.
+- Reads a picture or PDF with one model call that has no tools and a fixed answer shape (`SCHMEIDE_INTERVIEW_MODEL`;
+  usage rows have the run kind `read`). What the picture says is treated as content, never as instructions.
+- Gives a change's attached files to the builder in `attachments/build-<id>/` in the data dir, outside the app and
+  read only, until the build ends. Only a file that is `mine` and `in_app` may be copied into the app; after each
+  builder run, an exact copy of any other attached file found in the app is removed and the removal committed.
+  Something that is `someone_else` cannot be uploaded as `in_app`.
+
 ## Environment
 
 | Variable                   | Default                                    | Meaning                              |
@@ -296,10 +329,10 @@ keeps ticked.
 | `PORT`                     | `3100`                                     | API port (Vite proxies to it)        |
 | `DATABASE_URL`             | Postgres on `:5440`, database `schmeide`   | Customer database                    |
 | `TEMPORAL_ADDRESS`         | `localhost:7233`                           | Temporal frontend                    |
-| `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, logs, make shim          |
+| `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, files, logs, make shim   |
 | `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
 | `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run   |
-| `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for interview questions        |
+| `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for questions and for reading  |
 | `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website          |
 | `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
 | `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
@@ -324,7 +357,7 @@ decides, and the run kind is its only input.
 - Every `usage` row carries `run_kind`, so cost per kind is one query:
   `select run_kind, model, sum(cost_usd) from usage group by 1, 2`. An interview question is a fourth kind there,
   `interview`; its model is `SCHMEIDE_INTERVIEW_MODEL`, not this table. Reading a website is a fifth, `website`, on
-  `SCHMEIDE_WEBSITE_MODEL`.
+  `SCHMEIDE_WEBSITE_MODEL`. Reading an uploaded file is a sixth, `read`, on `SCHMEIDE_INTERVIEW_MODEL`.
 - The request size, the tenant's plan, and the remaining allowance do not change the model.
 - Nothing escalates. A fix-up run after failed checks resumes the same session on the same model, and a build that
   still fails after its fix-up rounds fails as before.
@@ -334,6 +367,7 @@ decides, and the run kind is its only input.
 ## Where things live
 
 - `~/.schmeide/projects/<slug>/`: one git working directory per project.
+- `~/.schmeide/files/<business id>/<project id>/<file id>`: uploaded files, removed with the file or the project.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
   Kept after a project is deleted. `e2e-fake-server.log` is the `make e2e/fake` server's output.
 - `~/.schmeide/bin/make`: a link to GNU make, first on `PATH` for project runs and the agent.
