@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -252,7 +252,7 @@ describe("ProjectPage", () => {
     expect(screen.getByText(copy.project.phase.check)).toBeInTheDocument();
   });
 
-  it("shows the preview link and usage once the app is live", async () => {
+  it("shows the app in a frame, its link and usage once the app is live", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
       projectServer({
@@ -272,10 +272,13 @@ describe("ProjectPage", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(screen.getByText("$0.42")).toBeInTheDocument();
     expect(screen.getByText("1,200")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: copy.project.toChanges })).toHaveAttribute(
-      "href",
-      "/projects/7/changes"
-    );
+    const frame = screen.getByTitle(copy.project.designer.frameTitle("Invoices"));
+    expect(frame).toHaveAttribute("src", "http://localhost:8100");
+    expect(frame).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
+    expect(frame).toHaveAttribute("referrerpolicy", "no-referrer");
+    expect(frame).toHaveAttribute("width");
+    expect(frame).toHaveAttribute("height");
+    expect(screen.getByText(copy.project.designer.frameHelp)).toBeVisible();
   });
 
   it("requests a change on a live app", async () => {
@@ -498,30 +501,186 @@ describe("ProjectPage setup", () => {
   });
 });
 
-describe("ProjectPage app workspace", () => {
+describe("ProjectPage designer", () => {
   const live = aProject({ status: "live", spec: SPEC, previewUrl: "http://localhost:8100" });
   const passed = aBuild({ status: "passed", finishedAt: new Date() });
 
-  it("links its three views, marking the one shown", async () => {
+  const links = (nav: HTMLElement) =>
+    within(nav)
+      .getAllByRole("link")
+      .map((link) => [
+        link.textContent,
+        link.getAttribute("href"),
+        link.getAttribute("aria-current"),
+      ]);
+
+  it("links the designer and settings, and the two tabs of the designer, marking the one shown", async () => {
     renderWithApi(
       <ProjectPage id={7} view="changes" />,
       projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
     );
     const views = await screen.findByRole("navigation", { name: copy.project.views.label });
-    expect(
-      within(views)
-        .getAllByRole("link")
-        .map((link) => [
-          link.textContent,
-          link.getAttribute("href"),
-          link.getAttribute("aria-current"),
-        ])
-    ).toEqual([
-      ["Overview", "/projects/7", null],
-      ["Changes", "/projects/7/changes", "page"],
+    expect(links(views)).toEqual([
+      ["Designer", "/projects/7", "true"],
       ["Settings", "/projects/7/settings", null],
     ]);
+    expect(
+      links(screen.getByRole("navigation", { name: copy.project.designer.tabsLabel }))
+    ).toEqual([
+      ["App", "/projects/7", null],
+      ["Changes", "/projects/7/changes", "page"],
+    ]);
     expect(screen.queryByRole("list", { name: copy.project.setup.label })).toBeNull();
+  });
+
+  it("marks the app tab on the app's own address, and has no tabs on settings", async () => {
+    window.history.replaceState(null, "", "/projects/7");
+    renderWithApi(
+      <Routes />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    const tabs = await screen.findByRole("navigation", { name: copy.project.designer.tabsLabel });
+    expect(links(tabs)).toEqual([
+      ["App", "/projects/7", "page"],
+      ["Changes", "/projects/7/changes", null],
+    ]);
+    expect(links(screen.getByRole("navigation", { name: copy.project.views.label }))[0]).toEqual([
+      "Designer",
+      "/projects/7",
+      "page",
+    ]);
+
+    await userEvent.click(within(tabs).getByRole("link", { name: copy.project.views.changes }));
+    expect(window.location.pathname).toBe("/projects/7/changes");
+    expect(
+      within(screen.getByRole("navigation", { name: copy.project.designer.tabsLabel })).getByRole(
+        "link",
+        { name: copy.project.views.changes }
+      )
+    ).toHaveAttribute("aria-current", "page");
+
+    await userEvent.click(screen.getByRole("link", { name: copy.project.views.settings }));
+    expect(screen.queryByRole("navigation", { name: copy.project.designer.tabsLabel })).toBeNull();
+    expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).toBeNull();
+  });
+
+  it.each(["overview", "changes"] as const)(
+    "shows the app and the way to change it together on %s, the request box saying when a change goes live",
+    async (view) => {
+      renderWithApi(
+        <ProjectPage id={7} view={view} />,
+        projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+      );
+      const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
+      expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
+      expect(screen.getByLabelText(copy.project.changeLabel)).toHaveAccessibleDescription(
+        copy.project.designer.goesLive
+      );
+      expect(screen.getByText(copy.project.designer.goesLive)).toBeVisible();
+    }
+  );
+
+  it("says the app is loading until the frame has loaded, and again after a reload", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    const title = copy.project.designer.frameTitle("Invoices");
+    const first = await screen.findByTitle(title);
+    expect(screen.getByText(copy.project.designer.loading)).toBeVisible();
+    fireEvent.load(first);
+    expect(screen.queryByText(copy.project.designer.loading)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.reload }));
+    expect(screen.getByText(copy.project.designer.loading)).toBeVisible();
+    expect(screen.getByTitle(title)).not.toBe(first);
+    expect(screen.getByTitle(title)).toHaveAttribute("src", "http://localhost:8100");
+  });
+
+  it("switches the frame between a computer and a phone width", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    const widths = await screen.findByRole("group", { name: copy.project.designer.widthLabel });
+    const computer = within(widths).getByRole("radio", {
+      name: copy.project.designer.width.computer,
+    });
+    const phone = within(widths).getByRole("radio", { name: copy.project.designer.width.phone });
+    const frame = screen.getByTitle(copy.project.designer.frameTitle("Invoices"));
+    expect(computer).toBeChecked();
+    const wide = Number(frame.getAttribute("width"));
+
+    await userEvent.click(phone);
+    expect(phone).toBeChecked();
+    expect(computer).not.toBeChecked();
+    expect(screen.getByTitle(copy.project.designer.frameTitle("Invoices"))).toBe(frame);
+    expect(Number(frame.getAttribute("width"))).toBeLessThan(wide);
+  });
+
+  it("keeps showing the live app while a change is built, saying so, and loads the new version after", async () => {
+    const state = {
+      project: aProject({ status: "building", spec: SPEC, previewUrl: "http://localhost:8100" }),
+      latestBuild: aBuild({ id: 8, kind: "change", request: "Add a logo" }),
+      hasBeenLive: true,
+    };
+    renderWithApi(<ProjectPage id={7} />, projectServer(state));
+    const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
+    const title = copy.project.designer.frameTitle("Invoices");
+    const before = within(app).getByTitle(title);
+    expect(within(app).getByText(copy.project.designer.building)).toBeVisible();
+    expect(within(app).getByRole("link", { name: new RegExp(copy.project.open) })).toHaveAttribute(
+      "href",
+      "http://localhost:8100"
+    );
+    fireEvent.load(before);
+
+    state.project = { ...state.project, status: "live" };
+    state.latestBuild = { ...state.latestBuild, status: "passed", finishedAt: new Date() };
+    await waitFor(
+      () => expect(within(app).queryByText(copy.project.designer.building)).toBeNull(),
+      { timeout: 4000 }
+    );
+    expect(within(app).getByTitle(title)).not.toBe(before);
+    expect(within(app).getByText(copy.project.designer.loading)).toBeVisible();
+  });
+
+  it("says a rebuilt app appears when its build finishes, when there is no live version to show", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "building", spec: SPEC }),
+        latestBuild: aBuild({ kind: "change", request: "Bring it back" }),
+        hasBeenLive: true,
+      })
+    );
+    const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByText(copy.project.designer.buildingNoApp)).toBeVisible();
+    expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).toBeNull();
+  });
+
+  it("says there are no changes yet until one is requested", async () => {
+    const state = {
+      project: live,
+      latestBuild: passed,
+      hasBeenLive: true,
+      queued: [] as ReturnType<typeof aBuild>[],
+    };
+    renderWithApi(<ProjectPage id={7} view="changes" />, {
+      ...projectServer(state),
+      "projects.requestChange": (input) => {
+        const build = aBuild({ id: 5, status: "queued", request: String(input.request) });
+        state.queued = [build];
+        return { project: state.project, build };
+      },
+    });
+    expect(await screen.findByText(copy.project.designer.noChanges)).toBeVisible();
+    expect(screen.queryByRole("region", { name: copy.project.queueTitle })).toBeNull();
+
+    await userEvent.type(screen.getByLabelText(copy.project.changeLabel), "Add a logo");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.requestChange }));
+    await screen.findByRole("region", { name: copy.project.queueTitle });
+    expect(screen.queryByText(copy.project.designer.noChanges)).toBeNull();
   });
 
   it("calls the spec the one the app started from, and says nothing changed since", async () => {
@@ -577,23 +736,27 @@ describe("ProjectPage app workspace", () => {
     }
   );
 
-  it("keeps the overview to opening the app: no change box, title, or delete there", async () => {
-    renderWithApi(
-      <ProjectPage id={7} />,
-      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
-    );
-    await screen.findByRole("link", { name: new RegExp(copy.project.open) });
-    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
-    expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
-    expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
-    expect(screen.queryByRole("log")).toBeNull();
-  });
-
-  it("stays in the workspace when a later change fails, pointing to what went wrong", async () => {
+  it("keeps the designer to the app and its changes: no title or delete there", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
       projectServer({
-        project: aProject({ status: "failed", spec: SPEC }),
+        project: live,
+        latestBuild: aBuild({ kind: "change", request: "Add a logo", status: "passed" }),
+        hasBeenLive: true,
+      })
+    );
+    await screen.findByRole("link", { name: new RegExp(copy.project.open) });
+    expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
+    expect(screen.queryByLabelText(copy.project.site.titleLabel)).toBeNull();
+    expect(screen.queryByRole("button", { name: copy.project.delete })).toBeNull();
+    expect(screen.queryByText(copy.project.designer.noChanges)).toBeNull();
+  });
+
+  it("stays in the designer when a later change fails, showing the app from before it and what went wrong", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed", spec: SPEC, previewUrl: "http://localhost:8100" }),
         latestBuild: aBuild({
           kind: "change",
           request: "Add a logo",
@@ -604,11 +767,31 @@ describe("ProjectPage app workspace", () => {
       })
     );
     expect(await screen.findByText(copy.project.appFailedHint)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: copy.project.seeChanges })).toHaveAttribute(
-      "href",
-      "/projects/7/changes"
+    const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByText(copy.project.designer.failed)).toBeVisible();
+    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
+    expect(screen.getByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
+    expect(screen.getByText(copy.project.failureTitle)).toBeVisible();
+    expect(screen.getByText("boom")).toBeVisible();
+    expect(screen.getByText(copy.project.changeRetryIntro)).toBeVisible();
+    expect(primaryButtons()).toHaveLength(1);
+  });
+
+  it("shows no frame for an offline app, saying why and how to bring it back", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "stopped", spec: SPEC }),
+        latestBuild: passed,
+        hasBeenLive: true,
+      })
     );
+    const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByText(copy.project.designer.offline)).toBeVisible();
+    expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).toBeNull();
     expect(screen.queryByRole("link", { name: new RegExp(copy.project.open) })).toBeNull();
+    expect(screen.queryByRole("group", { name: copy.project.designer.widthLabel })).toBeNull();
+    expect(screen.getByLabelText(copy.project.changeLabel)).toBeInTheDocument();
     expect(primaryButtons()).toHaveLength(1);
   });
 
@@ -643,6 +826,7 @@ describe("ProjectPage app workspace", () => {
     expect(await screen.findByRole("button", { name: copy.project.cancelBuild })).toBeVisible();
     expect(screen.getByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
     expect(screen.getByText(copy.project.appBuildingHint)).toBeInTheDocument();
+    expect(screen.getByText(copy.project.changeQueueIntro)).toBeVisible();
 
     await userEvent.click(screen.getByRole("link", { name: copy.project.views.settings }));
     expect(window.location.pathname).toBe("/projects/7/settings");
@@ -663,10 +847,13 @@ describe("ProjectPage app workspace", () => {
     );
 
     await userEvent.click(screen.getByRole("link", { name: copy.project.views.overview }));
-    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    expect(window.location.pathname).toBe("/projects/7");
+    expect(screen.getByLabelText(copy.project.changeLabel)).toHaveValue("Add a due");
     await waitFor(() => expect(document.title).toBe(copy.pageTitle("Invoices")));
 
-    await userEvent.click(screen.getByRole("link", { name: copy.project.toChanges }));
+    await userEvent.click(screen.getByRole("link", { name: copy.project.views.settings }));
+    expect(screen.queryByLabelText(copy.project.changeLabel)).toBeNull();
+    await userEvent.click(screen.getByRole("link", { name: copy.project.views.designer }));
     expect(screen.getByLabelText(copy.project.changeLabel)).toHaveValue("Add a due");
   });
 });

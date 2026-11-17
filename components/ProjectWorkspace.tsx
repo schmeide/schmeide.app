@@ -1,26 +1,16 @@
 import { copy } from "../data/copy";
 import type { Build, BuiltChange, Project, Usage } from "../trpc";
-import { pathTo, type RouteName } from "../utils/routes";
-import { BuildStep } from "./BuildStep";
-import { ChangeForm } from "./ChangeForm";
+import { pathTo } from "../utils/routes";
 import { canDelete, DeleteProject } from "./DeleteProject";
+import { Designer } from "./Designer";
 import { Link } from "./Link";
-import { QueuedChanges } from "./QueuedChanges";
 import { SiteStep } from "./SiteStep";
-import { Spec } from "./Spec";
 import { StopButton } from "./StopButton";
-import { UsageSummary } from "./UsageSummary";
 
 import stepStyles from "./Step.module.css";
 import styles from "./ProjectWorkspace.module.css";
 
 export type ProjectView = "overview" | "changes" | "settings";
-
-const VIEWS: readonly { readonly view: ProjectView; readonly route: RouteName }[] = [
-  { view: "overview", route: "project" },
-  { view: "changes", route: "projectChanges" },
-  { view: "settings", route: "projectSettings" },
-];
 
 type Props = {
   readonly view: ProjectView;
@@ -35,7 +25,8 @@ type Props = {
   readonly onStop: () => void;
 };
 
-// The home of an app that has been live: three views, each with at most one primary button.
+// The home of an app that has been live: the designer and its settings, each with at most one
+// primary button.
 export function ProjectWorkspace({
   view,
   project,
@@ -48,106 +39,47 @@ export function ProjectWorkspace({
   onRequestChange,
   onStop,
 }: Props) {
-  const changesPath = pathTo("projectChanges", { id: project.id });
-  const live = project.status === "live" && project.previewUrl;
+  const designerView = view === "settings" ? null : view;
 
   return (
     <>
       <nav aria-label={copy.project.views.label} className={styles.views}>
         <ul>
-          {VIEWS.map((entry) => (
-            <li key={entry.view}>
-              <Link
-                to={pathTo(entry.route, { id: project.id })}
-                aria-current={entry.view === view ? "page" : undefined}
-              >
-                {copy.project.views[entry.view]}
-              </Link>
-            </li>
-          ))}
+          <li>
+            <Link
+              to={pathTo("project", { id: project.id })}
+              aria-current={view === "overview" ? "page" : view === "changes" ? "true" : undefined}
+            >
+              {copy.project.views.designer}
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={pathTo("projectSettings", { id: project.id })}
+              aria-current={view === "settings" ? "page" : undefined}
+            >
+              {copy.project.views.settings}
+            </Link>
+          </li>
         </ul>
       </nav>
 
-      {view === "overview" && (
-        <>
-          {/* Opening the app is the one primary action while it is live; otherwise the way on is
-              a change, which also retries a failed build and brings an offline app back. */}
-          <div className={styles.actions}>
-            {live && (
-              <a
-                href={live}
-                target="_blank"
-                rel="noreferrer"
-                className={styles.action}
-                data-variant="primary"
-              >
-                {copy.project.open}{" "}
-                <span className={styles.hint}>{copy.project.opensInNewTab}</span>
-              </a>
-            )}
-            <Link
-              to={changesPath}
-              className={styles.action}
-              data-variant={live ? undefined : "primary"}
-            >
-              {project.status === "failed" ? copy.project.seeChanges : copy.project.toChanges}
-            </Link>
-          </div>
-          {live && <p className={styles.address}>{live}</p>}
-          <UsageSummary usage={usage} />
-          {project.spec && (
-            <section aria-labelledby="built-from" className={stepStyles.step}>
-              <h2 id="built-from">{copy.project.builtFrom}</h2>
-              {changes.length === 0 ? (
-                <p className={stepStyles.muted}>{copy.project.builtFromUnchanged}</p>
-              ) : (
-                <>
-                  <p className={stepStyles.muted}>{copy.project.builtFromChanged}</p>
-                  <h3 id="changes-since">{copy.project.changesSince}</h3>
-                  <ol aria-labelledby="changes-since">
-                    {changes.map((change) => (
-                      <li key={change.id}>{change.request}</li>
-                    ))}
-                  </ol>
-                </>
-              )}
-              <details>
-                <summary>{copy.project.showSpec}</summary>
-                <Spec source={project.spec} />
-              </details>
-            </section>
-          )}
-        </>
-      )}
-
-      {view === "changes" && (
-        <>
-          <section aria-labelledby="request-change" className={stepStyles.step}>
-            <h2 id="request-change">{copy.project.changeTitleForm}</h2>
-            <ChangeForm project={project} request={request} onRequestChange={onRequestChange} />
-          </section>
-          {latestBuild && (
-            <BuildStep
-              key={latestBuild.id}
-              build={latestBuild}
-              title={
-                latestBuild.kind === "initial"
-                  ? copy.project.firstBuildTitle
-                  : copy.project.changeTitle
-              }
-            />
-          )}
-          {project.status === "building" && (
-            <div className={styles.cancel}>
-              <StopButton project={project} onStop={onStop} />
-            </div>
-          )}
-          <QueuedChanges queued={queued} />
-        </>
+      {designerView && (
+        <Designer
+          view={designerView}
+          project={project}
+          latestBuild={latestBuild}
+          queued={queued}
+          changes={changes}
+          usage={usage}
+          request={request}
+          onRequestChange={onRequestChange}
+          onStop={onStop}
+        />
       )}
 
       {view === "settings" && (
-        <>
+        <div className={styles.settings}>
           <SiteStep project={project} hasIcon={hasIcon} />
           <section aria-labelledby="manage" className={stepStyles.step}>
             <h2 id="manage">{copy.project.manageTitle}</h2>
@@ -157,7 +89,7 @@ export function ProjectWorkspace({
               <DeleteProject project={project} />
             </div>
           </section>
-        </>
+        </div>
       )}
     </>
   );

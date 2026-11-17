@@ -12,11 +12,12 @@ type Props = {
   // The text lives with the page, so it survives a move between the app's views.
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
+  readonly note?: string;
 };
 
 // A box to request a change. It is also the way to retry a failed build and to bring an offline
 // app back; while a build runs, the change waits its turn.
-export function ChangeForm({ project, request, onRequestChange }: Props) {
+export function ChangeForm({ project, request, onRequestChange, note }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const change = useMutation(
@@ -48,7 +49,9 @@ export function ChangeForm({ project, request, onRequestChange }: Props) {
         value={request}
         onChange={(event) => onRequestChange(event.target.value)}
         placeholder={copy.project.changePlaceholder}
+        aria-describedby={note ? "change-note" : undefined}
       />
+      {note && <p id="change-note">{note}</p>}
       <div className={stepStyles.actions}>
         <button type="submit" data-variant="primary" disabled={change.isPending || !request.trim()}>
           {change.isPending ? copy.project.requesting : copy.project.requestChange}
