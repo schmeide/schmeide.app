@@ -20,7 +20,7 @@ import { builds, projects } from "../../db/schema.ts";
 import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
-import { MAX_FIX_ATTEMPTS, buildWorkflow } from "../workflows.ts";
+import { MAX_FIX_ATTEMPTS, MAX_REVIEW_ROUNDS, buildWorkflow } from "../workflows.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -42,10 +42,13 @@ type Options = {
   // Requests queued behind the build; each starts after the one before it passes.
   readonly queued?: readonly string[];
   readonly kind?: "initial" | "site" | "promote" | "discard";
+  // Turns the design team on, with a reviewer that finds a serious problem on its first review
+  // only, or on every one.
+  readonly review?: "once" | "never";
 };
 
 const setup = (
-  { fixOnRun, interruptFirstAgentRun, cancelDuringPrepare }: Options,
+  { fixOnRun, interruptFirstAgentRun, cancelDuringPrepare, review }: Options,
   taskQueue: string
 ) => {
   const root = mkdtempSync(join(tmpdir(), "schmeide-wf-"));
@@ -69,9 +72,18 @@ const setup = (
   const runs = join(dataDir, "runs");
   const prompts = join(root, "prompts");
   const agent = join(root, "agent.sh");
+  const reviews = join(root, "reviews");
+  const problem = `{"severity":"serious","screen":"Notes","problem":"The list ignores the tokens.","fix":"Use them."}`;
   writeFileSync(
     agent,
     `#!/bin/sh
+case "$1" in
+  design) echo '{"style":"calm","reason":"Notes are personal.","screens":[]}'; exit 0;;
+  review)
+    r=$(( $(cat ${reviews} 2>/dev/null || echo 0) + 1 )); echo $r > ${reviews}
+    if [ "${review}" = never ] || [ $r -eq 1 ]; then echo '{"problems":[${problem}]}'; else echo '{"problems":[]}'; fi
+    exit 0;;
+esac
 n=$(( $(cat ${runs} 2>/dev/null || echo 0) + 1 )); echo $n > ${runs}
 printf '%s\\n---\\n' "$AGENT_PROMPT" >> ${prompts}
 if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
@@ -87,6 +99,7 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     makeBin: "make",
     builderPlugin: join(root, "builder-plugin"),
     agentCmd: agent,
+    designTeam: review !== undefined,
   });
   const runPrompts = () =>
     existsSync(prompts) ? readFileSync(prompts, "utf8").split("\n---\n").slice(0, -1) : [];
@@ -250,6 +263,45 @@ describe("buildWorkflow check and fix loop", () => {
 
     expect(outcome).toBe("failed");
     expect(queued.map((build) => build.status)).toEqual(["queued"]);
+  }, 120_000);
+
+  it("gives the builder a fix round for a serious design problem, then passes", async () => {
+    const { outcome, build, prompts, events } = await runBuild({ fixOnRun: 1, review: "once" });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[0]).toContain("Foundation first");
+    expect(prompts[1]).toContain("design review");
+    expect(prompts[1]).toContain("1. [serious] Notes: The list ignores the tokens.");
+    expect(events).toEqual(
+      expect.arrayContaining([
+        "Design: the Calm look. Notes are personal.",
+        "Design review found 1 problem (1 serious)",
+        "Agent is fixing design problems",
+        "Design review passed",
+      ])
+    );
+    // The fix round's work is checked again before it is reviewed again.
+    expect(events.filter((message) => message === "make test passed")).toHaveLength(2);
+    expect(build.status).toBe("passed");
+  }, 120_000);
+
+  it(`stops the design fix rounds at ${MAX_REVIEW_ROUNDS} and publishes with what is left`, async () => {
+    const { outcome, build, prompts, events } = await runBuild({ fixOnRun: 1, review: "never" });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(1 + MAX_REVIEW_ROUNDS);
+    expect(events.filter((message) => message === "Agent is fixing design problems")).toHaveLength(
+      MAX_REVIEW_ROUNDS
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        `Design review still found 1 problem (1 serious) after ${MAX_REVIEW_ROUNDS} fix rounds; the app is published with them`,
+        "Left for later (serious): Notes: The list ignores the tokens.",
+        "Build passed",
+      ])
+    );
+    expect(build.status).toBe("passed");
   }, 120_000);
 
   it("applies the page title and icon and deploys without the agent for a site build", async () => {

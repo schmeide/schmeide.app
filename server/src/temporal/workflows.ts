@@ -46,32 +46,52 @@ const { planDesign } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "10 minutes",
 });
+const { reviewDesign } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: "30 minutes",
+});
 
 // Fix-up rounds after the first independent check run fails.
 export const MAX_FIX_ATTEMPTS = 3;
+// Fix rounds for the design review's serious problems; what is left after them is recorded.
+export const MAX_REVIEW_ROUNDS = 2;
 
 // The design lead chooses the look (a no-op unless the design team is on), the agent builds, then
-// the server's own checks run, with fix-up rounds while they fail. Each run is told its round,
-// which names its Job on the cluster.
+// the server's own checks run, with fix-up rounds while they fail. Once they pass, a build with a
+// design brief is reviewed against it, with fix rounds of its own; each round is checked again.
+// Each agent run is told its round, which names its Job on the cluster, and so are the checks after it.
 async function buildAndCheck(buildId: number): Promise<void> {
   // patched: a build already running when the design team was added replays without it.
-  if (patched("design-team")) await planDesign(buildId);
-  let session = await runAgent({ buildId, round: 0 });
-  for (let attempt = 0; ; attempt++) {
-    const checks = await runChecks(buildId, attempt);
-    if (checks.ok) return;
-    if (attempt === MAX_FIX_ATTEMPTS) {
-      // A plain Error would fail only the workflow task, which Temporal retries forever.
-      throw ApplicationFailure.nonRetryable(
-        `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
-      );
+  const design = patched("design-team") ? await planDesign(buildId) : null;
+  let round = 0;
+  let session = await runAgent({ buildId, round });
+  let checkFixes = 0;
+  let reviewFixes = 0;
+  for (;;) {
+    const checks = await runChecks(buildId, round);
+    if (!checks.ok) {
+      if (checkFixes === MAX_FIX_ATTEMPTS) {
+        // A plain Error would fail only the workflow task, which Temporal retries forever.
+        throw ApplicationFailure.nonRetryable(
+          `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
+        );
+      }
+      checkFixes++;
+      round++;
+      session = await runAgent({ buildId, round, resume: session, feedback: checks.output });
+      continue;
     }
-    session = await runAgent({
+    if (!design) return;
+    const review = await reviewDesign({
       buildId,
-      round: attempt + 1,
-      resume: session,
-      feedback: checks.output,
+      base: design.base,
+      round: reviewFixes,
+      last: reviewFixes === MAX_REVIEW_ROUNDS,
     });
+    if (review.ok) return;
+    reviewFixes++;
+    round++;
+    session = await runAgent({ buildId, round, resume: session, review: review.output });
   }
 }
 

@@ -34,7 +34,8 @@ import {
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createSummaries, listSummaries } from "../../services/summaries.ts";
 import type { Summarizer } from "../../services/summarizer.ts";
-import { briefPrompt } from "../../services/designBrief.ts";
+import { briefPrompt, designBrief } from "../../services/designBrief.ts";
+import { reviewFeedbackPrompt, type ScreenCapture } from "../../services/designReview.ts";
 import { DEFAULT_STYLE } from "../../services/designStyles.ts";
 import { JPEG, PNG, WEBP } from "../../services/__tests__/fileFixtures.ts";
 import { createLocalFileStore } from "../../services/fileStore.ts";
@@ -1145,14 +1146,20 @@ describe("the design lead", () => {
       { ...config, designTeam: true },
       leadQuery(calls, answer, fail)
     );
-    return { activities, calls, env: new MockActivityEnvironment() };
+    const env = new MockActivityEnvironment();
+    // The workflow prepares the workspace before the design lead runs.
+    const plan = async (buildId: number) => {
+      await env.run(activities.prepareWorkspace, buildId);
+      return env.run(activities.planDesign, buildId);
+    };
+    return { activities, calls, env, plan };
   };
 
   it("chooses a look from the spec before the first build, records why, and keeps it for a rebuild", async () => {
-    const { activities, calls, env } = designing();
+    const { calls, plan } = designing();
     const { project, build } = await newBuild();
 
-    await env.run(activities.planDesign, build.id);
+    await plan(build.id);
     const [, again] = await db
       .insert(builds)
       .values([
@@ -1160,7 +1167,7 @@ describe("the design lead", () => {
         { projectId: project.id, kind: "initial", request: "spec" },
       ])
       .returning();
-    await env.run(activities.planDesign, again.id);
+    await plan(again.id);
 
     expect(calls).toHaveLength(1);
     expect(calls[0].prompt).toContain("BEGIN SPEC");
@@ -1190,10 +1197,10 @@ describe("the design lead", () => {
     ["fails", LEAD, true],
     ["cannot be reached", new Error("network down"), false],
   ])("uses the default look, and says so, when the lead %s", async (_what, answer, fail) => {
-    const { activities, env } = designing(answer, fail);
+    const { plan } = designing(answer, fail);
     const { project, build } = await newBuild();
 
-    await env.run(activities.planDesign, build.id);
+    await plan(build.id);
 
     expect(await designOf(project.id)).toMatchObject({
       style: DEFAULT_STYLE,
@@ -1205,14 +1212,14 @@ describe("the design lead", () => {
   });
 
   it("adapts the look to the business's colors only where they pass contrast", async () => {
-    const { activities, env } = designing();
+    const { plan } = designing();
     const { project, build } = await newBuild();
     await db
       .update(projects)
       .set({ brandColors: ["#ffe14d", "#a3201a"] })
       .where(eq(projects.id, project.id));
 
-    await env.run(activities.planDesign, build.id);
+    await plan(build.id);
 
     // The yellow is unreadable on white but reads on the dark surfaces; the red the other way.
     const { brief } = await designOf(project.id);
@@ -1227,10 +1234,10 @@ describe("the design lead", () => {
   });
 
   it("leaves an app built without a brief as it is on a change", async () => {
-    const { activities, calls, env } = designing();
+    const { calls, plan } = designing();
     const { project, build } = await newBuild("change");
 
-    await env.run(activities.planDesign, build.id);
+    await plan(build.id);
 
     expect(calls).toHaveLength(0);
     expect(await designOf(project.id)).toBeUndefined();
@@ -1282,5 +1289,170 @@ describe("with the design team off", () => {
     expect(await messages(build.id)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^Design/)])
     );
+  });
+});
+
+const SERIOUS = {
+  severity: "serious",
+  screen: "Orders",
+  problem: "The table uses raw hex colors instead of the tokens.",
+  fix: "Use --surface and --border from the shared stylesheet.",
+};
+
+describe("the design review", () => {
+  // A project with a brief and a prepared workspace, a reviewer that answers `answer`, and a
+  // capture that takes `pictures` pictures.
+  const reviewing = async (
+    answer: unknown,
+    { kind = "initial", pictures = 0 }: { kind?: "initial" | "change"; pictures?: number } = {}
+  ) => {
+    const { config, dataDir } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const capture: ScreenCapture = async ({ outDir }) =>
+      Array.from({ length: pictures }, (_, index) => {
+        const path = join(outDir, `shot-${index}.png`);
+        writeFileSync(path, PNG);
+        return { path, screen: "Orders", width: 360, theme: "dark" as const };
+      });
+    const activities = createActivities(
+      deps,
+      { ...config, designTeam: true },
+      leadQuery(calls, answer),
+      createLocalFileStore(dataDir),
+      undefined,
+      capture
+    );
+    const env = new MockActivityEnvironment();
+    const { project, build } = await newBuild(kind);
+    await env.run(activities.prepareWorkspace, build.id);
+    await db.insert(projectDesigns).values({
+      projectId: project.id,
+      style: "ledger",
+      chosenBy: "lead",
+      brief: designBrief(LEAD, []),
+    });
+    const plan = (await env.run(activities.planDesign, build.id)) as Awaited<
+      ReturnType<typeof activities.planDesign>
+    >;
+    if (!plan) throw new Error("a build with a brief has a base to review from");
+    const workspace = join(dataDir, "projects", project.slug);
+    const review = (last = false) =>
+      env.run(activities.reviewDesign, {
+        buildId: build.id,
+        base: plan.base,
+        round: last ? 2 : 0,
+        last,
+      }) as Promise<{ ok: boolean; output: string }>;
+    return { activities, env, calls, project, build, workspace, review, dataDir };
+  };
+
+  it("sends serious problems back to the builder as a fix round, most serious first", async () => {
+    const minor = { ...SERIOUS, severity: "minor", problem: "Uneven gaps." };
+    const { calls, build, review } = await reviewing({ problems: [minor, SERIOUS] });
+
+    const outcome = await review();
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.output).toBe(
+      reviewFeedbackPrompt([SERIOUS, minor] as Parameters<typeof reviewFeedbackPrompt>[0])
+    );
+    expect(calls[0].options).toMatchObject({
+      model: "sonnet",
+      tools: ["Read", "Glob", "Grep"],
+      allowedTools: ["Read", "Glob", "Grep"],
+      settingSources: [],
+      permissionMode: "dontAsk",
+      outputFormat: { type: "json_schema" },
+    });
+    expect(calls[0].prompt).toContain("code-based review");
+    expect(calls[0].options.additionalDirectories).toBeUndefined();
+    expect(await messages(build.id)).toContain("Design review found 2 problems (1 serious)");
+    expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([
+      expect.objectContaining({ runKind: "review", model: "claude-lead" }),
+    ]);
+  });
+
+  it("records what is left and lets the build go on at the last round", async () => {
+    const { build, review } = await reviewing({ problems: [SERIOUS] });
+
+    expect(await review(true)).toEqual({ ok: true, output: "" });
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Design review still found 1 problem (1 serious) after 2 fix rounds; the app is published with them",
+        `Left for later (serious): Orders: ${SERIOUS.problem}`,
+      ])
+    );
+  });
+
+  it("passes a build with only minor problems, and records them", async () => {
+    const { build, review } = await reviewing({
+      problems: [{ ...SERIOUS, severity: "minor" }],
+    });
+
+    expect((await review()).ok).toBe(true);
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Design review passed, with 1 problem small enough to leave",
+        `Left for later (minor): Orders: ${SERIOUS.problem}`,
+      ])
+    );
+  });
+
+  it("lets the build go on when the reviewer gives no usable answer", async () => {
+    const { build, review } = await reviewing("it looks fine");
+
+    expect((await review()).ok).toBe(true);
+    expect(await messages(build.id)).toContain(
+      "The design review could not run, so the build goes on without it"
+    );
+  });
+
+  it("works from pictures of the app when there are some, and shows them to the reviewer only", async () => {
+    const { calls, review, dataDir, build } = await reviewing({ problems: [] }, { pictures: 1 });
+
+    expect((await review()).ok).toBe(true);
+    const shots = join(dataDir, "reviews", `build-${build.id}`);
+    expect(calls[0].options.additionalDirectories).toEqual([shots]);
+    expect(calls[0].prompt).toContain(`- ${join(shots, "shot-0.png")}: Orders, 360px wide, dark`);
+    expect(calls[0].prompt).not.toContain("code-based review");
+    expect(existsSync(shots)).toBe(false);
+  });
+
+  it("skips a change that does not touch the interface, and reviews one that does", async () => {
+    const { calls, build, review, workspace } = await reviewing(
+      { problems: [] },
+      { kind: "change" }
+    );
+    mkdirSync(join(workspace, "backend"), { recursive: true });
+    writeFileSync(join(workspace, "backend", "orders.ts"), "export const orders = [];\n");
+
+    expect((await review()).ok).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect(await messages(build.id)).toContain(
+      "This change does not touch the interface, so the design review is skipped"
+    );
+
+    writeFileSync(join(workspace, "frontend", "Orders.tsx"), "export const Orders = 1;\n");
+    expect((await review()).ok).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("gives the builder the review's problems on a fix round", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, { ...config, designTeam: true }, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    const { build } = await newBuild();
+    await env.run(activities.prepareWorkspace, build.id);
+
+    await env.run(activities.runAgent, {
+      buildId: build.id,
+      resume: "session-1",
+      review: "Schmeide's design review found these problems",
+    });
+
+    expect(calls[0].prompt).toBe("Schmeide's design review found these problems");
+    expect(calls[0].options.resume).toBe("session-1");
+    expect(await messages(build.id)).toContain("Agent is fixing design problems");
   });
 });
