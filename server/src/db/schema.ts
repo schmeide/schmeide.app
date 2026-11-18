@@ -86,6 +86,9 @@ export const projects = pgTable(
     // The business's own colors, from reading its website (services/website.ts), most important
     // first. The design lead uses the first that passes contrast (services/designBrief.ts).
     brandColors: jsonb("brand_colors").$type<readonly string[]>().notNull().default([]),
+    // The template's app shapes the first build kept (services/shapes.ts), the home page first.
+    // Empty until a workspace is prepared, and for a template with no shapes.
+    shapes: jsonb("shapes").$type<readonly string[]>().notNull().default([]),
     // Production, the copy the app's own customers use: its address while it runs, and the commit
     // it runs from its own checkout (null for an app deployed before there was one).
     previewUrl: text("preview_url"),

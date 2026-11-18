@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "shapes" jsonb DEFAULT '[]'::jsonb NOT NULL;

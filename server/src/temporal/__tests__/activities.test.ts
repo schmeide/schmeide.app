@@ -70,8 +70,12 @@ const git = (cwd: string, ...args: string[]) =>
     env: { ...process.env, GIT_CONFIG_GLOBAL: gitConfigFile(join(cwd, "..")) },
   }).toString();
 
-// A data dir plus a one-commit template repository beside it.
-const setup = () => {
+// A data dir plus a one-commit template repository beside it. With `shapes`, the template has a
+// shapes/ directory, `make shape/list` prints `listed`, and `make shape/keep` accepts only `known`.
+const setup = (shapes?: {
+  readonly listed: readonly string[];
+  readonly known: readonly string[];
+}) => {
   // Real, so paths match what a command run there prints as its working directory.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "schmeide-test-")));
   const dataDir = join(root, "data");
@@ -103,6 +107,20 @@ const setup = () => {
       "",
     ].join("\n")
   );
+  if (shapes) {
+    mkdirSync(join(template, "shapes"));
+    writeFileSync(join(template, "shapes", "notes.shape.json"), "{}\n");
+    writeFileSync(
+      join(template, "Makefile"),
+      [
+        // Installing dependencies prints around the names.
+        `shape/list:\n\t@echo added 3 packages; printf '%s\\n' ${shapes.listed.join(" ")}`,
+        `shape/keep:\n\t@for n in $(NAMES); do case " ${shapes.known.join(" ")} " in *" $$n "*) ;; *) echo "Unknown shape: $$n"; exit 1;; esac; done; rm -rf shapes; echo $(NAMES) > kept-shapes`,
+        "",
+      ].join("\n"),
+      { flag: "a" }
+    );
+  }
   // Docker, found first on the PATH the server gives a project's commands, only notes its call.
   writeFileSync(join(dataDir, "bin", "docker"), `#!/bin/sh\necho "docker $* $(pwd)" >> ${calls}\n`);
   chmodSync(join(dataDir, "bin", "docker"), 0o755);
@@ -261,6 +279,63 @@ describe("build activities", () => {
       "Workspace ready",
       "Reusing the project workspace",
     ]);
+  });
+
+  describe("app shapes", () => {
+    const shapes = { listed: ["notes", "invoices", "ghost"], known: ["notes", "invoices"] };
+    const withSpec = async (spec: string) => {
+      const made = await newBuild();
+      await db.update(projects).set({ spec }).where(eq(projects.id, made.project.id));
+      return made;
+    };
+    const keptShapes = async (projectId: number) =>
+      (await db.select().from(projects).where(eq(projects.id, projectId)))[0].shapes;
+
+    it("keeps the shapes the spec needs before the first commit, and records them", async () => {
+      const { config, dataDir } = setup(shapes);
+      const { project, build } = await withSpec("## Features\n- Send an invoice to each client");
+      const calls: { prompt: string; options: Options }[] = [];
+      const activities = createActivities(deps, config, fakeQuery(calls));
+      const env = new MockActivityEnvironment();
+
+      await env.run(activities.prepareWorkspace, build.id);
+
+      const workspace = join(dataDir, "projects", project.slug);
+      expect(readFileSync(join(workspace, "kept-shapes"), "utf8").trim()).toBe("invoices");
+      expect(git(workspace, "ls-tree", "-r", "--name-only", "HEAD")).not.toContain("shapes/");
+      expect(git(workspace, "log", "--oneline").trim().split("\n")).toHaveLength(1);
+      expect(await keptShapes(project.id)).toEqual(["invoices"]);
+      expect(await messages(build.id)).toContain("Keeping the app shapes: invoices");
+
+      await env.run(activities.runAgent, { buildId: build.id });
+      expect(calls[0].prompt).toContain("invoices (docs/shapes/invoices.md)");
+    });
+
+    it("keeps notes when no shape fits the spec", async () => {
+      const { config, dataDir } = setup(shapes);
+      const { project, build } = await withSpec("## Features\n- Write down ideas");
+
+      await new MockActivityEnvironment().run(
+        createActivities(deps, config).prepareWorkspace,
+        build.id
+      );
+
+      const workspace = join(dataDir, "projects", project.slug);
+      expect(readFileSync(join(workspace, "kept-shapes"), "utf8").trim()).toBe("notes");
+      expect(await keptShapes(project.id)).toEqual(["notes"]);
+    });
+
+    it("fails the build, keeping nothing, when the template rejects a shape name", async () => {
+      const { config, dataDir } = setup(shapes);
+      const { project, build } = await withSpec("## Features\n- A ghost list");
+
+      await expect(
+        new MockActivityEnvironment().run(createActivities(deps, config).prepareWorkspace, build.id)
+      ).rejects.toThrow(/could not keep the app shapes ghost[\s\S]*Unknown shape: ghost/i);
+
+      expect(existsSync(join(dataDir, "projects", project.slug))).toBe(false);
+      expect(await keptShapes(project.id)).toEqual([]);
+    });
   });
 
   it("runs the agent in the workspace with the allowlist and records its usage", async () => {
