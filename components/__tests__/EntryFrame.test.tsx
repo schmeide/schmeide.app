@@ -91,7 +91,7 @@ describe("the sign-up page", () => {
     expect(screen.getByText(copy.signUpPage.inviteOnly)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: copy.signUpPage.askForAccess })).toHaveAttribute(
       "href",
-      copy.outbound.earlyAccess
+      "https://schmeide.com/#early-access"
     );
     expect(document.title).toBe(copy.pageTitle(copy.routes.signUp));
   });
@@ -179,7 +179,7 @@ describe("the sign-in page as an entry page", () => {
     open("/sign-in", signedOut);
     expect(screen.getByRole("link", { name: copy.signInPage.notInvited })).toHaveAttribute(
       "href",
-      copy.outbound.earlyAccess
+      "https://schmeide.com/#early-access"
     );
   });
 
