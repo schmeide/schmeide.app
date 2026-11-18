@@ -27,6 +27,7 @@ import {
   copyUrl,
   databaseName,
   databaseSecret,
+  imageRepos,
   objectPath,
   rolloutProblem,
   tenantNamespace,
@@ -978,6 +979,20 @@ export const createActivities = (
       : undefined;
   };
 
+  // The ACR run an earlier attempt of this deploy scheduled, from its last heartbeat.
+  const imageRunId = (): string | undefined => {
+    const { attempt, heartbeatDetails } = Context.current().info;
+    const details: unknown = heartbeatDetails;
+    return attempt > 1 &&
+      typeof details === "object" &&
+      details !== null &&
+      "runId" in details &&
+      typeof details.runId === "string" &&
+      details.runId.length > 0
+      ? details.runId
+      : undefined;
+  };
+
   const runRecorded = async (run: NewAgentRun): Promise<boolean> =>
     (
       await db
@@ -1094,14 +1109,38 @@ export const createActivities = (
         await mustRun(project, "git", args, dir, buildId, env);
       const archive = `${dir}.tar.gz`;
       tarFlags ??= contextTarFlags(execFileSync("tar", ["--version"], { encoding: "utf8" }));
+      const context = Context.current();
+      let runId = imageRunId();
+      if (runId !== undefined) context.heartbeat({ runId });
+      const repos = imageRepos(project.tenantId, project.slug);
       try {
         await mustRun(project, "tar", [...tarFlags, "-czf", archive, "-C", dir, "."], dir);
-        await event(buildId, "deploy", `Building the app's images for ${commit.slice(0, 12)}`);
-        await withHeartbeat((signal) =>
-          runner.hosting.acr.build(archive, taskYaml(project.tenantId, project.slug, commit), {
-            signal,
-            onQueued: (runId) => void event(buildId, "deploy", `Image build ${runId} queued`),
-          })
+        await event(
+          buildId,
+          "deploy",
+          runId === undefined
+            ? `Building the app's images for ${commit.slice(0, 12)}`
+            : `Following image build ${runId}`
+        );
+        await withHeartbeat(
+          (signal) =>
+            runner.hosting.acr.build(archive, taskYaml(project.tenantId, project.slug, commit), {
+              signal,
+              runId,
+              images: { repos: [repos.web, repos.api], tag: commit },
+              onQueued: (id) => {
+                runId = id;
+                context.heartbeat({ runId: id });
+                void event(buildId, "deploy", `Image build ${id} queued`);
+              },
+              onSkipped: () =>
+                void event(
+                  buildId,
+                  "deploy",
+                  `Images for ${commit.slice(0, 12)} are already built`
+                ),
+            }),
+          () => (runId === undefined ? undefined : { runId })
         );
       } finally {
         await rm(archive, { force: true });

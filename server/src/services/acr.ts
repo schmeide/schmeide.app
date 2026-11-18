@@ -1,8 +1,9 @@
 // App images on ACR Tasks (docs/stage2.md, "Deploy and hosting"): the worker uploads a project's
 // tree as the build context, schedules one quick run that builds and pushes its web and api
-// images, and follows it; a delete removes both repositories. The worker signs in to Azure as its
-// workload identity by exchanging its federated token, with fetch: three ARM calls and two token
-// exchanges do not justify @azure/identity and the ARM SDK.
+// images, and follows it. A retry follows that run, or skips the build when both commit tags
+// already exist. Canceling the deploy cancels the run. A delete removes both repositories. The
+// worker signs in to Azure as its workload identity by exchanging its federated token, with fetch:
+// these calls do not justify @azure/identity and the ARM SDK.
 import { readFile } from "node:fs/promises";
 import { setTimeout as sleep } from "node:timers/promises";
 import { imageRepos } from "../kube/apps.ts";
@@ -78,14 +79,31 @@ export const taskYaml = (tenantId: number, slug: string, commit: string): string
   ].join("\n");
 };
 
+// 25 minutes. The deploy activity allows 60 (workflows.ts, `deploy-budget`), which also covers the
+// clone, both rollouts, and both health checks. The run stops itself before Temporal gives up on
+// the activity.
+export const RUN_TIMEOUT_SECONDS = 25 * 60;
+
 export const runRequest = (sourceLocation: string, yaml: string) => ({
   type: "EncodedTaskRunRequest",
   encodedTaskContent: Buffer.from(yaml).toString("base64"),
   sourceLocation,
-  timeout: 1800,
+  timeout: RUN_TIMEOUT_SECONDS,
   platform: { os: "Linux", architecture: "amd64" },
   credentials: { sourceRegistry: { identity: "[caller]" } },
 });
+
+// Both images of one commit. When each repository already has the tag, nothing needs building.
+export type AcrImages = { readonly repos: readonly string[]; readonly tag: string };
+
+export type AcrBuildOptions = {
+  readonly signal?: AbortSignal;
+  // An earlier attempt's run, from its heartbeat. Follow it instead of scheduling another.
+  readonly runId?: string;
+  readonly images?: AcrImages;
+  readonly onQueued?: (runId: string) => void;
+  readonly onSkipped?: () => void;
+};
 
 const DONE = new Set(["Succeeded", "Failed", "Canceled", "Error", "Timeout"]);
 
@@ -112,9 +130,15 @@ export const createAcr = (config: AcrConfig) => {
   };
   const armToken = () => token(`${ARM}/.default`);
   const registry = `${ARM}/subscriptions/${config.subscriptionId}/resourceGroups/${config.resourceGroup}/providers/Microsoft.ContainerRegistry/registries/${config.name}`;
-  const arm = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const arm = async <T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal
+  ): Promise<T> => {
     const response = await call(`${registry}${path}?api-version=${TASKS_API_VERSION}`, {
       method,
+      signal,
       headers: {
         authorization: `Bearer ${await armToken()}`,
         ...(body !== undefined && { "content-type": "application/json" }),
@@ -127,6 +151,98 @@ export const createAcr = (config: AcrConfig) => {
       );
     return (await response.json()) as T;
   };
+  // A run already in a terminal state answers 400. The identity needs runs/cancel on the registry.
+  const cancelRun = async (runId: string): Promise<void> => {
+    const response = await call(
+      `${registry}/runs/${runId}/cancel?api-version=${TASKS_API_VERSION}`,
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${await armToken()}` },
+      }
+    );
+    const text = await response.text().catch(() => "");
+    if (response.ok || response.status === 400) return;
+    throw new AcrError(
+      `ACR POST /runs/${runId}/cancel answered ${response.status}: ${text.slice(0, 500)}`
+    );
+  };
+  // One exchange, then a scoped registry token. Delete and tag reads share it.
+  const registryRefresh = async (): Promise<string> => {
+    const service = config.loginServer;
+    const exchange = await call(`https://${service}/oauth2/exchange`, {
+      method: "POST",
+      body: new URLSearchParams({
+        grant_type: "access_token",
+        service,
+        tenant: config.identity.tenantId,
+        access_token: await armToken(),
+      }),
+    });
+    if (!exchange.ok)
+      throw new AcrError(`The registry's token exchange answered ${exchange.status}`);
+    const { refresh_token } = (await exchange.json()) as { refresh_token: string };
+    return refresh_token;
+  };
+  const registryAccess = async (refresh: string, scope: string): Promise<string> => {
+    const granted = await call(`https://${config.loginServer}/oauth2/token`, {
+      method: "POST",
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        service: config.loginServer,
+        scope,
+        refresh_token: refresh,
+      }),
+    });
+    if (!granted.ok) throw new AcrError(`The registry's token answered ${granted.status}`);
+    const { access_token } = (await granted.json()) as { access_token: string };
+    return access_token;
+  };
+  const tagExists = async (refresh: string, repo: string, tag: string): Promise<boolean> => {
+    const response = await call(
+      `https://${config.loginServer}/acr/v1/${repo}/_tags/${encodeURIComponent(tag)}`,
+      {
+        headers: {
+          authorization: `Bearer ${await registryAccess(refresh, `repository:${repo}:metadata_read`)}`,
+        },
+      }
+    );
+    if (response.status === 404) return false;
+    if (!response.ok) throw new AcrError(`Reading ${repo}:${tag} answered ${response.status}`);
+    return true;
+  };
+  const imagesReady = async (images: AcrImages): Promise<boolean> => {
+    if (images.repos.length === 0) return false;
+    const refresh = await registryRefresh();
+    for (const repo of images.repos)
+      if (!(await tagExists(refresh, repo, images.tag))) return false;
+    return true;
+  };
+  const uploadAndSchedule = async (
+    archive: string,
+    yaml: string,
+    signal?: AbortSignal
+  ): Promise<string> => {
+    const { uploadUrl, relativePath } = await arm<{ uploadUrl: string; relativePath: string }>(
+      "POST",
+      "/listBuildSourceUploadUrl",
+      undefined,
+      signal
+    );
+    const upload = await call(uploadUrl, {
+      method: "PUT",
+      signal,
+      headers: { "x-ms-blob-type": "BlockBlob" },
+      body: await readFile(archive),
+    });
+    if (!upload.ok) throw new AcrError(`Uploading the build context answered ${upload.status}`);
+    const run = await arm<{ properties: { runId: string } }>(
+      "POST",
+      "/scheduleRun",
+      runRequest(relativePath, yaml),
+      signal
+    );
+    return run.properties.runId;
+  };
   // The tail of a failed run's log, with where to read all of it.
   const failure = async (runId: string, status: string): Promise<string> => {
     const { logLink } = await arm<{ logLink?: string }>("POST", `/runs/${runId}/listLogSasUrl`);
@@ -137,73 +253,53 @@ export const createAcr = (config: AcrConfig) => {
       : "";
     return `The image build (ACR run ${runId}) ended ${status}.${log ? `\n${log.slice(-3000)}` : ""}${logLink ? `\nFull log: ${logLink}` : ""}`;
   };
+  const follow = async (runId: string, signal?: AbortSignal): Promise<void> => {
+    for (;;) {
+      const { status } = (
+        await arm<{ properties: { status: string } }>("GET", `/runs/${runId}`, undefined, signal)
+      ).properties;
+      if (status === "Succeeded") return;
+      if (DONE.has(status)) throw new AcrError(await failure(runId, status));
+      await sleep(config.pollMs ?? 5000, undefined, { signal });
+    }
+  };
 
   return {
     armToken,
 
     // Uploads the tar.gz at `archive` and runs `yaml` on it; resolves when the run succeeded.
-    build: async (
-      archive: string,
-      yaml: string,
-      options: { readonly signal?: AbortSignal; readonly onQueued?: (runId: string) => void } = {}
-    ): Promise<void> => {
-      const { uploadUrl, relativePath } = await arm<{ uploadUrl: string; relativePath: string }>(
-        "POST",
-        "/listBuildSourceUploadUrl"
-      );
-      const upload = await call(uploadUrl, {
-        method: "PUT",
-        headers: { "x-ms-blob-type": "BlockBlob" },
-        body: await readFile(archive),
-      });
-      if (!upload.ok) throw new AcrError(`Uploading the build context answered ${upload.status}`);
-      const run = await arm<{ properties: { runId: string } }>(
-        "POST",
-        "/scheduleRun",
-        runRequest(relativePath, yaml)
-      );
-      const { runId } = run.properties;
-      options.onQueued?.(runId);
-      for (;;) {
-        await sleep(config.pollMs ?? 5000, undefined, { signal: options.signal });
-        const { status } = (await arm<{ properties: { status: string } }>("GET", `/runs/${runId}`))
-          .properties;
-        if (status === "Succeeded") return;
-        if (DONE.has(status)) throw new AcrError(await failure(runId, status));
+    // `runId` follows a run an earlier attempt already scheduled. Both tags already present skips
+    // the run. An aborted signal cancels whatever run this call started or was given.
+    build: async (archive: string, yaml: string, options: AcrBuildOptions = {}): Promise<void> => {
+      const { signal } = options;
+      if (options.images && (await imagesReady(options.images))) {
+        options.onSkipped?.();
+        if (signal?.aborted && options.runId !== undefined) await cancelRun(options.runId);
+        return;
+      }
+      let runId = options.runId;
+      try {
+        if (runId === undefined) {
+          runId = await uploadAndSchedule(archive, yaml, signal);
+          options.onQueued?.(runId);
+        }
+        if (signal?.aborted) throw signal.reason ?? new Error("The image build was canceled");
+        await follow(runId, signal);
+      } catch (error) {
+        if (signal?.aborted && runId !== undefined) await cancelRun(runId);
+        throw error;
       }
     },
 
     // Deletes the app's web and api repositories with the registry's own API, which takes a
     // registry token from the ARM one. Gone already is done.
     deleteImages: async (tenantId: number, slug: string): Promise<void> => {
-      const service = config.loginServer;
-      const exchange = await call(`https://${service}/oauth2/exchange`, {
-        method: "POST",
-        body: new URLSearchParams({
-          grant_type: "access_token",
-          service,
-          tenant: config.identity.tenantId,
-          access_token: await armToken(),
-        }),
-      });
-      if (!exchange.ok)
-        throw new AcrError(`The registry's token exchange answered ${exchange.status}`);
-      const { refresh_token } = (await exchange.json()) as { refresh_token: string };
+      const refresh = await registryRefresh();
       for (const repo of Object.values(imageRepos(tenantId, slug))) {
-        const granted = await call(`https://${service}/oauth2/token`, {
-          method: "POST",
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            service,
-            scope: `repository:${repo}:delete`,
-            refresh_token,
-          }),
-        });
-        if (!granted.ok) throw new AcrError(`The registry's token answered ${granted.status}`);
-        const { access_token } = (await granted.json()) as { access_token: string };
-        const deleted = await call(`https://${service}/acr/v1/${repo}`, {
+        const access = await registryAccess(refresh, `repository:${repo}:delete`);
+        const deleted = await call(`https://${config.loginServer}/acr/v1/${repo}`, {
           method: "DELETE",
-          headers: { authorization: `Bearer ${access_token}` },
+          headers: { authorization: `Bearer ${access}` },
         });
         if (!deleted.ok && deleted.status !== 404)
           throw new AcrError(`Deleting ${repo} answered ${deleted.status}`);

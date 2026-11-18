@@ -19,6 +19,7 @@ import { createDb } from "../../db/client.ts";
 import { buildFiles, builds, files, projects, usage } from "../../db/schema.ts";
 import type { Cluster, Job, Kube, LogLine, Pod } from "../../kube/client.ts";
 import { KubeError } from "../../kube/client.ts";
+import { createAcr, type Acr } from "../../services/acr.ts";
 import { appendEvent, listEvents } from "../../services/builds.ts";
 import type { Forgejo } from "../../services/forgejo.ts";
 import type { AppDatabases } from "../../services/appDatabases.ts";
@@ -295,6 +296,47 @@ const newBuild = async () => {
 
 const messages = (buildId: number) =>
   listEvents(db, buildId, 0).then((events) => events.map((event) => event.message));
+
+const acrJson = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+// A real ACR client whose Azure calls `handle` answers, after the sign-in and upload defaults.
+const scriptedAcr = (root: string, handle: (url: string, method: string) => Response) => {
+  const calls: string[] = [];
+  const tokenFile = join(root, "azure-token");
+  writeFileSync(tokenFile, "federated-jwt\n");
+  const fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? "GET";
+    calls.push(`${method} ${url}`);
+    if (url.includes("login.microsoftonline.com"))
+      return acrJson({ access_token: "arm-token", expires_in: 3600 });
+    if (url.includes("/oauth2/exchange")) return acrJson({ refresh_token: "refresh" });
+    if (url.includes("/oauth2/token")) return acrJson({ access_token: "registry" });
+    if (url.includes("listBuildSourceUploadUrl"))
+      return acrJson({
+        uploadUrl: "https://blob.example/upload",
+        relativePath: "source/1.tar.gz",
+      });
+    if (url.startsWith("https://blob.example")) return new Response(null, { status: 201 });
+    return handle(url, method);
+  };
+  const acr: Acr = createAcr({
+    identity: {
+      clientId: "worker-client",
+      tenantId: "entra-tenant",
+      federatedTokenFile: tokenFile,
+      authorityHost: "https://login.microsoftonline.com/",
+    },
+    subscriptionId: "sub",
+    resourceGroup: "rg",
+    name: "schmeide",
+    loginServer: "schmeide.azurecr.io",
+    fetch: fetch as typeof globalThis.fetch,
+    pollMs: 1,
+  });
+  return { acr, calls };
+};
 
 const agentLines = (pushed: string): readonly string[] => [
   "Cloning into '/work/app'...",
@@ -805,6 +847,112 @@ describe("kubernetes mode", () => {
       `app-${project.id}-staging did not roll out within 5 minutes: exceeded quota: tenant`
     );
     expect(hosting.scaled).toEqual([[staging, 0]]);
+  });
+
+  const prepared = async () => {
+    const built = setup();
+    const { project, build } = await newBuild();
+    await new MockActivityEnvironment().run(
+      createActivities(deps, built.config).prepareWorkspace,
+      build.id
+    );
+    const commit = builderCommit(
+      built.root,
+      built.forgejo.bare(`t${project.tenantId}`, project.slug)
+    );
+    return { ...built, project, build, commit };
+  };
+
+  it("heartbeats the ACR run id while the images build", async () => {
+    const { config, runner, hosting, root, build } = await prepared();
+    const { acr, calls } = scriptedAcr(root, (url) => {
+      if (url.includes("/_tags/")) return new Response(null, { status: 404 });
+      if (url.includes("scheduleRun")) return acrJson({ properties: { runId: "ca1" } });
+      if (url.includes("/runs/ca1")) return acrJson({ properties: { status: "Succeeded" } });
+      throw new Error(`unexpected ${url}`);
+    });
+    const activities = createActivities(deps, {
+      ...config,
+      runner: { ...runner, hosting: { ...hosting.hosting, acr } },
+    });
+    const env = new MockActivityEnvironment();
+    const beats: unknown[] = [];
+    env.on("heartbeat", (details: unknown) => beats.push(details));
+
+    await env.run(activities.deploy, build.id);
+
+    expect(beats).toContainEqual({ runId: "ca1" });
+    expect(calls.filter((call) => call.includes("scheduleRun"))).toHaveLength(1);
+    expect(await messages(build.id)).toContain("Image build ca1 queued");
+  });
+
+  it("follows the heartbeated ACR run on a retry instead of building again", async () => {
+    const { config, runner, forgejo, hosting, root, project, build } = await prepared();
+    const { acr, calls } = scriptedAcr(root, (url) => {
+      if (url.includes("/_tags/")) return new Response(null, { status: 404 });
+      if (url.includes("/runs/ca1")) return acrJson({ properties: { status: "Succeeded" } });
+      throw new Error(`unexpected ${url}`);
+    });
+    const activities = createActivities(deps, {
+      ...config,
+      runner: { ...runner, hosting: { ...hosting.hosting, acr } },
+    });
+    const env = new MockActivityEnvironment({ attempt: 2, heartbeatDetails: { runId: "ca1" } });
+
+    await env.run(activities.deploy, build.id);
+
+    expect(calls.some((call) => call.includes("scheduleRun"))).toBe(false);
+    expect(calls.some((call) => call.includes("/runs/ca1"))).toBe(true);
+    expect(await messages(build.id)).toContain("Following image build ca1");
+    expect(git(forgejo.bare(`t${project.tenantId}`, project.slug), "rev-parse", "main")).toMatch(
+      /^[0-9a-f]{40}$/
+    );
+  });
+
+  it("skips the image build when both commit tags already exist", async () => {
+    const { config, runner, hosting, root, build, commit } = await prepared();
+    const { acr, calls } = scriptedAcr(root, (url) => {
+      if (url.includes("/_tags/")) return acrJson({});
+      throw new Error(`unexpected ${url}`);
+    });
+    const activities = createActivities(deps, {
+      ...config,
+      runner: { ...runner, hosting: { ...hosting.hosting, acr } },
+    });
+
+    await new MockActivityEnvironment().run(activities.deploy, build.id);
+
+    expect(calls.some((call) => call.includes("scheduleRun"))).toBe(false);
+    expect(calls.some((call) => call.includes("/runs/"))).toBe(false);
+    expect(await messages(build.id)).toContain(
+      `Images for ${commit.slice(0, 12)} are already built`
+    );
+  });
+
+  it("cancels the ACR run when the deploy is canceled", async () => {
+    const { config, runner, hosting, root, build } = await prepared();
+    const env = new MockActivityEnvironment();
+    let polls = 0;
+    const { acr, calls } = scriptedAcr(root, (url) => {
+      if (url.includes("/_tags/")) return new Response(null, { status: 404 });
+      if (url.includes("/runs/ca1/cancel")) return new Response(null, { status: 200 });
+      if (url.includes("scheduleRun")) return acrJson({ properties: { runId: "ca1" } });
+      if (url.includes("/runs/ca1")) {
+        polls += 1;
+        if (polls === 1) env.cancel();
+        return acrJson({ properties: { status: "Running" } });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const activities = createActivities(deps, {
+      ...config,
+      runner: { ...runner, hosting: { ...hosting.hosting, acr } },
+    });
+
+    await expect(env.run(activities.deploy, build.id)).rejects.toThrow();
+
+    expect(calls.filter((call) => call.includes("scheduleRun"))).toHaveLength(1);
+    expect(calls.filter((call) => call.includes("/runs/ca1/cancel"))).toHaveLength(1);
   });
 
   it("discards staging back to production's commit with an empty database", async () => {

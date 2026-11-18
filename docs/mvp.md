@@ -541,9 +541,9 @@ What the worker needs, besides the Forgejo settings above:
 | `SCHMEIDE_APP_DATABASE_HOST`     | The shared Postgres server's host name, as app pods reach it (TLS needed) |
 
 The worker's identity needs, on the registry, `listBuildSourceUploadUrl/action`, `scheduleRun/action`,
-`runs/read` and `runs/listLogSasUrl/action`, plus Container Registry Repository Contributor limited to `apps/`: a
-quick run in ABAC mode pushes as its caller, and a delete removes the repositories. The cluster's kubelet identity
-needs Container Registry Repository Reader on `apps/` to pull.
+`runs/read`, `runs/cancel/action` and `runs/listLogSasUrl/action`, plus Container Registry Repository Contributor
+limited to `apps/`: a quick run in ABAC mode pushes as its caller, and a delete removes the repositories. The
+cluster's kubelet identity needs Container Registry Repository Reader on `apps/` to pull.
 
 ## How built apps are made to work on a phone
 
