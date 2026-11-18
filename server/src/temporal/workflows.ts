@@ -41,6 +41,13 @@ const { prepareWorkspace, runChecks, deploy, release } = proxyActivities<Activit
   ...longRunning,
   startToCloseTimeout: "30 minutes",
 });
+// The image build is allowed 25 minutes (RUN_TIMEOUT_SECONDS). The rest is the clone, two
+// rollouts, and two health checks. A deploy already scheduled keeps the 30 minute budget.
+export const DEPLOY_BUDGET = "60 minutes";
+const { deploy: deployWithBudget } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: DEPLOY_BUDGET,
+});
 // A single model answer with no tools; a retry reuses a brief already stored.
 const { planDesign } = proxyActivities<Activities>({
   ...longRunning,
@@ -115,7 +122,7 @@ export async function buildWorkflow(
       if (kind !== "site") await buildAndCheck(buildId);
       // patched: a build already running when this step was added replays without it.
       if (patched("apply-site")) await applySite(buildId);
-      await deploy(buildId);
+      await (patched("deploy-budget") ? deployWithBudget : deploy)(buildId);
     }
     await finishBuild(buildId);
   } catch (error) {

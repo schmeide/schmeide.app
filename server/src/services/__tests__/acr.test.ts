@@ -107,6 +107,11 @@ describe("taskYaml and runRequest", () => {
     });
     expect(Buffer.from(request.encodedTaskContent, "base64").toString()).toBe("version: v1.1.0\n");
   });
+
+  it("stops the run well under the deploy activity's 60 minute budget", () => {
+    // 35 minutes left covers the clone, two rollouts, and two health checks.
+    expect(runRequest("source/123.tar.gz", "version: v1.1.0\n").timeout).toBe(25 * 60);
+  });
 });
 
 describe("createAcr", () => {
@@ -187,6 +192,120 @@ describe("createAcr", () => {
         "Bearer repository:apps/t3/notes/api:delete",
       ],
     ]);
+  });
+
+  const images = { repos: ["apps/t3/notes/web", "apps/t3/notes/api"], tag: "abc" };
+  const tag = (repo: string, status: number) =>
+    [
+      `/acr/v1/${repo}/_tags/abc`,
+      () => (status === 200 ? json({}) : new Response(null, { status })),
+    ] as const;
+
+  it("cancels the run when the deploy is aborted and does not start another", async () => {
+    const controller = new AbortController();
+    const { calls, fetch } = fakeFetch({
+      "login.microsoftonline.com": token,
+      listBuildSourceUploadUrl: () =>
+        json({ uploadUrl: "https://blob.example/upload", relativePath: "source/1.tar.gz" }),
+      "blob.example/upload": () => new Response(null, { status: 201 }),
+      scheduleRun: () => json({ properties: { runId: "ca1" } }),
+      "runs/ca1/cancel": () => new Response(null, { status: 200 }),
+      "runs/ca1": () => {
+        controller.abort();
+        return json({ properties: { status: "Running" } });
+      },
+    });
+
+    await expect(
+      acrWith(fetch).build(archive, "version: v1.1.0\n", { signal: controller.signal })
+    ).rejects.toThrow();
+
+    expect(calls.filter((call) => call.url.includes("scheduleRun"))).toHaveLength(1);
+    const cancel = calls.find((call) => call.url.includes("/runs/ca1/cancel"));
+    expect(cancel?.method).toBe("POST");
+    expect(cancel?.url).toBe(`${registry}/runs/ca1/cancel?api-version=${TASKS_API_VERSION}`);
+    expect(cancel?.headers.authorization).toBe("Bearer arm-token");
+  });
+
+  it("follows a run from an earlier attempt and does not start another", async () => {
+    const statuses = ["Running", "Succeeded"];
+    const { calls, fetch } = fakeFetch({
+      "login.microsoftonline.com": token,
+      "runs/ca9": () => json({ properties: { status: statuses.shift() } }),
+    });
+
+    await acrWith(fetch).build(archive, "version: v1.1.0\n", { runId: "ca9" });
+
+    expect(calls.some((call) => call.url.includes("scheduleRun"))).toBe(false);
+    expect(calls.some((call) => call.url.includes("listBuildSourceUploadUrl"))).toBe(false);
+    expect(calls.filter((call) => call.url.includes("/runs/ca9"))).toHaveLength(2);
+  });
+
+  it("cancels a followed run when the deploy is aborted", async () => {
+    const controller = new AbortController();
+    const { calls, fetch } = fakeFetch({
+      "login.microsoftonline.com": token,
+      "runs/ca9/cancel": () => new Response(null, { status: 200 }),
+      "runs/ca9": () => {
+        controller.abort();
+        return json({ properties: { status: "Running" } });
+      },
+    });
+
+    await expect(
+      acrWith(fetch).build(archive, "", { runId: "ca9", signal: controller.signal })
+    ).rejects.toThrow();
+
+    expect(calls.some((call) => call.url.includes("scheduleRun"))).toBe(false);
+    expect(
+      calls.filter((call) => call.method === "POST" && call.url.includes("/cancel"))
+    ).toHaveLength(1);
+  });
+
+  it("skips the run when both commit tags already exist", async () => {
+    const { calls, fetch } = fakeFetch({
+      "login.microsoftonline.com": token,
+      "/oauth2/exchange": () => json({ refresh_token: "refresh" }),
+      "/oauth2/token": (call) =>
+        json({ access_token: new URLSearchParams(call.body).get("scope") }),
+      ...Object.fromEntries([tag("apps/t3/notes/web", 200), tag("apps/t3/notes/api", 200)]),
+    });
+    const skipped: string[] = [];
+
+    await acrWith(fetch).build(archive, "version: v1.1.0\n", {
+      images,
+      onSkipped: () => skipped.push("skipped"),
+    });
+
+    expect(skipped).toEqual(["skipped"]);
+    expect(calls.some((call) => call.url.includes("scheduleRun"))).toBe(false);
+    expect(calls.some((call) => call.url.includes("listBuildSourceUploadUrl"))).toBe(false);
+    expect(
+      calls
+        .filter((call) => call.url.includes("/oauth2/token"))
+        .map((call) => new URLSearchParams(call.body).get("scope"))
+    ).toEqual([
+      "repository:apps/t3/notes/web:metadata_read",
+      "repository:apps/t3/notes/api:metadata_read",
+    ]);
+  });
+
+  it("starts a run when one commit tag is missing", async () => {
+    const { calls, fetch } = fakeFetch({
+      "login.microsoftonline.com": token,
+      "/oauth2/exchange": () => json({ refresh_token: "refresh" }),
+      "/oauth2/token": () => json({ access_token: "pull" }),
+      ...Object.fromEntries([tag("apps/t3/notes/web", 200), tag("apps/t3/notes/api", 404)]),
+      listBuildSourceUploadUrl: () =>
+        json({ uploadUrl: "https://blob.example/upload", relativePath: "source/1.tar.gz" }),
+      "blob.example/upload": () => new Response(null, { status: 201 }),
+      scheduleRun: () => json({ properties: { runId: "ca3" } }),
+      "runs/ca3": () => json({ properties: { status: "Succeeded" } }),
+    });
+
+    await acrWith(fetch).build(archive, "version: v1.1.0\n", { images });
+
+    expect(calls.filter((call) => call.url.includes("scheduleRun"))).toHaveLength(1);
   });
 });
 

@@ -54,7 +54,9 @@ import {
   type Config,
   type Query,
 } from "../activities.ts";
+import { RUN_TIMEOUT_SECONDS } from "../../services/acr.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
+import { DEPLOY_BUDGET } from "../workflows.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -1520,5 +1522,15 @@ describe("the design review", () => {
     expect(calls[0].prompt).toBe("Schmeide's design review found these problems");
     expect(calls[0].options.resume).toBe("session-1");
     expect(await messages(build.id)).toContain("Agent is fixing design problems");
+  });
+});
+
+describe("the image build's budget", () => {
+  it("ends the ACR run well under the deploy activity, with time left for both copies", () => {
+    const minutes = Number(/^(\d+) minutes$/.exec(DEPLOY_BUDGET)?.[1]);
+    expect(RUN_TIMEOUT_SECONDS).toBe(25 * 60);
+    expect(minutes).toBe(60);
+    // The clone, two rollouts, and two health checks need what remains.
+    expect(minutes * 60 - RUN_TIMEOUT_SECONDS).toBeGreaterThanOrEqual(30 * 60);
   });
 });
