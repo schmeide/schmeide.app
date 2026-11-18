@@ -15,6 +15,7 @@ import {
   timestamp,
   uniqueIndex,
   varchar,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -112,11 +113,19 @@ export const projects = pgTable(
 );
 
 // `site`: applies the page title and icon and redeploys, without the agent. `promote` makes
-// production run staging's commit and `discard` returns staging to production's; neither runs the
-// builder, and both are asked for by a person (`byUserId`).
-export const buildKind = pgEnum("build_kind", ["initial", "change", "site", "promote", "discard"]);
+// production run staging's commit, `discard` returns staging to production's, and `rollback` puts
+// an earlier version live; none runs the builder, and each is asked for by a person (`byUserId`).
+export const buildKind = pgEnum("build_kind", [
+  "initial",
+  "change",
+  "site",
+  "promote",
+  "discard",
+  "rollback",
+]);
 // What became of a passed build's work: put live on production, or thrown away from staging.
-// Null while it is on staging only.
+// Null while it is on staging only. It is history ("was promoted"), not what is live now: after a
+// roll back, live is `projects.production_commit`, whatever the flag says.
 export const buildRelease = pgEnum("build_release", ["promoted", "discarded"]);
 // `queued`: a change waiting for the project's running build; it starts once that one passes.
 // `canceled`: the person stopped the build. Nothing failed, so there is no error message.
@@ -149,12 +158,37 @@ export const builds = pgTable(
     // Null for the first build, which starts from the template commit.
     baseCommit: varchar("base_commit", { length: 40 }),
     release: buildRelease("release"),
+    // Whether this version's migrations only add to the database (schmeide/template#25), so an
+    // earlier version can still read it. True when the checks passed with the template's
+    // check/migrations; null (unknown) for an app whose template has none.
+    additive: boolean("additive"),
+    // A `rollback` that goes back with the information from a day: the copy it restores.
+    fromCopyId: integer("from_copy_id").references((): AnyPgColumn => databaseCopies.id, {
+      onDelete: "set null",
+    }),
     byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
   },
   (table) => [uniqueIndex("builds_project_version_idx").on(table.projectId, table.version)]
 );
+
+// A copy of the live app's database, taken just before a promote or a roll back moves production
+// (#227). `version` was live when it was taken; null for a live commit that has no number.
+export const databaseCopies = pgTable("database_copies", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id")
+    .notNull()
+    .references(() => projects.id),
+  buildId: integer("build_id")
+    .notNull()
+    .references(() => builds.id),
+  version: integer("version"),
+  takenAt: timestamp("taken_at", { withTimezone: true }).notNull().defaultNow(),
+  path: text("path").notNull(),
+  bytes: bigint("bytes", { mode: "number" }).notNull(),
+});
+export type DatabaseCopy = typeof databaseCopies.$inferSelect;
 
 // Kept out of projects so project rows, polled by the UI, stay small.
 export const projectIcons = pgTable("project_icons", {

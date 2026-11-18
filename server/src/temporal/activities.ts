@@ -55,6 +55,7 @@ import {
   projectIcons,
   projects,
   tenants,
+  type Build,
   type BuildEventKind,
   type FileRow,
   type NewAgentRun,
@@ -205,6 +206,9 @@ export const PLATFORM_FILES = [
 ] as const;
 
 // A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
+// The template's Makefile has the additions-only check (schmeide/template#25).
+export const MIGRATIONS_TARGET = /^check\/migrations:/m;
+
 export const isCommit = (text: string): boolean => /^[0-9a-f]{40}$/.test(text);
 
 // How build events name each copy.
@@ -1482,6 +1486,7 @@ export const createActivities = (
   // agent pushed, with the same events and answer as on the host.
   const runChecksJob = async (
     runner: KubeRunner,
+    build: Build,
     project: Project,
     buildId: number,
     round: number,
@@ -1507,6 +1512,8 @@ export const createActivities = (
               SCHMEIDE_COMMIT: commit,
               // The commit the build started from, for the secrets check to read what changed.
               ...(project.stagingCommit && { SCHMEIDE_BASE: project.stagingCommit }),
+              // Where the template's check/migrations starts (schmeide/template#25).
+              ...(build.baseCommit && { SCHMEIDE_MIGRATIONS_BASE: build.baseCommit }),
             },
             {}
           );
@@ -1577,6 +1584,12 @@ export const createActivities = (
             })
           );
           await recordDependencies(db, buildId, locks.flat());
+          await recordAdditive(
+            buildId,
+            MIGRATIONS_TARGET.test(
+              (await runner.forgejo.fileAt(org, repo, commit, "Makefile")) ?? ""
+            )
+          );
           return { ok: true, output: "" };
         } finally {
           await endJob(runner, project, name);
@@ -1682,6 +1695,14 @@ export const createActivities = (
     const added = await run("git", ["ls-files", "--others", "--exclude-standard"], options);
     return [...changed.output.split("\n"), ...added.output.split("\n")].filter(Boolean);
   };
+
+  // Passing checks that included check/migrations prove the build only added to the database.
+  // Without the target, an app made from an older template, nothing is known.
+  const recordAdditive = (buildId: number, checked: boolean) =>
+    db
+      .update(builds)
+      .set({ additive: checked ? true : null })
+      .where(eq(builds.id, buildId));
 
   // A version is a passed build with a commit of its own. promote and discard move a copy.
   const VERSION_KINDS = ["initial", "change", "site"] as const;
@@ -2215,12 +2236,18 @@ export const createActivities = (
 
     // ponytail: checks run on the host via the project Makefile, or in a Job (runChecksJob)
     async runChecks(buildId: number, round = 0): Promise<{ ok: boolean; output: string }> {
-      const { project } = await stepOfBuild(buildId);
+      const { build, project } = await stepOfBuild(buildId);
       if (config.runner)
-        return runChecksJob(config.runner, project, buildId, round, resumePosition());
+        return runChecksJob(config.runner, build, project, buildId, round, resumePosition());
+      // The template's check/migrations runs inside `make check` (schmeide/template#25), on the
+      // migrations added since BASE; with no BASE, the first build, on every one.
+      const additive = MIGRATIONS_TARGET.test(
+        await readFile(join(workspaceOf(project), "Makefile"), "utf8").catch(() => "")
+      );
       for (const target of ["check", "test", "build"]) {
         await event(buildId, "check", `Running make ${target}`);
-        const result = await run(config.makeBin, [target], {
+        const base = target === "check" && build.baseCommit;
+        const result = await run(config.makeBin, base ? [target, `BASE=${base}`] : [target], {
           cwd: workspaceOf(project),
           env: projectEnv(project, config.dataDir),
           buildId,
@@ -2253,6 +2280,7 @@ export const createActivities = (
       }
       await event(buildId, "check", PACKAGES_OK);
       await recordDependencies(db, buildId, await appDependencies(workspaceOf(project)));
+      await recordAdditive(buildId, additive);
       return { ok: true, output: "" };
     },
 

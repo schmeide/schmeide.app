@@ -139,6 +139,10 @@ describe("runJob", () => {
     const script = container.command.join(" ");
     expect(script).toContain('git checkout -q --detach "$SCHMEIDE_COMMIT"');
     for (const { target } of CHECK_TARGETS) expect(script).toContain(checksMarker("start", target));
+    // The template's migrations check starts at the build's base when there is one.
+    expect(script).toContain(
+      'make check ${SCHMEIDE_MIGRATIONS_BASE:+BASE="$SCHMEIDE_MIGRATIONS_BASE"}'
+    );
     // The phone check runs after make build, on what it built (#219), then the secrets and
     // outside-calls check (#271), then the packages check (#270).
     expect(CHECK_TARGETS.map(({ target }) => target)).toEqual([

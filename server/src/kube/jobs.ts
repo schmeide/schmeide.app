@@ -72,7 +72,11 @@ const labelsOf = (run: RunJob): Record<string, string> => ({
 // the pod's own database until the template uses TEST_DATABASE_URL (docs/stage2.md, "The template
 // contract").
 export const CHECK_TARGETS = [
-  { target: "check", command: "make check" },
+  // BASE: the build's base commit, for the template's check/migrations (schmeide/template#25).
+  {
+    target: "check",
+    command: 'make check ${SCHMEIDE_MIGRATIONS_BASE:+BASE="$SCHMEIDE_MIGRATIONS_BASE"}',
+  },
   { target: "test", command: 'make test/run DATABASE_URL="$TEST_DATABASE_URL"' },
   { target: "build", command: "make build" },
   // Schmeide's check of what make build left in frontend/dist, as runChecks does on the host.

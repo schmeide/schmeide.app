@@ -506,6 +506,48 @@ describe("build activities", () => {
     );
   });
 
+  it("checks migrations since the build's base and records the build as additive", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild("change");
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const workspace = join(dataDir, "projects", project.slug);
+    const base = "b".repeat(40);
+    await db.update(builds).set({ baseCommit: base }).where(eq(builds.id, build.id));
+    writeFileSync(
+      join(workspace, "Makefile"),
+      `check: check/migrations\ncheck/migrations:\n\t@echo migrations since $(BASE) > migrations-checked\n`,
+      { flag: "a" }
+    );
+    // Committed and recorded as staging's, so the secrets check reads only what changes after.
+    git(workspace, "commit", "-qam", "migrations check");
+    await db
+      .update(projects)
+      .set({ stagingCommit: git(workspace, "rev-parse", "HEAD").trim() })
+      .where(eq(projects.id, project.id));
+
+    expect(await env.run(activities.runChecks, build.id)).toEqual({ ok: true, output: "" });
+
+    expect(readFileSync(join(workspace, "migrations-checked"), "utf8")).toBe(
+      `migrations since ${base}\n`
+    );
+    expect((await getBuild(db, build.id)).additive).toBe(true);
+  });
+
+  it("records additive as unknown for an app whose template cannot check its migrations", async () => {
+    const { config } = setup();
+    const { build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    await db.update(builds).set({ additive: true }).where(eq(builds.id, build.id));
+
+    expect(await env.run(activities.runChecks, build.id)).toEqual({ ok: true, output: "" });
+
+    expect((await getBuild(db, build.id)).additive).toBeNull();
+  });
+
   it("fails a build that passes its make targets but is not ready for a phone", async () => {
     const { config, dataDir } = setup();
     const { project, build } = await newBuild();
