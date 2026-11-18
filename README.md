@@ -66,7 +66,8 @@ variables reach client code, and nothing secret belongs in either — the bundle
 
 Optional. Set it to announce planned work: while the date is in the future, the site shows the maintenance page
 (`components/MaintenancePage.tsx`) with that time as when to come back. Use an ISO 8601 date and time, for example
-`VITE_MAINTENANCE_UNTIL=2026-12-01T06:00:00Z`. Unset, empty, or unreadable means no planned work.
+`VITE_MAINTENANCE_UNTIL=2026-12-01T06:00:00Z`.
+Once that time has passed the normal site shows again; unset, empty, or unreadable means no planned work.
 
 It is baked in at build time (`import.meta.env`), so changing it needs a rebuild and a deploy. Only `VITE_`-prefixed
 variables reach client code, so the value ships in the public bundle: nothing secret belongs in it.
