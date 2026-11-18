@@ -21,6 +21,7 @@ import { createLocalFileStore } from "./services/fileStore.ts";
 import { createInterviewer } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createResourceReader } from "./services/resources.ts";
+import { sweepExpired } from "./services/retention.ts";
 import { createSiteFetcher } from "./services/siteFetcher.ts";
 import { createSummaries } from "./services/summaries.ts";
 import { createSummarizer } from "./services/summarizer.ts";
@@ -184,6 +185,14 @@ const startWorker = async () => {
   });
   await failOrphanedBuilds(deps);
   if (runner) console.log(`Swept ${await sweepLeftoverRuns(db, runner)} leftover build Jobs.`);
+  // On the worker, which keeps the build logs: at start and each day after (services/retention.ts).
+  const sweep = () =>
+    sweepExpired(db, config.dataDir).then(
+      (removed) => console.log(`Retention sweep removed ${JSON.stringify(removed)}.`),
+      (error: unknown) => console.error("Retention sweep failed:", error)
+    );
+  void sweep();
+  setInterval(() => void sweep(), 86_400_000).unref();
   return worker;
 };
 

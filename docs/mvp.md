@@ -470,12 +470,34 @@ decides, and the run kind is its only input.
   app deployed before this existed runs from images built in the workspace until its first promote.
 - `~/.schmeide/files/<business id>/<project id>/<file id>`: uploaded files, removed with the file or the project.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
-  Kept after a project is deleted. `e2e-fake-server.log` is the `make e2e/fake` server's output.
+  `e2e-fake-server.log` is the `make e2e/fake` server's output.
+- `~/.schmeide/attachments/build-<id>/`: the files a change attached, staged read-only for the builder.
+- `~/.claude/projects/<staging path, dashed>/` (or under `CLAUDE_CONFIG_DIR`): the agent's session transcripts.
 - `~/.schmeide/bin/make`: a link to GNU make, first on `PATH` for project runs and the agent.
 - `~/.schmeide/gitconfig`: neutral git identity used instead of your global git config.
 - Each deployed project is two Compose projects: `schmeide-<slug>` on `http://localhost:<web port>` and
   `schmeide-<slug>_staging` on `http://localhost:<web port + 10000>`; its `make test` database uses port
   `5600 + n` for web port `8100 + n`. Web ports stay below 18100 (a database check), so the ranges never meet.
+
+### How long records are kept
+
+`services/retention.ts` holds one period per kind of record, and the worker deletes what is past it at start and
+daily after, recording how many of each kind it removed as a `retention sweep` row in the audit log. The periods are
+a starting point until a lawyer has read them (#275).
+
+| Kind             | Kept for                    | What                                         |
+| ---------------- | --------------------------- | -------------------------------------------- |
+| `build_logs`     | 90 days from the last write | Build logs and staged attachments            |
+| `agent_sessions` | 90 days from the last write | The agent's session transcripts              |
+| `website_reads`  | 1 day                       | The website read limit's record of each read |
+| `sign_ins`       | 30 days after they expire   | Sign-in sessions and provider sign-ins       |
+| `usage`          | 10 years                    | Tokens and cost, for billing                 |
+| `audit_log`      | 10 years                    | What admins did (`admin_actions`)            |
+
+A deleted project's build logs, attachments and transcripts go with it: the sweep removes any whose build or project
+no longer exists, however new. Not yet done (#275): removing them at the moment of deletion (a call in the
+`removeProject` activity), keeping usage and audit rows of a deletion without personal details, refused requests and
+reports (which do not exist yet), and publishing the periods on the privacy page and in "Download my details".
 
 To bring a stopped app back by hand, production:
 `cd ~/.schmeide/production/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug> WEB_PORT=<port>` (from
