@@ -42,12 +42,40 @@ describe("the set-password page", () => {
     await save();
 
     await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(calls.find((call) => call.path === "invites.get")?.input).toEqual({ token: "abc" });
     expect(calls.find((call) => call.path === "invites.accept")?.input).toEqual({
       token: "abc",
       name: "Ada Lovelace",
       password: PASSWORD,
     });
     expect(await screen.findByRole("button", { name: "Ada Lovelace" })).toBeInTheDocument();
+  });
+
+  it("sends next with the token when it is a path on this site", async () => {
+    const kept = open("/set-password?token=abc&next=%2Fgo%3Fplan%3Dstarter%26intent%3Ddescribe", {
+      "invites.get": () => ({ email: "ada@example.com", hasAccount: true }),
+      "invites.accept": () => ({ email: "ada@example.com" }),
+    });
+    await screen.findByLabelText(copy.setPasswordPage.passwordLabel);
+    await type(copy.setPasswordPage.passwordLabel, PASSWORD);
+    await type(copy.setPasswordPage.confirmLabel, PASSWORD);
+    await save();
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    const carried = { token: "abc", next: "/go?plan=starter&intent=describe" };
+    expect(kept.find((call) => call.path === "invites.get")?.input).toEqual(carried);
+    expect(kept.find((call) => call.path === "invites.accept")?.input).toEqual({
+      ...carried,
+      password: PASSWORD,
+    });
+    expect(JSON.stringify(kept)).not.toContain("idea");
+  });
+
+  it("does not send a next that points at another origin", async () => {
+    const dropped = open("/set-password?token=xyz&next=https%3A%2F%2Fevil.example", {
+      "invites.get": () => ({ email: "ada@example.com", hasAccount: true }),
+    });
+    expect(await screen.findByLabelText(copy.setPasswordPage.passwordLabel)).toBeInTheDocument();
+    expect(dropped.find((call) => call.path === "invites.get")?.input).toEqual({ token: "xyz" });
   });
 
   it("does not send two passwords that differ, and says so on the field", async () => {

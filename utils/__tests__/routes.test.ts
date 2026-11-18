@@ -1,12 +1,17 @@
 import {
+  approvalEntryUrl,
   carryPlan,
   entryRoutes,
+  GO_INTENTS,
+  goTo,
   guard,
+  intentFrom,
   matchRoute,
   nextPath,
   pathTo,
   planFrom,
   routes,
+  SIGN_UP_OPEN,
   type RouteName,
 } from "../routes";
 import { signedOut, type Session } from "../session";
@@ -220,5 +225,98 @@ describe("nextPath", () => {
     expect(nextPath("?next=%2F%2Fevil.example")).toBe("/");
     expect(nextPath("?next=%2F%5Cevil.example")).toBe("/");
     expect(nextPath("")).toBe("/");
+  });
+});
+
+const door = (query: string) => `/go${query}`;
+const nextOf = (page: string, query: string) => `${page}?next=${encodeURIComponent(door(query))}`;
+
+describe("the front door", () => {
+  const atGo = (search: string, hasIdea = false) => ({ search, hasIdea });
+
+  it("is /go, public, and not one of the entry pages", () => {
+    expect(pathTo("go")).toBe("/go");
+    expect(route("go").access).toBe("public");
+    expect(entryRoutes.has("go")).toBe(false);
+    expect(GO_INTENTS).toEqual(["describe", "pricing", "sign-in"]);
+    expect(SIGN_UP_OPEN).toBe(false);
+  });
+
+  it("reads an intent only from the fixed list", () => {
+    expect(intentFrom("?intent=describe")).toBe("describe");
+    expect(intentFrom("?intent=pricing")).toBe("pricing");
+    expect(intentFrom("?intent=sign-in")).toBe("sign-in");
+    expect(intentFrom("?plan=starter&intent=describe")).toBe("describe");
+    expect(intentFrom("?intent=hack")).toBeNull();
+    expect(intentFrom("?intent=")).toBeNull();
+    expect(intentFrom("")).toBeNull();
+  });
+
+  it("sends a signed-out person to sign-in while sign-up is invitation-only, with plan and intent inside next", () => {
+    expect(goTo(signedOut, atGo(""), false, PLANS)).toBe(nextOf("/sign-in", ""));
+    expect(goTo(signedOut, atGo("?plan=starter&intent=describe"), false, PLANS)).toBe(
+      nextOf("/sign-in", "?plan=starter&intent=describe")
+    );
+    expect(goTo(signedOut, atGo("?plan=starter&intent=describe", true), false, PLANS)).toBe(
+      nextOf("/sign-in", "?plan=starter&intent=describe")
+    );
+    expect(goTo(signedOut, atGo(""))).toBe(nextOf("/sign-in", ""));
+  });
+
+  it("sends a signed-out person to sign-up once sign-up is open", () => {
+    expect(goTo(signedOut, atGo("?intent=pricing"), true, PLANS)).toBe(
+      nextOf("/sign-up", "?intent=pricing")
+    );
+  });
+
+  it("sends a signed-in person with no business back through first-run, admin included", () => {
+    expect(goTo(newcomer, atGo("?plan=business&intent=sign-in"), false, PLANS)).toBe(
+      nextOf("/welcome", "?plan=business&intent=sign-in")
+    );
+    expect(goTo(newcomer, atGo("", true), false, PLANS)).toBe(nextOf("/welcome", ""));
+    expect(goTo(admin, atGo("?intent=describe"), false, PLANS)).toBe(
+      nextOf("/welcome", "?intent=describe")
+    );
+  });
+
+  it("fills in /new when a business is carrying an idea, and goes home otherwise", () => {
+    expect(goTo(owner, atGo("?plan=starter", true), false, PLANS)).toBe("/new");
+    expect(goTo(owner, atGo("", true), false, PLANS)).toBe("/new");
+    // Checkout (#61) is not here yet, so a plan alone ends at home, the same as nothing carried.
+    expect(goTo(owner, atGo("?plan=starter"), false, PLANS)).toBe("/");
+    expect(goTo(owner, atGo(""), false, PLANS)).toBe("/");
+  });
+
+  it("drops an unknown plan, an unknown intent, an idea in the query, and a next that leaves the site", () => {
+    expect(goTo(signedOut, atGo("?plan=enterprise&intent=hack"), false, PLANS)).toBe(
+      nextOf("/sign-in", "")
+    );
+    expect(goTo(signedOut, atGo("?plan=starter&intent=nope"), false, PLANS)).toBe(
+      nextOf("/sign-in", "?plan=starter")
+    );
+    expect(goTo(signedOut, atGo("?idea=track%20ovens&plan=starter"), false, PLANS)).toBe(
+      nextOf("/sign-in", "?plan=starter")
+    );
+    expect(
+      goTo(signedOut, atGo("?next=https%3A%2F%2Fevil.example&plan=starter"), false, PLANS)
+    ).toBe(nextOf("/sign-in", "?plan=starter"));
+    expect(goTo(owner, atGo("?plan=enterprise"), false, PLANS)).toBe("/");
+  });
+});
+
+describe("an approval link", () => {
+  it("is the set-password link with next=/go until a provider is configured", () => {
+    expect(approvalEntryUrl("https://schmeide.app", "tok/1", false)).toBe(
+      "https://schmeide.app/set-password?token=tok%2F1&next=%2Fgo"
+    );
+    expect(approvalEntryUrl("https://schmeide.app/", "tok", false)).toBe(
+      "https://schmeide.app/set-password?token=tok&next=%2Fgo"
+    );
+  });
+
+  it("is /go?intent=sign-in once a provider is on", () => {
+    expect(approvalEntryUrl("https://schmeide.app", "tok", true)).toBe(
+      "https://schmeide.app/go?intent=sign-in"
+    );
   });
 });

@@ -8,8 +8,9 @@ import {
 } from "react";
 
 import { copy } from "../data/copy";
+import { ideaFrom, readCarried, writeCarried } from "../utils/carried";
 import { currentLocation, navigate, subscribe } from "../utils/navigation";
-import { entryRoutes, guard, matchRoute, pathTo } from "../utils/routes";
+import { entryRoutes, goTo, guard, matchRoute, pathTo } from "../utils/routes";
 import { EntryFrame } from "./EntryFrame";
 import { RoutePage } from "./RoutePage";
 import { NotFoundPage } from "./NotFoundPage";
@@ -38,12 +39,18 @@ export function Routes({ banner }: { readonly banner?: ReactNode }) {
   const [pathname, query = ""] = location.split("?");
   const search = query && `?${query}`;
   const match = matchRoute(pathname);
-  const redirect =
-    match &&
-    (() => {
-      const outcome = guard(match.route, session, { pathname, search });
-      return outcome.kind === "redirect" ? outcome.to : null;
-    })();
+  // `/go` renders nothing. The idea, if the fragment carried one, is moved into this tab before
+  // the address is replaced, so Back never lands here and the fragment is not left behind.
+  const onGo = match?.route.name === "go";
+  const arrivedIdea = onGo ? ideaFrom(window.location.hash) : null;
+  const hasIdea = onGo && (arrivedIdea !== null || readCarried() !== null);
+  const redirect = onGo
+    ? goTo(session, { search, hasIdea })
+    : match &&
+      (() => {
+        const outcome = guard(match.route, session, { pathname, search });
+        return outcome.kind === "redirect" ? outcome.to : null;
+      })();
 
   // A session that ended while a page was open (not by signing out here) gets the signed-out
   // page in place, rather than a jump to sign-in: the address stays, and signing in returns to it.
@@ -55,8 +62,14 @@ export function Routes({ banner }: { readonly banner?: ReactNode }) {
       : null;
 
   useEffect(() => {
-    if (redirect && !ended) navigate(redirect, { replace: true });
-  }, [redirect, ended]);
+    if (!redirect) return;
+    if (onGo) {
+      if (arrivedIdea) writeCarried(arrivedIdea);
+      navigate(redirect, { replace: true });
+      return;
+    }
+    if (!ended) navigate(redirect, { replace: true });
+  }, [redirect, ended, onGo, arrivedIdea]);
 
   // A layout effect, so a page that names itself (a project) can set its own title in an effect
   // afterwards.
@@ -97,6 +110,8 @@ export function Routes({ banner }: { readonly banner?: ReactNode }) {
   ) : (
     <RoutePage name={match.route.name} params={match.params} />
   );
+  // The door draws nothing: not the shell, and not the entry frame.
+  if (onGo) return null;
   // Before a person has a business, the entry pages sit outside the app shell.
   if (match && entryRoutes.has(match.route.name)) return <EntryFrame>{page}</EntryFrame>;
   return (

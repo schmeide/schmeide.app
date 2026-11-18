@@ -5,12 +5,22 @@ import { RoutePage } from "../RoutePage";
 import { aProject, projectServer, renderWithApi } from "./fakeApi";
 
 describe("RoutePage", () => {
-  it.each(routes)("renders a page with a heading for $name, which has a title", async (route) => {
-    renderWithApi(
-      <RoutePage name={route.name} params={{ id: 7 }} />,
-      projectServer({ project: aProject() })
-    );
-    expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
-    expect(route.title).not.toBe("");
+  it.each(routes.filter((route) => route.name !== "go"))(
+    "renders a page with a heading for $name, which has a title",
+    async (route) => {
+      renderWithApi(
+        <RoutePage name={route.name} params={{ id: 7 }} />,
+        projectServer({ project: aProject() })
+      );
+      expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
+      expect(route.title).not.toBe("");
+    }
+  );
+
+  it("gives /go a title and no page: it only forwards", () => {
+    const go = routes.find((route) => route.name === "go");
+    expect(go?.title).not.toBe("");
+    renderWithApi(<RoutePage name="go" params={{}} />, {});
+    expect(screen.queryByRole("heading")).toBeNull();
   });
 });

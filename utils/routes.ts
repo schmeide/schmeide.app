@@ -28,6 +28,8 @@ const table = {
   adminUsage: { path: "/admin/usage", access: "admin" },
   adminAudit: { path: "/admin/audit", access: "admin" },
   help: { path: "/help", access: "public" },
+  // The front door from schmeide.com. It renders nothing: `goTo` sends the person on.
+  go: { path: "/go", access: "public" },
   signIn: { path: "/sign-in", access: "public" },
   signUp: { path: "/sign-up", access: "public" },
   setPassword: { path: "/set-password", access: "public" },
@@ -88,11 +90,13 @@ export const matchRoute = (pathname: string): RouteMatch | null => {
 export const pathTo = (name: RouteName, params: RouteParams = {}): string =>
   table[name].path.replace(/:(\w+)/g, (_, key: string) => String(params[key]));
 
+// A path on this site, or null. Rejects another origin and a protocol-relative path (`//evil`).
+export const sitePath = (value: string | null): string | null =>
+  value && /^\/(?![/\\])/.test(value) ? value : null;
+
 // Where sign-in returns to: only a path on this site, never another origin.
-export const nextPath = (search: string): string => {
-  const next = new URLSearchParams(search).get("next");
-  return next && /^\/(?![/\\])/.test(next) ? next : pathTo("apps");
-};
+export const nextPath = (search: string): string =>
+  sitePath(new URLSearchParams(search).get("next")) ?? pathTo("apps");
 
 // The plan ids schmeide.com's pricing page may send with `?plan=<id>`. Empty until the server
 // exposes the plans (#119); until then every id is unknown and dropped.
@@ -120,6 +124,62 @@ export const carryPlan = (
   if (params.has("plan")) return path;
   params.set("plan", plan);
   return `${pathname}?${params.toString()}`;
+};
+
+// Invitation-only until the sign-up screen (#46) replaces the placeholder. `/go` sends a
+// signed-out person to sign-in until this is true.
+export const SIGN_UP_OPEN = false;
+
+// What schmeide.com may put in `intent` on `/go`. Anything else is dropped. The site's helper
+// keeps this same list.
+export const GO_INTENTS = ["describe", "pricing", "sign-in"] as const;
+export type GoIntent = (typeof GO_INTENTS)[number];
+
+// The intent on an address: only one of `GO_INTENTS`, otherwise null without an error.
+export const intentFrom = (search: string): GoIntent | null => {
+  const intent = new URLSearchParams(search).get("intent");
+  return intent !== null && (GO_INTENTS as readonly string[]).includes(intent)
+    ? (intent as GoIntent)
+    : null;
+};
+
+// `/go` with only the plan and intent that are trusted, so both can ride inside `next`. An idea
+// never belongs here: it stays in the fragment and then in this tab.
+const goReturn = (search: string, known: readonly string[]): string => {
+  const params = new URLSearchParams();
+  const plan = planFrom(search, known);
+  const intent = intentFrom(search);
+  if (plan) params.set("plan", plan);
+  if (intent) params.set("intent", intent);
+  const query = params.toString();
+  return query ? `${pathTo("go")}?${query}` : pathTo("go");
+};
+
+const withNext = (path: string, next: string): string => `${path}?next=${encodeURIComponent(next)}`;
+
+// Where `/go` sends this person. A pure function of the session and the address, like `guard`.
+// `hasIdea` is whether this tab is carrying a sentence; the sentence itself stays out of the URL.
+// Checkout (#61) is not in the app yet, so a known plan ends at home once they have a business.
+export const goTo = (
+  session: Session,
+  location: { readonly search: string; readonly hasIdea: boolean },
+  signUpOpen = SIGN_UP_OPEN,
+  known: readonly string[] = KNOWN_PLANS
+): string => {
+  const back = goReturn(location.search, known);
+  if (!session.person) return withNext(pathTo(signUpOpen ? "signUp" : "signIn"), back);
+  if (session.businesses.length === 0) return withNext(pathTo("welcome"), back);
+  if (location.hasIdea) return pathTo("start");
+  return pathTo("apps");
+};
+
+// Where an approval sends someone. While no provider is configured, it is the set-password link
+// with `next` pointing at `/go`. Once a provider is on, it is `/go?intent=sign-in`, so a person
+// with Google or Microsoft is not pushed into a password (#147).
+export const approvalEntryUrl = (origin: string, token: string, providersOn: boolean): string => {
+  const root = origin.replace(/\/+$/, "");
+  if (providersOn) return `${root}${pathTo("go")}?intent=sign-in`;
+  return `${root}${pathTo("setPassword")}?token=${encodeURIComponent(token)}&next=${encodeURIComponent(pathTo("go"))}`;
 };
 
 export type Guarded =

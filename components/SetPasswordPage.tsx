@@ -6,7 +6,7 @@ import { useTRPC } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { signInWithPassword } from "../utils/authApi";
 import { navigate } from "../utils/navigation";
-import { carryPlan, nextPath, pathTo } from "../utils/routes";
+import { carryPlan, nextPath, pathTo, sitePath } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
 import { JoinBusiness } from "./JoinBusiness";
 import { Link } from "./Link";
@@ -24,8 +24,16 @@ export function SetPasswordPage() {
   const trpc = useTRPC();
   const { refresh } = useSession();
   const search = window.location.search;
-  const token = new URLSearchParams(search).get("token") ?? "";
-  const invite = useQuery({ ...trpc.invites.get.queryOptions({ token }), enabled: token !== "" });
+  const params = new URLSearchParams(search);
+  const token = params.get("token") ?? "";
+  // Kept with the token, and only when it is a path on this site. The page still navigates with
+  // `nextPath`, which falls back to home when this is missing.
+  const next = sitePath(params.get("next")) ?? undefined;
+  const inviteInput = { token, ...(next && { next }) };
+  const invite = useQuery({
+    ...trpc.invites.get.queryOptions(inviteInput),
+    enabled: token !== "",
+  });
   const accept = useMutation(trpc.invites.accept.mutationOptions());
   const join = useMutation(trpc.invites.join.mutationOptions());
   const [mismatch, setMismatch] = useState(false);
@@ -56,7 +64,7 @@ export function SetPasswordPage() {
     if (differs) return;
     const name = form.get("name");
     const { email } = await accept.mutateAsync({
-      token,
+      ...inviteInput,
       password,
       ...(typeof name === "string" && { name }),
     });

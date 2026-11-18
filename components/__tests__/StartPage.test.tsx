@@ -2,6 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
+import { readCarried, writeCarried } from "../../utils/carried";
 import { StartPage } from "../StartPage";
 import {
   ApiFailure,
@@ -25,6 +26,24 @@ const submit = () => userEvent.click(screen.getByRole("button", { name: copy.sta
 describe("StartPage", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/new");
+  });
+
+  it("fills the box from an idea carried in this tab, and forgets it once the app is started", async () => {
+    writeCarried("<b>I need to track jobs</b>");
+    const calls = renderWithApi(<StartPage />, server());
+
+    expect(field()).toHaveValue("<b>I need to track jobs</b>");
+    expect(document.querySelector("b")).toBeNull();
+    expect(calls.map((call) => call.path)).not.toContain("projects.create");
+
+    await submit();
+
+    await waitFor(() => expect(window.location.pathname).toBe("/projects/12"));
+    expect(readCarried()).toBeNull();
+    expect(calls).toContainEqual({
+      path: "projects.create",
+      input: { need: "<b>I need to track jobs</b>" },
+    });
   });
 
   it("asks one question, and says what Schmeide builds with a way to ask for more", () => {

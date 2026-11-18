@@ -954,7 +954,9 @@ describe("creating a business", () => {
     await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Phone");
     await submit(form, copy.businesses.createAction);
     expect(
-      await within(form).findByText(`${window.location.origin}/set-password?token=the-token`)
+      await within(form).findByText(
+        `${window.location.origin}/set-password?token=the-token&next=%2Fgo`
+      )
     ).toBeInTheDocument();
     expect(callsTo(calls, "admin.businesses.create")[0]?.input).toEqual({
       name: "Bea's bakes",
@@ -1059,7 +1061,7 @@ describe("a person's access", () => {
     await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "New");
     await submit(form, copy.people.approveAction);
     expect(
-      await within(form).findByText(`${window.location.origin}/set-password?token=tok`)
+      await within(form).findByText(`${window.location.origin}/set-password?token=tok&next=%2Fgo`)
     ).toBeInTheDocument();
     expect(callsTo(calls, "admin.access.approve")[0]?.input).toEqual({
       email: "n@e.com",
@@ -1133,7 +1135,7 @@ describe("AdminAdminsPage", () => {
     await userEvent.type(within(form).getByLabelText(copy.adminActions.reasonLabel), "Hire");
     await submit(form, copy.admins.grantAction);
     expect(
-      await within(form).findByText(`${window.location.origin}/set-password?token=tok`)
+      await within(form).findByText(`${window.location.origin}/set-password?token=tok&next=%2Fgo`)
     ).toBeInTheDocument();
     expect(callsTo(calls, "admin.admins.grant")[0]?.input).toEqual({
       email: "n@e.com",
