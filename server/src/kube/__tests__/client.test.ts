@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKube, KubeError } from "../client.ts";
+import { createCluster, createKube, KubeError } from "../client.ts";
 
 type Call = { readonly method: string; readonly url: URL; readonly init: RequestInit };
 
@@ -144,5 +144,28 @@ describe("createKube", () => {
         },
       },
     });
+  });
+});
+
+describe("createCluster", () => {
+  it("creates an object at its path's collection, and answers false when it already exists", async () => {
+    const calls: { readonly method: string; readonly url: URL }[] = [];
+    const statuses = [201, 409, 403];
+    const cluster = createCluster({
+      server: "https://10.0.0.1:443",
+      token: async () => "projected-token",
+      fetch: async (input, init = {}) => {
+        calls.push({ method: init.method ?? "GET", url: new URL(String(input)) });
+        return json({}, statuses.shift());
+      },
+    });
+    const path = "/api/v1/namespaces/tenant-1/secrets/app-1-production";
+
+    expect(await cluster.create(path, { kind: "Secret" })).toBe(true);
+    expect(await cluster.create(path, { kind: "Secret" })).toBe(false);
+    await expect(cluster.create(path, { kind: "Secret" })).rejects.toMatchObject({ status: 403 });
+    expect(calls[0].method).toBe("POST");
+    expect(calls[0].url.pathname).toBe("/api/v1/namespaces/tenant-1/secrets");
+    expect(calls[0].url.searchParams.get("fieldManager")).toBe("schmeide-worker");
   });
 });

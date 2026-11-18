@@ -220,6 +220,18 @@ export const createCluster = (config: Omit<KubeConfig, "namespace">) => {
         query: { fieldManager: "schmeide-worker", force: "true" },
       });
     },
+    // Creates `object` at its `path`; false when something of that name is already there.
+    create: async (path: string, object: object): Promise<boolean> =>
+      request("POST", path.slice(0, path.lastIndexOf("/")), {
+        body: object,
+        query: { fieldManager: "schmeide-worker" },
+      }).then(
+        () => true,
+        (error: unknown) => {
+          if (error instanceof KubeError && error.status === 409) return false;
+          throw error;
+        }
+      ),
     get: <T>(path: string): Promise<T | undefined> => json<T>("GET", path).catch(missing),
     scale: async (deploymentPath: string, replicas: number) => {
       await request("PATCH", deploymentPath, {

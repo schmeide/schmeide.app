@@ -81,6 +81,7 @@ describe("checkRunner", () => {
         createDb: boolean;
         createRole: boolean;
         template: boolean;
+        open: readonly string[];
       }>;
     } = {}
   ) => {
@@ -95,7 +96,8 @@ describe("checkRunner", () => {
         databases: {
           ...real.hosting.databases,
           rights:
-            hosting.rights ?? (async () => ({ createDb: true, createRole: true, template: true })),
+            hosting.rights ??
+            (async () => ({ createDb: true, createRole: true, template: true, open: [] })),
         },
       },
     };
@@ -145,7 +147,12 @@ describe("checkRunner", () => {
           armToken: async () => {
             throw new Error("AADSTS70021");
           },
-          rights: async () => ({ createDb: true, createRole: false, template: false }),
+          rights: async () => ({
+            createDb: true,
+            createRole: false,
+            template: false,
+            open: ["postgres"],
+          }),
         }
       ),
       tokenFile()
@@ -156,6 +163,9 @@ describe("checkRunner", () => {
       expect.stringMatching(/ALTER ROLE schmeide_provisioner CREATEDB CREATEROLE/),
       expect.stringMatching(
         /no schmeide_app_template database.*ALTER SCHEMA public OWNER TO pg_database_owner/
+      ),
+      expect.stringMatching(
+        /Any role may connect to the Postgres database postgres.*REVOKE CONNECT ON DATABASE postgres FROM PUBLIC/
       ),
     ]);
   });

@@ -161,6 +161,11 @@ const fakeHosting = (root: string) => {
   const dropped: string[] = [];
   const deletedImages: string[] = [];
   const cluster = {
+    create: async (path: string, object: object) => {
+      if (objects.has(path)) return false;
+      objects.set(path, object as Record<string, unknown>);
+      return true;
+    },
     apply: async (path: string, object: object) => {
       const applied = object as { kind: string; spec?: { replicas?: number } };
       const replicas = applied.spec?.replicas ?? 0;
@@ -226,7 +231,7 @@ const fakeHosting = (root: string) => {
         dropped.push(name);
         databases.delete(name);
       },
-      rights: async () => ({ createDb: true, createRole: true, template: true }),
+      rights: async () => ({ createDb: true, createRole: true, template: true, open: [] }),
     } satisfies AppDatabases,
     domain: "apps.example",
     registry: "registry.example",
@@ -699,6 +704,44 @@ describe("kubernetes mode", () => {
     const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
     expect(after).toMatchObject({ host: row.host, stagingCommit: next, productionCommit: commit });
     expect(hosting.databases.get(`app_${project.id}_staging`)).toBe(password);
+  });
+
+  it("gives the role the password of a Secret another attempt made first (#217)", async () => {
+    const { config, runner, forgejo, hosting, root } = setup();
+    const { project, build } = await newBuild();
+    const { cluster } = hosting.hosting;
+    // Another attempt of this deploy makes the copy's Secret just before this one does.
+    const raced: KubeRunner = {
+      ...runner,
+      hosting: {
+        ...hosting.hosting,
+        cluster: {
+          ...cluster,
+          create: async (path: string, object: object) => {
+            await cluster.create(path, {
+              ...object,
+              stringData: {
+                DATABASE_URL: `postgres://app_${project.id}_staging:theirs@db.example:5432/app_${project.id}_staging?sslmode=require`,
+              },
+            });
+            return cluster.create(path, object);
+          },
+        },
+      },
+    };
+    const activities = createActivities(deps, { ...config, runner: raced });
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    builderCommit(root, forgejo.bare(`t${project.tenantId}`, project.slug));
+
+    await env.run(activities.deploy, build.id);
+
+    expect(hosting.databases.get(`app_${project.id}_staging`)).toBe("theirs");
+    expect(
+      hosting.objects.get(
+        `/api/v1/namespaces/tenant-${project.tenantId}/secrets/app-${project.id}-staging`
+      )
+    ).toMatchObject({ stringData: { DATABASE_URL: expect.stringContaining(":theirs@") } });
   });
 
   it("records production's commit before moving main, so a failed push cannot hide what is live", async () => {
