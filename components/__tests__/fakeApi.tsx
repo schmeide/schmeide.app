@@ -204,6 +204,7 @@ export const anItem = (overrides: Partial<PlanItem> = {}): PlanItem => ({
   text: "Create an invoice",
   source: "you",
   phase: "day_one",
+  open: false,
   createdAt: at,
   ...overrides,
 });

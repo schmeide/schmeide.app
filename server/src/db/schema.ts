@@ -274,6 +274,9 @@ export const planItems = pgTable("plan_items", {
   text: varchar("text", { length: ITEM_MAX }).notNull(),
   source: planSource("source").notNull().default("you"),
   phase: planPhase("phase").notNull().default("day_one"),
+  // A point the interview did not settle. The text is what will be assumed if it is left open,
+  // and the spec states it as an assumption.
+  open: boolean("open").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -311,6 +314,22 @@ export const interviews = pgTable("interviews", {
   ready: jsonb("ready").$type<readonly PlanSection[]>().notNull().default([]),
   // The model has no more questions, or the question limit was reached.
   finished: boolean("finished").notNull().default(false),
+});
+
+// One sentence of the read-back, with the single question asked when it is marked as wrong.
+export type ReadBackSentence = { readonly text: string; readonly ask: string };
+
+// What Schmeide understood, said back in the owner's terms before the spec is written. Written
+// from the plan, and dropped whenever the plan changes so it is never older than the plan.
+export const readBacks = pgTable("read_backs", {
+  projectId: integer("project_id")
+    .primaryKey()
+    .references(() => projects.id),
+  // The business in a few sentences.
+  business: jsonb("business").$type<readonly ReadBackSentence[]>().notNull(),
+  // How a piece of work goes through the app, start to finish.
+  steps: jsonb("steps").$type<readonly ReadBackSentence[]>().notNull(),
+  writtenAt: timestamp("written_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 const projectId = createSelectSchema(projects).shape.id;

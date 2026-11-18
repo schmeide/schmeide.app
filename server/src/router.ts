@@ -111,6 +111,13 @@ import {
   type Interviewer,
 } from "./services/interview.ts";
 import {
+  correctReadBack,
+  correctReadBackSchema,
+  getReadBack,
+  writeReadBack,
+  type ReadBackWriter,
+} from "./services/readBack.ts";
+import {
   getBusiness as getOwnBusiness,
   invitationSchema,
   inviteToBusiness,
@@ -150,6 +157,8 @@ import {
 export type AppContext = Deps &
   Omit<WebsiteDeps, "db"> & {
     readonly interviewer: Interviewer;
+    // Absent (as in most tests), the read-back cannot be written; see services/readBack.ts.
+    readonly readBackWriter?: ReadBackWriter;
     readonly files: FileStore;
     readonly reader: FileReader;
     // What hosted projects take up, read from the container runtime and the disk when asked.
@@ -654,6 +663,16 @@ export const appRouter = t.router({
     ),
     removeItem: onProject(planItemIdSchema).mutation(({ ctx, input }) =>
       removePlanItem(ctx.db, input)
+    ),
+  }),
+  // What was understood, said back before the spec is written; see services/readBack.ts.
+  readBack: t.router({
+    get: onProject(projectIdSchema).query(({ ctx, input }) => getReadBack(ctx.db, input.id)),
+    // Writes the account from the plan if there is none yet.
+    write: onProject(projectIdSchema).mutation(({ ctx, input }) => writeReadBack(ctx, input.id)),
+    // One answer about a sentence marked wrong, or an open point.
+    correct: onProject(correctReadBackSchema).mutation(({ ctx, input }) =>
+      correctReadBack(ctx, input)
     ),
   }),
   // The look of the app: the one it has and why, and picking another; see services/designs.ts.

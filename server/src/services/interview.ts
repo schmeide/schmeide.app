@@ -13,6 +13,7 @@ import {
   projectIdSchema,
   projects,
   questionKind,
+  readBacks,
   type Answer,
   type PlanItem,
   type PlanSection,
@@ -84,7 +85,7 @@ export type Interview = {
 // The plan can change until the build starts; changing it after the spec was written discards the spec.
 const EDITABLE = ["draft", "spec_ready"] as const;
 
-const editableProject = async (db: Db, id: number): Promise<Project> => {
+export const editableProject = async (db: Db, id: number): Promise<Project> => {
   const project = await findProject(db, id);
   if (!EDITABLE.some((status) => status === project.status)) {
     throw new ConflictError(
@@ -94,8 +95,11 @@ const editableProject = async (db: Db, id: number): Promise<Project> => {
   return project;
 };
 
-const planChanged = (db: Db, id: number): Promise<Project> =>
-  transition(db, id, EDITABLE, { status: "draft", spec: null });
+// The read-back is written from the plan, so it goes with any change to it.
+export const planChanged = async (db: Db, id: number): Promise<Project> => {
+  await db.delete(readBacks).where(eq(readBacks.projectId, id));
+  return transition(db, id, EDITABLE, { status: "draft", spec: null });
+};
 
 export const planItemsOf = (db: Db, projectId: number): Promise<readonly PlanItem[]> =>
   db.select().from(planItems).where(eq(planItems.projectId, projectId)).orderBy(asc(planItems.id));
@@ -128,19 +132,18 @@ export const getInterview = async (db: Db, id: number): Promise<Interview> => {
   };
 };
 
-const trailOf = (interview: Interview): readonly AnsweredQuestion[] =>
+export const trailOf = (interview: Interview): readonly AnsweredQuestion[] =>
   interview.questions.flatMap((question) =>
     question.answer ? [{ question, answer: question.answer }] : []
   );
 
-// Applies one model turn inside `tx`. Items the model adds on its own are marked as Schmeide's;
-// items that follow from something the person said are theirs.
-const applyTurn = async (
+// Applies a turn's changes to the plan inside `tx`, and says whether anything changed.
+export const applyPlanChanges = async (
   tx: Db,
   projectId: number,
-  turn: Turn,
+  turn: Pick<Turn, "add" | "update" | "remove">,
   source: PlanItem["source"]
-): Promise<void> => {
+): Promise<boolean> => {
   const mine = eq(planItems.projectId, projectId);
   const removed = turn.remove.length
     ? await tx
@@ -162,6 +165,18 @@ const applyTurn = async (
   if (turn.add.length) {
     await tx.insert(planItems).values(turn.add.map((item) => ({ ...item, projectId, source })));
   }
+  return removed.length + updated.length + turn.add.length > 0;
+};
+
+// Applies one model turn inside `tx`. Items the model adds on its own are marked as Schmeide's;
+// items that follow from something the person said are theirs.
+const applyTurn = async (
+  tx: Db,
+  projectId: number,
+  turn: Turn,
+  source: PlanItem["source"]
+): Promise<void> => {
+  const changed = await applyPlanChanges(tx, projectId, turn, source);
   const [{ asked }] = await tx
     .select({ asked: count() })
     .from(interviewQuestions)
@@ -173,10 +188,10 @@ const applyTurn = async (
     .insert(interviews)
     .values({ projectId, ...state })
     .onConflictDoUpdate({ target: interviews.projectId, set: state });
-  if (removed.length + updated.length + turn.add.length > 0) await planChanged(tx, projectId);
+  if (changed) await planChanged(tx, projectId);
 };
 
-const lockProject = (tx: Db, id: number) =>
+export const lockProject = (tx: Db, id: number) =>
   tx.select({ id: projects.id }).from(projects).where(eq(projects.id, id)).for("update");
 
 // Asks the first question, or the next one after a turn that failed. Does nothing while a question
@@ -233,6 +248,7 @@ export const restartInterview = async (
     }
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, input.id));
     await tx.delete(interviews).where(eq(interviews.projectId, input.id));
+    await tx.delete(readBacks).where(eq(readBacks.projectId, input.id));
     await tx.delete(planItems).where(eq(planItems.projectId, input.id));
   });
   return startInterview(deps, input.id);
@@ -373,17 +389,24 @@ const SECTION_TITLES: Readonly<Record<PlanSection, string>> = {
 const bullets = (title: string, items: readonly Pick<PlanItem, "text">[]): readonly string[] =>
   items.length ? [`${title}:\n${items.map((item) => `- ${item.text}`).join("\n")}`] : [];
 
-// The plan as text for the spec writer: day-one items by section, then what was put off.
-export const planBrief = (items: readonly Pick<PlanItem, "section" | "text" | "phase">[]): string =>
+// The plan as text for the spec writer: day-one items by section, then what was put off, then
+// what the owner left open and will be assumed.
+export const planBrief = (
+  items: readonly (Pick<PlanItem, "section" | "text" | "phase"> & { readonly open?: boolean })[]
+): string =>
   [
     ...PLAN_SECTIONS.flatMap((section) =>
       bullets(
         SECTION_TITLES[section],
-        items.filter((item) => item.section === section && item.phase === "day_one")
+        items.filter((item) => item.section === section && item.phase === "day_one" && !item.open)
       )
     ),
     ...bullets(
       "Wanted later, not part of this version",
-      items.filter((item) => item.phase === "later")
+      items.filter((item) => item.phase === "later" && !item.open)
+    ),
+    ...bullets(
+      "Assumed, because the owner left it open (state these in the spec as assumptions)",
+      items.filter((item) => item.open)
     ),
   ].join("\n\n");

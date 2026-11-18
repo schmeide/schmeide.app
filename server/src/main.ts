@@ -18,7 +18,7 @@ import {
 import { claudeEnv } from "./services/claudeEnv.ts";
 import { createFileReader } from "./services/fileReader.ts";
 import { createLocalFileStore } from "./services/fileStore.ts";
-import { createInterviewer } from "./services/interviewer.ts";
+import { createInterviewer, createReadBackWriter } from "./services/interviewer.ts";
 import { failOrphanedBuilds } from "./services/projects.ts";
 import { createResourceReader } from "./services/resources.ts";
 import { sweepExpired } from "./services/retention.ts";
@@ -202,6 +202,7 @@ const startApi = (authConfig: AuthConfig) => {
     {
       ...deps,
       interviewer: createInterviewer({ ...config, model: config.interviewModel }),
+      readBackWriter: createReadBackWriter({ ...config, model: config.interviewModel }),
       siteFetcher: createSiteFetcher(),
       reader: createFileReader({ ...config, model: config.interviewModel }),
       files: createLocalFileStore(config.dataDir),
