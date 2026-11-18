@@ -231,7 +231,7 @@ describe("removing a person from a business", () => {
   it("takes the business away at once, and their approval no longer leads back into it", async () => {
     const admin = await aSignedInAdmin(app, deps);
     const owner = await aSignedInPerson(app, deps);
-    // A teammate whose approval names the owner's business, and who has one of their own too.
+    // A teammate whose approval names the owner's business.
     const teammate = await aSignedInPerson(app, deps, { joins: owner.tenantId });
     const removed = await mutate(
       "admin.businesses.removeMember",
@@ -243,11 +243,12 @@ describe("removing a person from a business", () => {
     const inIt = { [BUSINESS_HEADER]: String(owner.tenantId) };
     const session = await callApi(app, "session.get", undefined, teammate.cookie, inIt);
     expect(session.data.person.email).toBe(teammate.email);
-    expect(session.data.businesses.map((b: { id: number }) => b.id)).not.toContain(owner.tenantId);
+    // In no business now, so first-run setup is theirs to go through again.
+    expect(session.data.businesses).toEqual([]);
     const project = await createProject(db, { name: "Owner's", tenantId: owner.tenantId });
     expect(
       (await callApi(app, "projects.get", { id: project.id }, teammate.cookie, inIt)).code
-    ).toBe("NOT_FOUND");
+    ).toBe("FORBIDDEN");
     const [approval] = await db
       .select()
       .from(approvedEmails)

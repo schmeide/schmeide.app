@@ -39,6 +39,8 @@ export const tenants = pgTable("tenants", {
   stateReason: text("state_reason"),
   stateChangedAt: timestamp("state_changed_at", { withTimezone: true }),
   country: varchar("country", { length: 2 }),
+  // What the business does, in its own words: one optional line from first-run setup.
+  description: varchar("description", { length: 200 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -135,9 +135,9 @@ export const guard = (
   known: readonly string[] = KNOWN_PLANS
 ): Guarded => {
   const carried = (path: string) => carryPlan(path, location.search, known);
+  const asked = location.pathname + location.search;
   if (!session.person) {
     if (route.access === "public") return { kind: "page" };
-    const asked = location.pathname + location.search;
     const home = asked === pathTo("apps");
     return redirect(
       home ? pathTo("signIn") : `${pathTo("signIn")}?next=${encodeURIComponent(asked)}`
@@ -147,8 +147,14 @@ export const guard = (
     return redirect(carried(nextPath(location.search)));
   if (route.access === "admin" && !isAdmin(session)) return redirect(pathTo("apps"));
   const hasBusiness = session.businesses.length > 0;
-  if (route.access === "business" && !hasBusiness)
-    return redirect(isAdmin(session) ? pathTo("admin") : carried(pathTo("welcome")));
-  if (route.name === "welcome" && hasBusiness) return redirect(carried(pathTo("apps")));
+  if (route.access === "business" && !hasBusiness) {
+    if (isAdmin(session)) return redirect(pathTo("admin"));
+    // First-run setup, then on to the page they asked for: an app they began describing on
+    // schmeide.com before signing up, say.
+    const home = location.pathname === pathTo("apps");
+    const welcome = pathTo("welcome");
+    return redirect(carried(home ? welcome : `${welcome}?next=${encodeURIComponent(asked)}`));
+  }
+  if (route.name === "welcome" && hasBusiness) return redirect(carried(nextPath(location.search)));
   return { kind: "page" };
 };

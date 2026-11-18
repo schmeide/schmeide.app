@@ -95,6 +95,24 @@ describe("guard", () => {
     expect(guard(route("welcome"), owner, at("/welcome"))).toEqual({ kind: "redirect", to: "/" });
     expect(guard(route("apps"), owner, at("/"))).toEqual({ kind: "page" });
   });
+
+  it("brings a person with no business back to the page they asked for once it is set up", () => {
+    expect(guard(route("project"), newcomer, at("/projects/7", "?tab=1"))).toEqual({
+      kind: "redirect",
+      to: "/welcome?next=%2Fprojects%2F7%3Ftab%3D1",
+    });
+    expect(guard(route("start"), newcomer, at("/new"))).toEqual({
+      kind: "redirect",
+      to: "/welcome?next=%2Fnew",
+    });
+    expect(guard(route("welcome"), owner, at("/welcome", "?next=%2Fnew"))).toEqual({
+      kind: "redirect",
+      to: "/new",
+    });
+    expect(
+      guard(route("welcome"), owner, at("/welcome", "?next=https%3A%2F%2Fevil.example"))
+    ).toEqual({ kind: "redirect", to: "/" });
+  });
 });
 
 describe("the admin area", () => {
@@ -168,6 +186,13 @@ describe("a plan chosen on schmeide.com", () => {
       kind: "redirect",
       to: "/?plan=starter",
     });
+    expect(guard(route("billing"), newcomer, at("/billing", "?plan=starter"), PLANS)).toEqual({
+      kind: "redirect",
+      to: "/welcome?next=%2Fbilling%3Fplan%3Dstarter&plan=starter",
+    });
+    expect(
+      guard(route("welcome"), owner, at("/welcome", "?next=%2Fnew&plan=starter"), PLANS)
+    ).toEqual({ kind: "redirect", to: "/new?plan=starter" });
     expect(guard(route("signIn"), owner, at("/sign-in", "?plan=enterprise"), PLANS)).toEqual({
       kind: "redirect",
       to: "/",

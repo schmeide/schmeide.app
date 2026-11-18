@@ -12,6 +12,7 @@ import { AdminPeoplePage } from "./AdminPeoplePage";
 import { AdminProjectsPage } from "./AdminProjectsPage";
 import { AdminUsagePage } from "./AdminUsagePage";
 import { BusinessPage } from "./BusinessPage";
+import { FirstRun } from "./FirstRun";
 import { PlaceholderPage } from "./PlaceholderPage";
 import { ProjectList } from "./ProjectList";
 import { ProjectPage } from "./ProjectPage";
@@ -36,7 +37,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   billing: placeholder("billing"),
   business: () => <BusinessPage />,
   account: () => <AccountPage />,
-  welcome: placeholder("welcome"),
+  welcome: () => <FirstRun />,
   admin: () => <AdminPage />,
   adminBusinesses: () => <AdminBusinessesPage />,
   adminBusiness: ({ id }) => <AdminBusinessPage key={id} id={id} />,
