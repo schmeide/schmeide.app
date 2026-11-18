@@ -9,8 +9,10 @@ import type {
   HostedProject,
   PersonEntry,
   ProjectResources,
+  ReviewItem,
   UsageSummaryData,
 } from "../../trpc";
+import { ageOf } from "../../utils/reviewAge";
 import type { Session } from "../../utils/session";
 import { AdminAdminsPage } from "../AdminAdminsPage";
 import { AdminAuditPage } from "../AdminAuditPage";
@@ -19,6 +21,7 @@ import { AdminBusinessesPage } from "../AdminBusinessesPage";
 import { AdminPage } from "../AdminPage";
 import { AdminPeoplePage } from "../AdminPeoplePage";
 import { AdminProjectsPage } from "../AdminProjectsPage";
+import { AdminReviewPage } from "../AdminReviewPage";
 import { AdminUsagePage } from "../AdminUsagePage";
 import { ViewAsForm } from "../ViewAsForm";
 import { ApiFailure, renderWithApi, type Call } from "./fakeApi";
@@ -55,7 +58,11 @@ const filters = () => ({
 
 describe("AdminPage", () => {
   it("links to every admin section, and to no page for viewing as a customer", () => {
-    renderWithApi(<AdminPage />, {}, admin);
+    renderWithApi(
+      <AdminPage />,
+      { "admin.review.open": () => ({ count: 0, oldestAt: null }) },
+      admin
+    );
     const nav = screen.getByRole("navigation", { name: copy.admin.sectionsNav });
     expect(
       within(nav)
@@ -68,10 +75,25 @@ describe("AdminPage", () => {
       [copy.routes.adminProjects, "/admin/projects"],
       [copy.routes.adminUsage, "/admin/usage"],
       [copy.routes.adminAudit, "/admin/audit"],
+      [copy.routes.adminReview, "/admin/review"],
     ]);
     expect(
       screen.getAllByRole("link").filter((link) => link.getAttribute("href") === "/admin/view-as")
     ).toEqual([]);
+  });
+
+  it("shows how many review items are open, and how old the oldest is", async () => {
+    const oldestAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    renderWithApi(<AdminPage />, { "admin.review.open": () => ({ count: 3, oldestAt }) }, admin);
+    const age = copy.review.age(
+      ageOf(oldestAt, new Date()).amount,
+      ageOf(oldestAt, new Date()).unit
+    );
+    expect(
+      await screen.findByRole("link", {
+        name: `${copy.routes.adminReview} ${copy.review.openCount(3)}, ${copy.review.oldest(age)}`,
+      })
+    ).toHaveAttribute("href", "/admin/review");
   });
 });
 
@@ -348,6 +370,29 @@ describe("AdminBusinessPage", () => {
     expect(screen.getByText(copy.business.noProjects)).toBeInTheDocument();
     // A business with no name goes by its slug.
     expect(screen.getByRole("heading", { level: 1, name: "ada" })).toBeInTheDocument();
+  });
+
+  it("fills in a reason carried from the review list, and opens the action it names", async () => {
+    window.history.pushState(
+      null,
+      "",
+      "/admin/businesses/4?action=suspend&reason=Review%20abc%3A%20health-records"
+    );
+    renderWithApi(
+      <AdminBusinessPage id={4} />,
+      {
+        "admin.businesses.get": () => aBusinessPage(),
+        "admin.projects.resources": () => [figures()],
+        "admin.usage.summary": noSummary,
+      },
+      admin
+    );
+    const suspend = (await screen.findByText(copy.business.suspend)).closest("details");
+    expect(suspend).toHaveAttribute("open");
+    expect(
+      within(suspend as HTMLElement).getByLabelText(copy.adminActions.reasonLabel)
+    ).toHaveValue("Review abc: health-records");
+    window.history.pushState(null, "", "/admin/businesses/4");
   });
 
   const withMembers = () => ({
@@ -1141,5 +1186,175 @@ describe("AdminAdminsPage", () => {
       email: "n@e.com",
       reason: "Hire",
     });
+  });
+});
+
+const aReview = (overrides: Partial<ReviewItem>): ReviewItem => ({
+  id: "item-1",
+  kind: "request",
+  at: new Date("2026-11-02T12:00:00Z"),
+  status: "open",
+  disposition: null,
+  closeReason: null,
+  requestText: null,
+  rule: null,
+  outcome: null,
+  cause: null,
+  fromTier: null,
+  toTier: null,
+  fileName: null,
+  fileType: null,
+  address: null,
+  replyEmail: null,
+  count: null,
+  tenantId: 4,
+  businessName: "Ada's bakery",
+  projectId: 9,
+  projectName: "Orders",
+  customerEmail: "ada@example.com",
+  ...overrides,
+});
+
+const reviewItems = (): ReviewItem[] => [
+  aReview({
+    id: "request-1",
+    kind: "request",
+    at: new Date("2026-11-01T12:00:00Z"),
+    requestText: "a clinic's patient records",
+    rule: "health-records",
+    outcome: "refused",
+  }),
+  aReview({
+    id: "tier-1",
+    kind: "tier",
+    at: new Date("2026-11-04T12:00:00Z"),
+    fromTier: "build",
+    toTier: "guardrails",
+    cause: "the plan started keeping customer contacts",
+  }),
+  aReview({
+    id: "upload-1",
+    kind: "upload",
+    at: new Date("2026-11-03T12:00:00Z"),
+    fileName: "catalogue.pdf",
+    fileType: "pdf",
+    rule: "PDF has a JavaScript action",
+  }),
+  aReview({
+    id: "report-1",
+    kind: "report",
+    at: new Date("2020-01-06T12:00:00Z"),
+    requestText: "the photos are mine",
+    rule: "it copies my work",
+    address: "https://orders.example",
+    replyEmail: "pat@example.com",
+  }),
+  aReview({
+    id: "repeated-4",
+    kind: "repeated",
+    at: new Date("2026-11-02T12:00:00Z"),
+    count: 3,
+    projectId: null,
+    projectName: null,
+  }),
+];
+
+describe("AdminReviewPage", () => {
+  const handlers = {
+    "admin.review.list": () => ({ entries: reviewItems(), nextCursor: null }),
+    "admin.review.open": () => ({ count: 5, oldestAt: new Date("2020-01-06T12:00:00Z") }),
+  };
+
+  it("renders each kind, the request and the rule, and no app database", async () => {
+    renderWithApi(<AdminReviewPage />, handlers, admin);
+    expect(
+      await screen.findByRole("article", { name: copy.review.kinds.request })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("article", { name: copy.review.kinds.tier })).toHaveTextContent(
+      "the plan started keeping customer contacts"
+    );
+    expect(screen.getByRole("article", { name: copy.review.kinds.upload })).toHaveTextContent(
+      "catalogue.pdf (pdf)"
+    );
+    const report = screen.getByRole("article", { name: copy.review.kinds.report });
+    expect(report).toHaveTextContent("the photos are mine");
+    expect(report).toHaveTextContent("Ada's bakery");
+    expect(report).toHaveTextContent("Orders");
+    expect(report).toHaveTextContent(copy.review.overdue);
+    expect(screen.getByRole("article", { name: copy.review.kinds.repeated })).toHaveTextContent(
+      "3 refusals"
+    );
+    expect(screen.getByText("a clinic's patient records")).toBeInTheDocument();
+    expect(screen.getByText("health-records")).toBeInTheDocument();
+    expect(screen.queryByText("patients")).toBeNull();
+    expect(screen.getByText(copy.review.lookedAt)).toBeInTheDocument();
+
+    const request = screen.getByRole("article", { name: copy.review.kinds.request });
+    const suspend = within(request).getByRole("link", { name: copy.review.suspend });
+    const suspendUrl = new URL(suspend.getAttribute("href") ?? "", "http://localhost");
+    expect(suspendUrl.pathname).toBe("/admin/businesses/4");
+    expect(suspendUrl.searchParams.get("action")).toBe("suspend");
+    expect(suspendUrl.searchParams.get("reason")).toContain("health-records");
+    const tier = within(request).getByRole("link", { name: copy.review.changeTier });
+    expect(new URL(tier.getAttribute("href") ?? "", "http://localhost").pathname).toBe(
+      "/admin/projects"
+    );
+    expect(
+      within(request).getByRole("link", { name: copy.review.takeOffline })
+    ).toBeInTheDocument();
+    expect(within(request).getByRole("link", { name: copy.review.viewAs })).toBeInTheDocument();
+    expect(
+      within(screen.getByRole("article", { name: copy.review.kinds.repeated })).queryByRole(
+        "link",
+        {
+          name: copy.review.changeTier,
+        }
+      )
+    ).toBeNull();
+  });
+
+  it("asks for a reason before it closes an item", async () => {
+    const calls = renderWithApi(
+      <AdminReviewPage />,
+      { ...handlers, "admin.review.close": () => null },
+      admin
+    );
+    const request = await screen.findByRole("article", { name: copy.review.kinds.request });
+    await userEvent.click(within(request).getByRole("button", { name: copy.review.close }));
+    expect(within(request).getByText(copy.adminActions.reasonNeeded)).toBeInTheDocument();
+    expect(calls.filter(({ path }) => path === "admin.review.close")).toEqual([]);
+
+    await userEvent.selectOptions(
+      within(request).getByLabelText(copy.review.dispositionLabel),
+      copy.review.dispositions.owner_contacted
+    );
+    await userEvent.type(
+      within(request).getByLabelText(copy.adminActions.reasonLabel),
+      "Wrote to Ada"
+    );
+    await userEvent.click(within(request).getByRole("button", { name: copy.review.close }));
+    await waitFor(() =>
+      expect(calls.filter(({ path }) => path === "admin.review.close").at(-1)?.input).toEqual({
+        id: "request-1",
+        disposition: "owner_contacted",
+        reason: "Wrote to Ada",
+      })
+    );
+  });
+
+  it("shows a non-admin the answer of a procedure that does not exist", async () => {
+    const missing = () => {
+      throw new ApiFailure("NOT_FOUND", 'No procedure found on path "admin.review.list"');
+    };
+    renderWithApi(
+      <AdminReviewPage />,
+      { "admin.review.list": missing, "admin.review.open": missing },
+      {
+        person: { name: "Ada", email: "ada@example.com" },
+        businesses: [{ id: 4, name: "Ada's bakery" }],
+      }
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.errors.notFound);
+    expect(screen.queryByRole("article")).toBeNull();
   });
 });

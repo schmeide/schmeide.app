@@ -66,6 +66,7 @@ export const copy = {
     adminProjects: "Hosted apps",
     adminUsage: "Tokens and cost",
     adminAudit: "Audit log",
+    adminReview: "Review",
     help: "Help",
     go: "Continue",
     signIn: "Sign in",
@@ -270,6 +271,65 @@ export const copy = {
     columns: ["When", "Admin", "Action", "Done to", "Detail"],
     empty: "Nothing has been recorded yet.",
     more: "Show older",
+  },
+  // What an operator looks at: flagged requests, tier changes, refused uploads, app reports.
+  review: {
+    intro:
+      "Requests the check refused or could not classify, projects whose tier changed, refused uploads, reports about an app, and businesses with repeated refusals. Newest first.",
+    lookedAt: "A report is looked at within two working days.",
+    waiting: (count: number, age: string) =>
+      count === 1
+        ? `1 open. The oldest has been open for ${age}.`
+        : `${count} open. The oldest has been open for ${age}.`,
+    openCount: (count: number) => (count === 1 ? "1 open" : `${count} open`),
+    oldest: (age: string) => `oldest ${age}`,
+    age: (amount: number, unit: "minute" | "hour" | "day") =>
+      `${amount} ${amount === 1 ? unit : `${unit}s`}`,
+    empty: "Nothing is waiting for review.",
+    caption: "Items to review",
+    more: "Show older",
+    kinds: {
+      request: "Refused or unclassified request",
+      tier: "Tier changed",
+      upload: "Refused upload",
+      report: "Report about an app",
+      repeated: "Repeated refusals",
+    },
+    request: "Request",
+    rule: "Rule",
+    file: "File",
+    address: "Address",
+    reply: "Reply email",
+    cause: "What caused it",
+    repeated: (count: number) => (count === 1 ? "1 refusal" : `${count} refusals`),
+    refused: "The check refused this request.",
+    unclassified: "The check could not classify this request.",
+    business: "Business",
+    project: "App",
+    overdue: "Past the two working days.",
+    closed: (what: string) => `Closed: ${what}.`,
+    dispositions: {
+      no_action: "No action",
+      tier_changed: "Tier changed",
+      owner_contacted: "Owner contacted",
+      app_offline: "App taken offline",
+      business_suspended: "Business suspended",
+    },
+    dispositionLabel: "What you did",
+    dispositionChoose: "Choose",
+    dispositionNeeded: "Say what you did before closing.",
+    close: "Close",
+    actions: "What you can do",
+    changeTier: "Change the tier",
+    takeOffline: "Take the app offline",
+    suspend: "Suspend the business",
+    viewAs: "View as the customer",
+    fileNamed: (name: string, type: string) => `${name} (${type})`,
+    tierChange: (from: string, to: string) => `${from} to ${to}`,
+  },
+  // Stated on the report form (#68). The form itself is still a placeholder.
+  report: {
+    lookedAt: "We look at a report within two working days.",
   },
   signInPage: {
     intro:
