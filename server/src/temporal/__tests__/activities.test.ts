@@ -425,6 +425,7 @@ describe("build activities", () => {
         "make check passed",
         "make test failed (exit 2)",
         "The built app is ready for phones",
+        "The code keeps no secrets and calls no other service",
       ])
     );
   });
@@ -450,6 +451,38 @@ describe("build activities", () => {
         "The built app is not ready for phones (1 problem)",
       ])
     );
+  });
+
+  it("fails a build that commits a key, without the key reaching its events or log", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    // Built at run time so this repository never holds a key-shaped literal.
+    const key = ["AKIA", "Z7Q2", "M4XK", "P9RW", "T3LB"].join("");
+    mkdirSync(join(dataDir, "projects", project.slug, "backend"));
+    writeFileSync(
+      join(dataDir, "projects", project.slug, "backend", "aws.ts"),
+      `export const key = "${key}";\n`
+    );
+
+    const checks = (await env.run(activities.runChecks, build.id)) as Awaited<
+      ReturnType<typeof activities.runChecks>
+    >;
+
+    expect(checks.ok).toBe(false);
+    expect(checks.output).toContain("backend/aws.ts:1");
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "The built app is ready for phones",
+        "Checking the code for secrets and calls to other services",
+        "The code has a secret or calls another service (1 problem)",
+      ])
+    );
+    const said = [checks.output, ...(await messages(build.id))].join("\n");
+    expect(said).not.toContain(key);
+    expect(readFileSync(join(dataDir, "logs", `build-${build.id}.log`), "utf8")).not.toContain(key);
   });
 
   it("writes the page title and icon into the app and commits them, and takes the icon away again", async () => {
