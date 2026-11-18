@@ -96,7 +96,8 @@ const setup = () => {
       "build:\n\t@echo building; mkdir -p frontend/dist/assets; cp frontend/index.html frontend/dist/; " +
         "rm -f frontend/dist/assets/app.css; test -f unstyled || echo 'body{margin:0}' > frontend/dist/assets/app.css",
       // `make up` fails while a file named fail-up sits beside the data dir.
-      `up:\n\t@test ! -e ${join(root, "fail-up")}\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
+      // A commit holding a file named fail-up fails its own `make up` only.
+      `up:\n\t@test ! -e ${join(root, "fail-up")}\n\t@test ! -e fail-up\n\t@echo up $$COMPOSE_PROJECT_NAME $$WEB_PORT $$(git rev-parse HEAD) $$(pwd) >> ${calls}`,
       `down:\n\t@echo down $$COMPOSE_PROJECT_NAME $$(pwd) >> ${calls}`,
       "",
     ].join("\n")
@@ -1013,6 +1014,59 @@ describe("the two copies", () => {
     expect((await projectRow(project.id)).productionCommit).toBe(ahead);
     expect((await buildRow(change.id)).release).toBe("promoted");
     expect(await messages(promote.id)).toContain(`Live at http://localhost:${project.webPort}`);
+  });
+
+  it("returns production to the version it was running when the promoted one cannot start", async () => {
+    const { project, build, activities, env, production, live, ran, commitIn, anotherBuild } =
+      await prepared();
+    await env.run(activities.deploy, build.id);
+    const running = (await buildRow(build.id)).commit ?? "";
+    const broken = commitIn("fail-up");
+    const promote = await anotherBuild({ kind: "promote", commit: broken });
+    const before = ran().length;
+
+    await expect(env.run(activities.release, promote.id)).rejects.toThrow(
+      /^Version could not start: make up failed[\s\S]*\. Your live app is back on the version it was running\.$/
+    );
+
+    expect(ran().slice(before)).toEqual([`up ${live} ${running} ${production}`]);
+    expect(headOf(production)).toBe(running);
+    expect((await projectRow(project.id)).productionCommit).toBe(running);
+    expect(await messages(promote.id)).toEqual(
+      expect.arrayContaining([
+        `Checking out ${broken.slice(0, 12)} for your live app`,
+        `Putting your live app back on ${running.slice(0, 12)}`,
+        `Checking out ${running.slice(0, 12)} for your live app`,
+      ])
+    );
+  });
+
+  it("fails with both reasons when production cannot go back either, and tries once", async () => {
+    const { project, build, activities, env, ran, commitIn, anotherBuild, failUp } =
+      await prepared();
+    await env.run(activities.deploy, build.id);
+    const running = (await buildRow(build.id)).commit ?? "";
+    const promote = await anotherBuild({ kind: "promote", commit: commitIn("ahead.ts") });
+    failUp();
+    const before = ran().length;
+
+    await expect(env.run(activities.release, promote.id)).rejects.toThrow(
+      /^Version could not start: make up failed[\s\S]*Your live app could not go back to the version it was running either: make up failed/
+    );
+    expect(ran().slice(before)).toEqual([]);
+    expect((await projectRow(project.id)).productionCommit).toBe(running);
+  });
+
+  it("attempts no return when an app's first promote fails", async () => {
+    const { project, activities, env, ran, commitIn, anotherBuild } = await prepared();
+    const promote = await anotherBuild({ kind: "promote", commit: commitIn("fail-up") });
+
+    await expect(env.run(activities.release, promote.id)).rejects.toThrow(/^make up failed/);
+    expect(ran()).toEqual([]);
+    expect(await messages(promote.id)).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^Putting your live app back/)])
+    );
+    expect((await projectRow(project.id)).productionCommit).toBeNull();
   });
 
   it("discards: staging goes back to production's commit with a fresh database, and production is not touched", async () => {

@@ -676,3 +676,6 @@ Each is marked in code with a `ponytail:` comment.
   turn. None of the measured runs failed because of it.
 - Deployments keep running until stopped. A new project takes the highest web port plus one, so
   ports below that are only reused once the projects above them are deleted.
+- When a promoted version cannot start, production goes back to the version it was running. `make up` may already
+  have run the new version's migrations against production's database by then, so the old code is safe on it only if
+  those migrations were additions. The template does not enforce that until schmeide/template#25 lands.
