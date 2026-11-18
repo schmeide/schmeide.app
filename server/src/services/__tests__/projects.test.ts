@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { chmod, mkdir, mkdtemp, readdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
@@ -27,6 +30,7 @@ import {
   generateSpec,
   listProjects,
   promoteStaging,
+  removeProjectFiles,
   removeQueuedChange,
   requestChange,
   setFeatures,
@@ -36,9 +40,11 @@ import {
   stopProject,
   suggestName,
   testDbPort,
+  transcriptsDir,
   transition,
   type Deps,
 } from "../projects.ts";
+import { copyOf } from "../resources.ts";
 import { planItemsOf } from "../interview.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
@@ -750,6 +756,37 @@ describe("deleting a project", () => {
     await deleteProjectRows(db, ready.id);
 
     await expect(findProject(db, ready.id)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("removes the project's build logs, attachments, and agent transcripts, and no one else's", async () => {
+    const { deps } = fakeWorkflows();
+    const dataDir = await mkdtemp(join(tmpdir(), "schmeide-delete-"));
+    const claude = join(dataDir, "claude");
+    const files = async (projectId: number) => {
+      const project = await findProject(db, projectId);
+      const { build } = await approveSpec(deps, projectId);
+      await finishBuild(db, build.id);
+      const transcripts = transcriptsDir(claude, copyOf(dataDir, project.slug, "staging").dir);
+      await mkdir(join(dataDir, "logs"), { recursive: true });
+      await writeFile(join(dataDir, "logs", `build-${build.id}.log`), "a request");
+      await mkdir(join(dataDir, "attachments", `build-${build.id}`), { recursive: true });
+      await writeFile(join(dataDir, "attachments", `build-${build.id}`, "1.pdf"), "an upload");
+      // Staged attachments are read-only (temporal/activities.ts).
+      await chmod(join(dataDir, "attachments", `build-${build.id}`), 0o555);
+      await mkdir(transcripts, { recursive: true });
+      await writeFile(join(transcripts, "session.jsonl"), "every message");
+      return project;
+    };
+    const gone = await files((await specReady()).id);
+    const kept = await files((await specReady()).id);
+
+    await removeProjectFiles(db, dataDir, gone, claude);
+
+    const left = (await readdir(dataDir, { recursive: true })).join("\n");
+    expect(left).not.toContain(gone.slug);
+    expect(left).toContain(kept.slug);
+    expect(await readdir(join(dataDir, "logs"))).toHaveLength(1);
+    expect(await readdir(join(dataDir, "attachments"))).toHaveLength(1);
   });
 });
 

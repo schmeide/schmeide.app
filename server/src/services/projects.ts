@@ -1,3 +1,6 @@
+import { chmod, rm } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
 import { and, asc, count, desc, eq, inArray, isNull, like, lt, ne, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
@@ -39,6 +42,7 @@ import {
 } from "./builds.ts";
 import { assertActive, businessSuspended } from "./businesses.ts";
 import { BUILDS_OFF, ConflictError, NotFoundError } from "./errors.ts";
+import { copyOf } from "./resources.ts";
 
 export const FIRST_WEB_PORT = 8100;
 export const FIRST_TEST_DB_PORT = 5600;
@@ -805,6 +809,47 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(builds).where(eq(builds.projectId, id));
     await tx.delete(projects).where(eq(projects.id, id));
   });
+
+// Where the builder's Claude Code keeps its session transcripts, as it runs on this machine.
+export const claudeDir = (): string => process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+
+// The transcripts of agent runs in `cwd`: Claude Code names the folder after the path, with every
+// character but a letter or digit a dash.
+export const transcriptsDir = (claude: string, cwd: string): string =>
+  join(claude, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+
+// A build's raw log and its staged attachments in the data dir (temporal/activities.ts).
+export const buildFilesOf = (dataDir: string, buildId: number): readonly string[] => [
+  join(dataDir, "logs", `build-${Math.trunc(buildId)}.log`),
+  join(dataDir, "attachments", `build-${Math.trunc(buildId)}`),
+];
+
+// Removes a path whatever it is; staged attachments are read-only folders.
+export const removePath = async (path: string): Promise<void> => {
+  await chmod(path, 0o700).catch(() => undefined);
+  await rm(path, { recursive: true, force: true });
+};
+
+// What a project left on the worker's disk beside its app: every build's log (each request, upload
+// text, and agent message) and attachments, and the agent's transcripts. Before its rows go, as
+// it reads the build ids from them.
+export const removeProjectFiles = async (
+  db: Db,
+  dataDir: string,
+  project: Pick<Project, "id" | "slug">,
+  claude: string = claudeDir()
+): Promise<void> => {
+  const ids = await db
+    .select({ id: builds.id })
+    .from(builds)
+    .where(eq(builds.projectId, project.id));
+  await Promise.all(
+    [
+      ...ids.flatMap(({ id }) => buildFilesOf(dataDir, id)),
+      transcriptsDir(claude, copyOf(dataDir, project.slug, "staging").dir),
+    ].map(removePath)
+  );
+};
 
 export const ORPHANED_BUILD =
   "The Schmeide server stopped while this build ran, and the build could not be resumed. Request a change to try again.";
