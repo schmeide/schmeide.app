@@ -47,6 +47,8 @@ export type FileReaderConfig = {
 };
 
 const SECTION_MEANING: Readonly<Record<PlanSection, string>> = {
+  business: "what the business is, who it serves, and what the app would be for",
+  rules: "rules the app would have to follow, such as how prices, tax, or numbering work",
   who: "the kinds of people who would use the app",
   does: "what the app would do, one task per item",
   screens: "the screens it would have",

@@ -102,11 +102,14 @@ import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./serv
 import {
   addPlanItem,
   answerQuestion,
+  depthSchema,
   getInterview,
   removePlanItem,
   restartInterview,
   restartInterviewSchema,
+  setInterviewDepth,
   startInterview,
+  startInterviewSchema,
   updatePlanItem,
   type Interviewer,
 } from "./services/interview.ts";
@@ -653,7 +656,11 @@ export const appRouter = t.router({
   interview: t.router({
     get: onProject(projectIdSchema).query(({ ctx, input }) => getInterview(ctx.db, input.id)),
     // Asks the first question, or the next one after a turn that failed.
-    start: onProject(projectIdSchema).mutation(({ ctx, input }) => startInterview(ctx, input.id)),
+    start: onProject(startInterviewSchema).mutation(({ ctx, input }) =>
+      startInterview(ctx, input.id, input.depth)
+    ),
+    // A quick sketch or the thorough interview; it can change at any time.
+    setDepth: onProject(depthSchema).mutation(({ ctx, input }) => setInterviewDepth(ctx.db, input)),
     // New wording of the prompt: clears the questions and the plan, and asks the first one again.
     restart: onProject(restartInterviewSchema).mutation(({ ctx, input }) =>
       restartInterview(ctx, input)

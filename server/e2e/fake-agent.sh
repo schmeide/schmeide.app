@@ -30,7 +30,7 @@ case "${1:-}" in
     echo "fake agent: retitled the page to ${title}"
     ;;
   interview)
-    printf '%s\n' '{"add":[{"section":"does","text":"Fake plan item for the end-to-end fixture","phase":"day_one"}],"update":[],"remove":[],"ready":["does"],"question":null}'
+    printf '%s\n' '{"add":[{"section":"does","text":"Fake plan item for the end-to-end fixture","phase":"day_one"}],"update":[],"remove":[],"covered":[],"question":null}'
     ;;
   readback)
     printf '%s\n' '{"business":[{"text":"Fake business for the end-to-end fixture.","ask":"What does your business do?"}],"steps":[{"text":"You use the fake plan item.","ask":"How does a piece of work start?"}],"open":[]}'

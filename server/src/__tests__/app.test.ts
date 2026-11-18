@@ -72,17 +72,25 @@ describe("the API", () => {
         headers: { cookie },
         payload: { json },
       });
-    const empty = { add: [], update: [], remove: [], ready: [] };
+    const empty = { add: [], update: [], remove: [], covered: [] };
     interviewer
       .mockResolvedValueOnce({
-        turn: { ...empty, question: { text: "Who uses it?", kind: "text", choices: [] } },
+        turn: {
+          ...empty,
+          question: {
+            text: "Who uses it?",
+            why: "To know who it is for.",
+            kind: "text",
+            choices: [],
+          },
+        },
         usage: null,
       })
       .mockResolvedValueOnce({
         turn: {
           ...empty,
           add: [{ section: "who", text: "Only the owner", phase: "day_one" }],
-          ready: ["who"],
+          covered: ["people.roles", "people.access"],
           question: null,
         },
         usage: null,

@@ -169,6 +169,8 @@ export const correctReadBack = async (
       ...trailOf(interview),
       { question: { text: prompt, kind: "text", choices: [] }, answer },
     ],
+    depth: interview.depth,
+    covered: interview.covered,
   });
   await recordUsage(db, usage);
   await db.transaction(async (transaction) => {

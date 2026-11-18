@@ -19,7 +19,9 @@ import { useDraft } from "./useDraft";
 import stepStyles from "./Step.module.css";
 import styles from "./InterviewStep.module.css";
 
-const SECTIONS = ["who", "does", "screens", "keeps", "replaces"] as const;
+const SECTIONS = ["business", "who", "does", "rules", "screens", "keeps", "replaces"] as const;
+const DEPTHS = ["thorough", "quick"] as const;
+type Depth = Interview["depth"];
 const YES = "yes";
 const NO = "no";
 
@@ -49,6 +51,7 @@ type QuestionProps = {
 function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
   const errorId = useId();
   const questionId = useId();
+  const whyId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const fields = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<readonly string[]>([]);
@@ -102,11 +105,18 @@ function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
         className={styles.question}
         disabled={busy}
         aria-labelledby={questionId}
-        aria-describedby={missing ? errorId : undefined}
+        aria-describedby={
+          [question.why ? whyId : "", missing ? errorId : ""].filter(Boolean).join(" ") || undefined
+        }
       >
         <h3 id={questionId} ref={heading} tabIndex={-1} className={styles.questionHeading}>
           {question.text}
         </h3>
+        {question.why && (
+          <p id={whyId} className={stepStyles.muted}>
+            {question.why}
+          </p>
+        )}
         <div ref={fields} className={styles.choices}>
           {question.kind === "text" ? (
             <textarea
@@ -179,6 +189,37 @@ function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
         <span className={stepStyles.muted}>{copy.interview.youDecideHint}</span>
       </div>
     </form>
+  );
+}
+
+type DepthProps = { readonly depth: Depth; readonly onChange: (depth: Depth) => void };
+
+// The choice of how deep the questions go, made before they start.
+function DepthChoice({ depth, onChange }: DepthProps) {
+  const hintId = useId();
+  return (
+    <fieldset className={styles.question}>
+      <legend>{copy.interview.depthLegend}</legend>
+      <div className={styles.choices}>
+        {DEPTHS.map((each) => (
+          <div key={each}>
+            <label className={styles.choice}>
+              <input
+                type="radio"
+                name="depth"
+                checked={depth === each}
+                aria-describedby={`${hintId}-${each}`}
+                onChange={() => onChange(each)}
+              />
+              {copy.interview.depths[each]}
+            </label>
+            <p id={`${hintId}-${each}`} className={stepStyles.muted}>
+              {copy.interview.depthHints[each]}
+            </p>
+          </div>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 
@@ -369,6 +410,8 @@ export function InterviewStep({
   const start = useMutation(trpc.interview.start.mutationOptions({ onSuccess: store }));
   const answer = useMutation(trpc.interview.answer.mutationOptions({ onSuccess: store }));
   const restart = useMutation(trpc.interview.restart.mutationOptions({ onSuccess: store }));
+  const setDepth = useMutation(trpc.interview.setDepth.mutationOptions({ onSuccess: store }));
+  const [depth, setChosenDepth] = useState<Depth>(interview.depth);
   const generate = useMutation(
     trpc.projects.generateSpec.mutationOptions({ onSettled: () => refresh() })
   );
@@ -377,8 +420,8 @@ export function InterviewStep({
   const reviewing = project.status === "spec_ready";
   const open = project.status === "draft" || (reviewing && editing);
   const started = interview.current !== null || interview.questions.length > 0;
-  const thinking = start.isPending || answer.isPending || restart.isPending;
-  const failure = answer.error ?? start.error ?? restart.error;
+  const thinking = start.isPending || answer.isPending || restart.isPending || setDepth.isPending;
+  const failure = answer.error ?? start.error ?? restart.error ?? setDepth.error;
   const unavailable = failure !== null && classifyError(failure) === "unavailable";
   const fresh = new Set(
     known ? interview.items.filter((item) => !known.has(item.id)).map((item) => item.id) : []
@@ -389,6 +432,11 @@ export function InterviewStep({
     remember();
     start.mutate({ id: project.id });
   };
+  const onFirstStart = () => {
+    remember();
+    start.mutate({ id: project.id, depth });
+  };
+  const otherDepth: Depth = interview.depth === "thorough" ? "quick" : "thorough";
   const onAnswer = (question: Question) => (given: Answer) => {
     remember();
     answer.mutate({ id: project.id, questionId: question.id, answer: given });
@@ -445,8 +493,9 @@ export function InterviewStep({
             {!started && !thinking && (
               <>
                 <p>{copy.interview.intro}</p>
+                <DepthChoice depth={depth} onChange={setChosenDepth} />
                 <div className={stepStyles.actions}>
-                  <button type="button" data-variant="primary" onClick={onStart}>
+                  <button type="button" data-variant="primary" onClick={onFirstStart}>
                     {copy.interview.start}
                   </button>
                   <button type="button" onClick={onWriteMyself}>
@@ -454,6 +503,23 @@ export function InterviewStep({
                   </button>
                 </div>
               </>
+            )}
+            {started && (
+              <div className={stepStyles.actions}>
+                <span className={stepStyles.muted}>{copy.interview.depthNow[interview.depth]}</span>
+                {interview.stage && (
+                  <span className={stepStyles.muted}>
+                    {copy.interview.stageNow(interview.stage)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  disabled={thinking}
+                  onClick={() => setDepth.mutate({ id: project.id, depth: otherDepth })}
+                >
+                  {copy.interview.switchDepth[otherDepth]}
+                </button>
+              </div>
             )}
             {interview.current && (
               <QuestionForm

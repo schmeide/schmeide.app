@@ -5,13 +5,16 @@ import { createDb } from "../../db/client.ts";
 import { interviewQuestions, planItems, usage } from "../../db/schema.ts";
 import { ConflictError, InterviewUnavailableError, NotFoundError } from "../errors.ts";
 import {
+  CHECKLIST,
   MAX_QUESTIONS,
+  QUESTION_LIMITS,
   addPlanItem,
   answerQuestion,
   getInterview,
   planBrief,
   removePlanItem,
   restartInterview,
+  setInterviewDepth,
   startInterview,
   updatePlanItem,
   type Interviewer,
@@ -34,7 +37,7 @@ const turn = (partial: Partial<Turn> = {}): Turn => ({
   add: [],
   update: [],
   remove: [],
-  ready: [],
+  covered: [],
   question: null,
   ...partial,
 });
@@ -42,10 +45,16 @@ const turn = (partial: Partial<Turn> = {}): Turn => ({
 type Asked = NonNullable<Turn["question"]>;
 const WHO: Asked = {
   text: "Who sends the invoices?",
+  why: "So the right people can send them.",
   kind: "pick_one",
   choices: ["Just me", "Me and my staff"],
 };
-const WHEN: Asked = { text: "Do invoices have a due date?", kind: "yes_no", choices: [] };
+const WHEN: Asked = {
+  text: "Do invoices have a due date?",
+  why: "Late payers are easier to chase with one.",
+  kind: "yes_no",
+  choices: [],
+};
 
 // Stands in for the model: hands back the given turns in order, one per call.
 const scripted = (...turns: readonly Turn[]) => {
@@ -73,6 +82,8 @@ describe("startInterview", () => {
       project: expect.objectContaining({ id: project.id, name: project.name }),
       items: [],
       trail: [],
+      depth: "thorough",
+      covered: [],
     });
     expect(interview.current).toMatchObject({ ...WHO, answer: null });
     expect(interview.questions).toEqual([]);
@@ -85,12 +96,15 @@ describe("startInterview", () => {
       }),
     ]);
     expect(interview.sections).toEqual({
+      business: "not_started",
       who: "not_started",
       does: "sketched",
+      rules: "not_started",
       screens: "not_started",
       keeps: "not_started",
       replaces: "not_started",
     });
+    expect(interview).toMatchObject({ depth: "thorough", limit: 30, stage: "business" });
     expect(interview.finished).toBe(false);
     expect(await getInterview(db, project.id)).toEqual(interview);
   });
@@ -193,6 +207,8 @@ describe("restartInterview", () => {
       project: expect.objectContaining({ id: project.id, need: "Book my lessons" }),
       items: [],
       trail: [],
+      depth: "thorough",
+      covered: [],
     });
     expect(interview.questions).toEqual([]);
     expect(interview.items).toEqual([]);
@@ -238,7 +254,7 @@ describe("answerQuestion", () => {
         add: [{ section: "who", text: "Only the owner", phase: "day_one" }],
         update: [{ id: create.id, text: "Create and send an invoice" }],
         remove: [print.id],
-        ready: ["who"],
+        covered: ["people.roles", "people.access"],
         question: WHEN,
       }),
       usage: null,
@@ -259,6 +275,8 @@ describe("answerQuestion", () => {
           answer: { type: "choices", values: ["Just me"] },
         },
       ],
+      depth: "thorough",
+      covered: [],
     });
     expect(interview.questions).toEqual([
       expect.objectContaining({ ...WHO, answer: { type: "choices", values: ["Just me"] } }),
@@ -440,6 +458,139 @@ describe("answerQuestion", () => {
   });
 });
 
+describe("the checklist", () => {
+  const answerWith = async (deps: ReturnType<typeof scripted>["deps"], projectId: number) => {
+    const { current } = await getInterview(db, projectId);
+    return answerQuestion(deps, {
+      id: projectId,
+      questionId: current?.id ?? 0,
+      answer: { type: "text", value: "Yes" },
+    });
+  };
+
+  it("makes a section ready only when every point it needs is settled, whatever else the model says", async () => {
+    const project = await newProject();
+    const { deps, interviewer } = scripted(
+      turn({
+        add: [
+          { section: "business", text: "A plumber with two staff", phase: "day_one" },
+          { section: "who", text: "The owner", phase: "day_one" },
+        ],
+        covered: ["business.offer", "business.flow", "people.roles"],
+        question: WHO,
+      }),
+      turn({
+        covered: ["business.volume", "business.pain", "business.aim", "not.a.point"],
+        question: WHEN,
+      })
+    );
+
+    const started = await startInterview(deps, project.id);
+    expect(started.sections).toMatchObject({ business: "sketched", who: "sketched" });
+    expect(started.stage).toBe("business");
+
+    const interview = await answerWith(deps, project.id);
+
+    expect(interview.sections).toMatchObject({ business: "ready", who: "sketched" });
+    expect(interview.stage).toBe("jobs");
+    expect(interview.covered).toEqual([
+      "business.offer",
+      "business.flow",
+      "business.volume",
+      "business.pain",
+      "business.aim",
+      "people.roles",
+    ]);
+    // Settled points are handed back, so the model asks about the next stage.
+    expect(interviewer).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        covered: ["business.offer", "business.flow", "people.roles"],
+      })
+    );
+  });
+
+  it("keeps a point settled when a later turn does not repeat it", async () => {
+    const project = await newProject();
+    const { deps } = scripted(
+      turn({ covered: ["business.offer"], question: WHO }),
+      turn({ question: WHEN })
+    );
+    await startInterview(deps, project.id);
+
+    expect((await answerWith(deps, project.id)).covered).toEqual(["business.offer"]);
+  });
+
+  it("has no stage left once every point is settled", async () => {
+    const project = await newProject();
+    const { deps } = scripted(turn({ covered: CHECKLIST.map((point) => point.id) }));
+
+    expect((await startInterview(deps, project.id)).stage).toBeNull();
+  });
+
+  it("stores the line that says why a question is asked", async () => {
+    const project = await newProject();
+    const { deps } = scripted(turn({ question: WHO }));
+
+    expect((await startInterview(deps, project.id)).current?.why).toBe(
+      "So the right people can send them."
+    );
+  });
+});
+
+describe("the depth", () => {
+  const askedAlready = (projectId: number, n: number) =>
+    db.insert(interviewQuestions).values(
+      Array.from({ length: n }, (_, i) => ({
+        projectId,
+        text: `Question ${i + 1}`,
+        kind: "text" as const,
+        answer: { type: "text" as const, value: "yes" },
+        answeredAt: new Date(),
+      }))
+    );
+
+  it("is chosen when the questions start, and a quick sketch stops at its own limit", async () => {
+    const project = await newProject();
+    await askedAlready(project.id, QUESTION_LIMITS.quick - 1);
+    const { deps, interviewer } = scripted(turn({ question: WHO }), turn({ question: WHEN }));
+
+    const started = await startInterview(deps, project.id, "quick");
+    expect(started).toMatchObject({ depth: "quick", limit: QUESTION_LIMITS.quick });
+    expect(interviewer).toHaveBeenLastCalledWith(expect.objectContaining({ depth: "quick" }));
+    const interview = await answerQuestion(deps, {
+      id: project.id,
+      questionId: started.current?.id ?? 0,
+      answer: { type: "text", value: "Me" },
+    });
+
+    expect(interview.current).toBeNull();
+    expect(interview.finished).toBe(true);
+  });
+
+  it("can be changed: going deeper after a quick sketch lets the questions carry on", async () => {
+    const project = await newProject();
+    await askedAlready(project.id, QUESTION_LIMITS.quick);
+    const { deps } = scripted(turn({ question: WHO }), turn({ question: WHO }));
+    await setInterviewDepth(db, { id: project.id, depth: "quick" });
+    expect((await startInterview(deps, project.id)).finished).toBe(true);
+
+    const deeper = await setInterviewDepth(db, { id: project.id, depth: "thorough" });
+
+    expect(deeper).toMatchObject({ depth: "thorough", finished: false });
+    expect((await startInterview(deps, project.id)).current).toMatchObject(WHO);
+  });
+
+  it("is kept when the questions start over", async () => {
+    const project = await newProject();
+    const { deps } = scripted(turn({ question: WHO }), turn({ question: WHEN }));
+    await startInterview(deps, project.id, "quick");
+
+    const interview = await restartInterview(deps, { id: project.id, need: "Book my lessons" });
+
+    expect(interview.depth).toBe("quick");
+  });
+});
+
 describe("editing the plan directly", () => {
   it("adds, changes, and removes an item as the person's own", async () => {
     const project = await newProject();
@@ -498,8 +649,11 @@ describe("editing the plan directly", () => {
 
 describe("planBrief", () => {
   it("lists day-one items by section and keeps later items apart", () => {
-    const item = (section: "who" | "does" | "keeps", text: string, phase = "day_one") =>
-      ({ section, text, phase }) as Parameters<typeof planBrief>[0][number];
+    const item = (
+      section: "business" | "who" | "does" | "rules" | "keeps",
+      text: string,
+      phase = "day_one"
+    ) => ({ section, text, phase }) as Parameters<typeof planBrief>[0][number];
 
     expect(
       planBrief([
@@ -507,11 +661,15 @@ describe("planBrief", () => {
         item("who", "Only the owner"),
         item("does", "Send reminders", "later"),
         item("keeps", "Clients"),
+        item("rules", "Invoice numbers never repeat"),
+        item("business", "A plumber who bills by the job"),
       ])
     ).toBe(
       [
+        "The business, and what the app is for:\n- A plumber who bills by the job",
         "Who uses it:\n- Only the owner",
         "What it does:\n- Create an invoice",
+        "Rules: the cases a simple version would get wrong:\n- Invoice numbers never repeat",
         "What it keeps:\n- Clients",
         "Wanted later, not part of this version:\n- Send reminders",
       ].join("\n\n")

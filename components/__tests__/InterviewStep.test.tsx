@@ -100,11 +100,48 @@ describe("InterviewStep", () => {
       expect.objectContaining({ textContent: "Me and my staff" }),
       expect.objectContaining({ textContent: copy.interview.other }),
     ]);
-    expect(calls).toContainEqual({ path: "interview.start", input: { id: 7 } });
+    expect(calls).toContainEqual({ path: "interview.start", input: { id: 7, depth: "thorough" } });
     const item = within(plan(1)).getByText("Create an invoice").closest("li");
     expect(item).toHaveTextContent(copy.interview.tagSchmeide);
     expect(item).toHaveTextContent(copy.interview.tagNew);
     expect(plan(1)).toHaveTextContent(copy.interview.sectionStatus.sketched);
+  });
+
+  it("says why each question is asked, beside it", async () => {
+    setup(anInterview({ current: WHO }));
+
+    expect(await screen.findByRole("group", { name: WHO.text })).toHaveAccessibleDescription(
+      "So the right people can send them."
+    );
+  });
+
+  it("recommends the thorough interview, and starts a quick sketch when that is chosen", async () => {
+    const { calls } = setup(anInterview(), {
+      "interview.start": () => anInterview({ current: WHO, depth: "quick", limit: 10 }),
+    });
+
+    const thorough = await screen.findByRole("radio", { name: copy.interview.depths.thorough });
+    expect(thorough).toBeChecked();
+    expect(thorough).toHaveAccessibleDescription(copy.interview.depthHints.thorough);
+    await userEvent.click(screen.getByRole("radio", { name: copy.interview.depths.quick }));
+    await userEvent.click(screen.getByRole("button", { name: copy.interview.start }));
+
+    await screen.findByRole("group", { name: WHO.text });
+    expect(calls).toContainEqual({ path: "interview.start", input: { id: 7, depth: "quick" } });
+  });
+
+  it("can change the depth while the questions go on", async () => {
+    const { calls } = setup(anInterview({ current: WHO, stage: "rules" }), {
+      "interview.setDepth": () => anInterview({ current: WHO, depth: "quick", limit: 10 }),
+    });
+
+    expect(await screen.findByText(copy.interview.stageNow("rules"))).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: copy.interview.switchDepth.quick }));
+
+    expect(
+      await screen.findByRole("button", { name: copy.interview.switchDepth.thorough })
+    ).toBeVisible();
+    expect(calls).toContainEqual({ path: "interview.setDepth", input: { id: 7, depth: "quick" } });
   });
 
   it("sends a chosen answer, marks what it added to the plan, and moves to the next question", async () => {
@@ -213,7 +250,7 @@ describe("InterviewStep", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(copy.interview.needAnswer);
     expect(screen.getByRole("group", { name: WHO.text })).toHaveAccessibleDescription(
-      copy.interview.needAnswer
+      `${WHO.why} ${copy.interview.needAnswer}`
     );
     expect(calls.map((call) => call.path)).not.toContain("interview.answer");
   });

@@ -38,7 +38,7 @@ const turn = (partial: Partial<Turn> = {}): Turn => ({
   add: [],
   update: [],
   remove: [],
-  ready: [],
+  covered: [],
   question: null,
   ...partial,
 });
@@ -143,7 +143,7 @@ describe("correctReadBack", () => {
       [
         turn({
           add: [{ section: "does", text: "Take bookings by email", phase: "day_one" }],
-          question: { text: "Anything else?", kind: "text", choices: [] },
+          question: { text: "Anything else?", why: "In case.", kind: "text", choices: [] },
         }),
       ]
     );
