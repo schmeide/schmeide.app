@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
+import { createReadStream, createWriteStream } from "node:fs";
 import {
   appendFile,
   chmod,
@@ -14,10 +15,11 @@ import {
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure, CancelledFailure } from "@temporalio/common";
-import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
 import {
@@ -50,6 +52,7 @@ import {
   agentRuns,
   buildFiles,
   builds,
+  databaseCopies,
   files,
   projectDesigns,
   projectIcons,
@@ -57,6 +60,7 @@ import {
   tenants,
   type Build,
   type BuildEventKind,
+  type DatabaseCopy,
   type FileRow,
   type NewAgentRun,
   type Project,
@@ -126,6 +130,7 @@ import {
   phonesReport,
 } from "../services/mobileCheck.ts";
 import {
+  backupsDir,
   builtChanges,
   deleteProjectRows,
   markReleased,
@@ -134,6 +139,7 @@ import {
   startNextChange,
   testDbPort,
   transition,
+  versionOfCommit,
   type Deps,
 } from "../services/projects.ts";
 import { COPIES, copyOf, webPortOf, type Copy } from "../services/resources.ts";
@@ -206,6 +212,20 @@ export const PLATFORM_FILES = [
 ] as const;
 
 // A full commit id, as `git rev-parse HEAD` prints it. Nothing else is ever handed to git as one.
+// Which of a project's database copies, newest first, the keep rule drops: all but the last
+// COPIES_KEPT and the newest copy of every version that was live when one was taken.
+export const COPIES_KEPT = 10;
+export const copiesToDrop = (
+  copies: readonly Pick<DatabaseCopy, "id" | "version">[]
+): readonly number[] => {
+  const seen = new Set<number | null>();
+  return copies.flatMap(({ id, version }, index) => {
+    const newestOfVersion = !seen.has(version);
+    seen.add(version);
+    return index < COPIES_KEPT || newestOfVersion ? [] : [id];
+  });
+};
+
 // The template's Makefile has the additions-only check (schmeide/template#25).
 export const MIGRATIONS_TARGET = /^check\/migrations:/m;
 
@@ -923,6 +943,171 @@ export const createActivities = (
     return url;
   };
 
+  // The template's database, as its compose.yaml names it.
+  const APP_DB = ["-U", "postgres"] as const;
+
+  // Runs a command in production's `db` service with a file as its output or its input, so a
+  // dump never passes through memory. Compose finds the stack in `dir`.
+  const inProductionDb = (
+    project: Project,
+    dir: string,
+    args: readonly string[],
+    file: { readonly to?: string; readonly from?: string } = {}
+  ) =>
+    withHeartbeat(async (signal) => {
+      const { composeProject } = copyOf(config.dataDir, project.slug, "production");
+      const child = spawn(
+        "docker",
+        ["compose", "-p", composeProject, "exec", "-T", "db", ...args],
+        {
+          cwd: dir,
+          env: appEnv(project, config.dataDir),
+          detached: true,
+          stdio: [file.from ? "pipe" : "ignore", file.to ? "pipe" : "ignore", "pipe"],
+        }
+      );
+      let errors = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        errors = (errors + chunk.toString()).slice(-2000);
+      });
+      const kill = () => child.pid && process.kill(-child.pid, "SIGTERM");
+      signal.addEventListener("abort", kill, { once: true });
+      const exited = new Promise<number>((done, fail) => {
+        child.on("error", fail);
+        child.on("close", (code) => done(code ?? 1));
+      });
+      try {
+        await Promise.all([
+          file.to && child.stdout && pipeline(child.stdout, createWriteStream(file.to)),
+          file.from && child.stdin && pipeline(createReadStream(file.from), child.stdin),
+        ]);
+        const code = await exited;
+        if (code !== 0) throw new Error(`${args[0]} failed (exit ${code}): ${errors.trim()}`);
+      } finally {
+        signal.removeEventListener("abort", kill);
+      }
+    });
+
+  // Production's database runs on its own, for a copy or a restore, whether or not the app does.
+  const startProductionDb = async (project: Project, dir: string, buildId: number) => {
+    const { composeProject } = copyOf(config.dataDir, project.slug, "production");
+    const result = await run(
+      "docker",
+      ["compose", "-p", composeProject, "up", "-d", "--wait", "db"],
+      {
+        cwd: dir,
+        env: appEnv(project, config.dataDir),
+        buildId,
+      }
+    );
+    if (result.code !== 0)
+      throw new Error(
+        `docker compose up db failed (exit ${result.code}): ${result.output.slice(-2000)}`
+      );
+  };
+
+  const reasonOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+  // Drops the copies the keep rule no longer wants, files and rows.
+  const keepCopies = async (projectId: number) => {
+    const copies = await db
+      .select({ id: databaseCopies.id, version: databaseCopies.version, path: databaseCopies.path })
+      .from(databaseCopies)
+      .where(eq(databaseCopies.projectId, projectId))
+      .orderBy(desc(databaseCopies.takenAt), desc(databaseCopies.id));
+    const dropped = new Set(copiesToDrop(copies));
+    for (const copy of copies.filter(({ id }) => dropped.has(id))) {
+      await rm(copy.path, { force: true });
+      await db.delete(databaseCopies).where(eq(databaseCopies.id, copy.id));
+    }
+  };
+
+  // Copies production's database (#227) before anything moves it, and records the copy. An app
+  // with nothing live has nothing to copy. A copy that fails fails the step before production is
+  // touched. `keep` false leaves the keep rule for later, so a restore cannot lose its own copy.
+  // ponytail: a dump file on this machine; blob storage (#195) in production.
+  // ponytail: the cluster's databases are not copied yet; its promotes and roll backs go without.
+  const copyProductionData = async (
+    project: Project,
+    buildId: number,
+    keep = true
+  ): Promise<DatabaseCopy | undefined> => {
+    const dir = await composeDir(project, "production");
+    if (project.productionCommit === null || !dir) {
+      await event(buildId, "deploy", "Nothing is live yet, so there is no information to copy");
+      return undefined;
+    }
+    if (config.runner) {
+      await event(buildId, "deploy", "The live app's information is not copied on the cluster yet");
+      return undefined;
+    }
+    const path = join(backupsDir(config.dataDir, project.slug), `${buildId}.dump`);
+    await mkdir(backupsDir(config.dataDir, project.slug), { recursive: true });
+    await event(buildId, "deploy", "Copying your live app's information");
+    try {
+      await startProductionDb(project, dir, buildId);
+      await inProductionDb(project, dir, ["pg_dump", ...APP_DB, "--format=custom", "app"], {
+        to: path,
+      });
+    } catch (cause) {
+      await rm(path, { force: true });
+      throw ApplicationFailure.nonRetryable(
+        `Your live app's information could not be copied, so nothing was changed: ${reasonOf(cause)}`
+      );
+    }
+    const [copy] = await db
+      .insert(databaseCopies)
+      .values({
+        projectId: project.id,
+        buildId,
+        version: await versionOfCommit(db, project.id, project.productionCommit),
+        path,
+        bytes: (await stat(path)).size,
+      })
+      .returning();
+    if (keep) await keepCopies(project.id);
+    return copy;
+  };
+
+  // Puts production's database back to `copyId` (#227), after a fresh copy so the restore can be
+  // undone. Stops the app, empties its database, and restores it; the caller runs `up` after.
+  const restoreProductionData = async (project: Project, copyId: number, buildId: number) => {
+    const [copy] = await db
+      .select()
+      .from(databaseCopies)
+      .where(and(eq(databaseCopies.id, copyId), eq(databaseCopies.projectId, project.id)));
+    if (!copy || !(await exists(copy.path)))
+      throw ApplicationFailure.nonRetryable(
+        "That copy of your information is no longer kept, so nothing was changed."
+      );
+    const fresh = await copyProductionData(project, buildId, false);
+    const dir = await composeDir(project, "production");
+    if (!dir)
+      throw ApplicationFailure.nonRetryable("Your live app has no checkout to restore into");
+    const { composeProject } = copyOf(config.dataDir, project.slug, "production");
+    await event(buildId, "deploy", "Stopping your live app to put its information back");
+    const down = await run(config.makeBin, ["down", `COMPOSE_PROJECT_NAME=${composeProject}`], {
+      cwd: dir,
+      env: appEnv(project, config.dataDir),
+      buildId,
+    });
+    if (down.code !== 0)
+      throw new Error(`make down failed (exit ${down.code}): ${down.output.slice(-2000)}`);
+    await startProductionDb(project, dir, buildId);
+    await inProductionDb(project, dir, ["dropdb", ...APP_DB, "--force", "--if-exists", "app"]);
+    await inProductionDb(project, dir, ["createdb", ...APP_DB, "app"]);
+    await inProductionDb(project, dir, ["pg_restore", ...APP_DB, "--no-owner", "-d", "app"], {
+      from: copy.path,
+    });
+    await event(
+      buildId,
+      "deploy",
+      `Your live app's information is back to ${copy.takenAt.toISOString()}`
+    );
+    await keepCopies(project.id);
+    return fresh;
+  };
+
   // Makes production run `commit` and answers its address. If it cannot start, production goes
   // back to the commit it was running, `project.productionCommit`, once, and the step fails either
   // way. An app with nothing live yet has nothing to go back to. Promote and roll back share it.
@@ -962,6 +1147,7 @@ export const createActivities = (
   // Production runs `commit`; every passed build staging held is now live.
   // On the cluster, `main` records it, moved forward once production answers.
   const promote = async (project: Project, commit: string, buildId: number) => {
+    await copyProductionData(project, buildId);
     const url = await moveProduction(project, commit, buildId);
     // Recorded before main moves: production runs `commit` now, whether or not the push works.
     await db

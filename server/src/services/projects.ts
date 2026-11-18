@@ -25,6 +25,7 @@ import {
   buildFiles,
   builds,
   buildSummaries,
+  databaseCopies,
   files,
   interviewQuestions,
   interviews,
@@ -303,6 +304,25 @@ export const builtChanges = (
     )
     .orderBy(asc(builds.id));
 
+// The version number of `commit` in the project, or null when it has none (an app live before
+// versions existed).
+export const versionOfCommit = async (
+  db: Db,
+  projectId: number,
+  commit: string | null
+): Promise<number | null> => {
+  if (commit === null) return null;
+  const [row] = await db
+    .select({ version: builds.version })
+    .from(builds)
+    .where(
+      and(eq(builds.projectId, projectId), eq(builds.commit, commit), isNotNull(builds.version))
+    )
+    .orderBy(asc(builds.version))
+    .limit(1);
+  return row?.version ?? null;
+};
+
 export const getProject = async (
   db: Db,
   id: number
@@ -372,16 +392,7 @@ export const getProject = async (
   const [by] = latestBuild?.byUserId
     ? await db.select({ name: users.name }).from(users).where(eq(users.id, latestBuild.byUserId))
     : [];
-  const versionOf = async (commit: string | null): Promise<number | null> => {
-    if (commit === null) return null;
-    const [row] = await db
-      .select({ version: builds.version })
-      .from(builds)
-      .where(and(eq(builds.projectId, id), eq(builds.commit, commit), isNotNull(builds.version)))
-      .orderBy(asc(builds.version))
-      .limit(1);
-    return row?.version ?? null;
-  };
+  const versionOf = (commit: string | null) => versionOfCommit(db, id, commit);
   return {
     project,
     latestBuild: latestBuild ?? null,
@@ -834,6 +845,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
     await tx.delete(interviews).where(eq(interviews.projectId, id));
     await tx.delete(readBacks).where(eq(readBacks.projectId, id));
+    await tx.delete(databaseCopies).where(eq(databaseCopies.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
     await tx.delete(buildSummaries).where(inArray(buildSummaries.buildId, ids));
     await tx.delete(buildFiles).where(inArray(buildFiles.buildId, ids));
@@ -849,6 +861,12 @@ export const claudeDir = (): string => process.env.CLAUDE_CONFIG_DIR ?? join(hom
 // character but a letter or digit a dash.
 export const transcriptsDir = (claude: string, cwd: string): string =>
   join(claude, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+
+// Where a project's database copies (#227) are kept. The slug is checked as copyOf checks it.
+export const backupsDir = (dataDir: string, slug: string): string => {
+  copyOf(dataDir, slug, "production");
+  return join(dataDir, "backups", slug);
+};
 
 // A build's raw log and its staged attachments in the data dir (temporal/activities.ts).
 export const buildFilesOf = (dataDir: string, buildId: number): readonly string[] => [
@@ -879,6 +897,7 @@ export const removeProjectFiles = async (
     [
       ...ids.flatMap(({ id }) => buildFilesOf(dataDir, id)),
       transcriptsDir(claude, copyOf(dataDir, project.slug, "staging").dir),
+      backupsDir(dataDir, project.slug),
     ].map(removePath)
   );
 };
