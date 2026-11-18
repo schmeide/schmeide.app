@@ -108,16 +108,14 @@ export const writeReadBack = async (deps: ReadBackDeps, id: number): Promise<Rea
     const room = MAX_OPEN - current.open.length;
     const open = output.open.filter((point) => !known.has(point.text)).slice(0, Math.max(room, 0));
     if (open.length) {
-      await tx
-        .insert(planItems)
-        .values(
-          open.map((point) => ({
-            ...point,
-            projectId: id,
-            source: "schmeide" as const,
-            open: true,
-          }))
-        );
+      await tx.insert(planItems).values(
+        open.map((point) => ({
+          ...point,
+          projectId: id,
+          source: "schmeide" as const,
+          open: true,
+        }))
+      );
       await planChanged(tx, id);
     }
     await tx

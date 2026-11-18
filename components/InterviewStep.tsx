@@ -13,6 +13,7 @@ import {
 } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
+import { ReadBackStep } from "./ReadBack";
 import { useDraft } from "./useDraft";
 
 import stepStyles from "./Step.module.css";
@@ -358,6 +359,8 @@ export function InterviewStep({
   // The item ids from before the latest turn; null until a turn has been taken on this page.
   const [known, setKnown] = useState<ReadonlySet<number> | null>(null);
   const [needPlan, setNeedPlan] = useState(false);
+  // The plan is said back before the spec is written from it.
+  const [checking, setChecking] = useState(false);
   const store = (next: Interview) => {
     queryClient.setQueryData(trpc.interview.get.queryKey({ id: project.id }), next);
     // An answer that changes the plan can send a reviewed project back to describing.
@@ -394,11 +397,27 @@ export function InterviewStep({
     remember();
     restart.mutate({ id: project.id, need });
   };
-  const onWriteSpec = () => {
+  const onCheck = () => {
     const ready = interview.items.some((item) => item.section === "does");
     setNeedPlan(!ready);
-    if (ready) generate.mutate({ id: project.id }, { onSuccess: () => onEditingChange(false) });
+    setChecking(ready);
   };
+  const onWriteSpec = () =>
+    generate.mutate({ id: project.id }, { onSuccess: () => onEditingChange(false) });
+
+  if (open && checking) {
+    return (
+      <>
+        <ReadBackStep
+          project={project}
+          writing={generate.isPending}
+          onWriteSpec={onWriteSpec}
+          onBack={() => setChecking(false)}
+        />
+        <ErrorNote error={generate.error} />
+      </>
+    );
+  }
 
   return (
     <section aria-labelledby="features" className={stepStyles.step}>
@@ -494,10 +513,10 @@ export function InterviewStep({
             <button
               type="button"
               data-variant={interview.current ? undefined : "primary"}
-              disabled={generate.isPending || thinking}
-              onClick={onWriteSpec}
+              disabled={thinking}
+              onClick={onCheck}
             >
-              {generate.isPending ? copy.project.startingSpec : copy.project.writeSpec}
+              {copy.readBack.open}
             </button>
             <button type="button" onClick={onWriteMyself}>
               {copy.interview.writeMyself}

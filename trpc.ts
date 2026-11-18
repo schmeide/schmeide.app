@@ -16,6 +16,7 @@ export type Usage = Outputs["projects"]["get"]["usage"];
 export type TimeTotals = Outputs["projects"]["get"]["time"];
 export type ProjectStatus = Project["status"];
 export type Interview = Outputs["interview"]["get"];
+export type ReadBack = Outputs["readBack"]["get"];
 export type Design = Outputs["design"]["get"];
 export type PlanItem = Interview["items"][number];
 export type Question = Interview["questions"][number];
