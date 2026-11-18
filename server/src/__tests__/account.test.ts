@@ -5,9 +5,9 @@ import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
 import { accounts, approvedEmails, memberships, sessions, tenants, users } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
-import { approveEmail } from "../services/access.ts";
+import { acceptInvite, approveEmail } from "../services/access.ts";
 import { createProject } from "../services/projects.ts";
-import { aSignedInPerson, callApi, PASSWORD, signIn, testAuth } from "./testAuth.ts";
+import { anEmail, aSignedInPerson, callApi, PASSWORD, signIn, testAuth } from "./testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -59,6 +59,17 @@ describe("the account", () => {
     expect(data.businesses).toEqual([
       { id: ada.tenantId, name: "Ada Example’s business", onDelete: "remove" },
     ]);
+  });
+
+  it("works for someone who has not finished first-run setup", async () => {
+    const { email, token } = await approveEmail(db, anEmail());
+    await acceptInvite(deps, { token, name: "Ada Example", password: PASSWORD });
+    const { cookie } = await signIn(app, email);
+    const { status, data } = await trpc("account.get", undefined, cookie);
+    expect(status).toBe(200);
+    expect(data).toMatchObject({ name: "Ada Example", email, businesses: [] });
+    expect((await trpc("account.rename", { name: "Ada Lovelace" }, cookie)).status).toBe(200);
+    expect((await trpc("account.export", undefined, cookie)).status).toBe(200);
   });
 
   it("renames the person and nobody else", async () => {

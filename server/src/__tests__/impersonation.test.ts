@@ -4,15 +4,22 @@ import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
 import { adminActions, sessions, users } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
-import { approveEmail, endImpersonationsBy, removeApproval } from "../services/access.ts";
+import {
+  acceptInvite,
+  approveEmail,
+  endImpersonationsBy,
+  removeApproval,
+} from "../services/access.ts";
 import { AUTH_PATHS_WHILE_IMPERSONATING, IMPERSONATION_SECONDS } from "../services/auth.ts";
 import { createProject } from "../services/projects.ts";
 import {
   adminPaths,
+  anEmail,
   aSignedInAdmin,
   aSignedInPerson,
   callApi,
   mutationPaths,
+  PASSWORD,
   signIn,
   TEST_ORIGIN,
   testAuth,
@@ -264,6 +271,26 @@ describe("the audit trail", () => {
         unrecorded.push(path);
     }
     expect(unrecorded).toEqual([]);
+  });
+
+  it("records an account write for someone in no business yet, naming no business", async () => {
+    const admin = await aSignedInAdmin(app, deps);
+    const { email, token } = await approveEmail(db, anEmail());
+    await acceptInvite(deps, { token, name: "Nora Newcomer", password: PASSWORD });
+    const started = await mutate(
+      "admin.impersonation.start",
+      { email, reason: "Help" },
+      admin.cookie
+    );
+    expect((await callApi(app, "account.get", undefined, started.cookie)).status).toBe(200);
+    const renamed = await callApi(app, "account.rename", { name: "Nora" }, started.cookie);
+    expect(renamed.status).toBe(200);
+    expect((await auditRows(admin.email)).at(-1)).toMatchObject({
+      action: "impersonation.write",
+      targetUserId: await idOf(email),
+      targetTenantId: null,
+      detail: "account.rename",
+    });
   });
 
   it("records an upload, which is not a procedure", async () => {

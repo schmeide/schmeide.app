@@ -57,9 +57,9 @@ const anAccount = (overrides: Partial<Account> = {}): Account => ({
   ...overrides,
 });
 
-const open = (account: Account, extra: Handlers = {}, path = "/account") => {
+const open = (account: Account, extra: Handlers = {}, path = "/account", session = ada) => {
   window.history.replaceState(null, "", path);
-  const state = { session: ada, providers: ["google", "microsoft"] as const };
+  const state = { session, providers: ["google", "microsoft"] as const };
   const { handlers, requests } = authServer({ ...state, providers: [...state.providers] });
   const calls = renderWithApi(
     <App isPublicSite={false} />,
@@ -100,6 +100,13 @@ describe("the account page", () => {
     expect(calls.find((call) => call.path === "account.rename")?.input).toEqual({
       name: "Ada King",
     });
+  });
+
+  it("opens for someone who has not finished first-run setup", async () => {
+    open(anAccount({ businesses: [] }), {}, "/account", { ...ada, businesses: [] });
+    const profile = await section(copy.accountPage.profile.title);
+    expect(profile.getByLabelText(copy.accountPage.profile.nameLabel)).toHaveValue("Ada Lovelace");
+    expect(window.location.pathname).toBe("/account");
   });
 
   it("offers each provider the server has, and never disconnects the only way in", async () => {

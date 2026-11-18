@@ -221,18 +221,25 @@ const open = procedure;
 export const SIGN_IN_FIRST = "Sign in to continue";
 export const NOT_IN_A_BUSINESS = "You are not in a business";
 
+// The business the person works in: the one the header names when they belong to it, otherwise
+// their first that is not suspended. None for someone not yet through first-run setup, or an admin.
+const workingIn = async (ctx: Pick<AppContext, "db">, person: Person, headers: Headers) => {
+  const businesses = await businessesOf(ctx.db, person);
+  const asked = Number(headers.get(BUSINESS_HEADER));
+  return (
+    businesses.find(({ id }) => id === asked) ??
+    businesses.find(({ suspended }) => !suspended) ??
+    businesses[0]
+  );
+};
+
 export const callerOf = async (
   ctx: Pick<AppContext, "auth" | "db">,
   headers: Headers
 ): Promise<{ readonly person: Person; readonly tenantId: number } | null> => {
   const person = await currentPerson(ctx, headers);
   if (!person) return null;
-  const businesses = await businessesOf(ctx.db, person);
-  const asked = Number(headers.get(BUSINESS_HEADER));
-  const business =
-    businesses.find(({ id }) => id === asked) ??
-    businesses.find(({ suspended }) => !suspended) ??
-    businesses[0];
+  const business = await workingIn(ctx, person, headers);
   // Someone not yet through first-run setup, or an admin, has none (businessesOf). The uploads
   // route answers both with a 403.
   if (!business) throw new TRPCError({ code: "FORBIDDEN", message: NOT_IN_A_BUSINESS });
@@ -261,6 +268,19 @@ const signedIn = procedure.use(async ({ ctx, type, path, next }) => {
   if (!caller) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
   if (type === "mutation") await recordWrite(ctx, caller, path);
   return next({ ctx: { ...ctx, ...caller } });
+});
+
+// About the signed-in person, not a business, so it works before first-run setup too: their own
+// account. Writes while an admin views as them are recorded against the business they work in,
+// or none when they have none.
+const personal = procedure.use(async ({ ctx, type, path, next }) => {
+  const person = await currentPerson(ctx, ctx.headers);
+  if (!person) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
+  if (type === "mutation") {
+    const business = await workingIn(ctx, person, ctx.headers);
+    await recordWrite(ctx, { person, tenantId: business?.id ?? null }, path);
+  }
+  return next({ ctx: { ...ctx, person } });
 });
 
 // For a signed-in person who may be in no business yet: first-run setup. Viewing as someone is
@@ -519,19 +539,19 @@ export const appRouter = t.router({
   }),
   // The signed-in person's own account; see services/account.ts.
   account: t.router({
-    get: signedIn.query(({ ctx }) => getAccount(ctx, ctx.person, ctx.headers)),
-    rename: signedIn
+    get: personal.query(({ ctx }) => getAccount(ctx, ctx.person, ctx.headers)),
+    rename: personal
       .input(renameAccountSchema)
       .mutation(({ ctx, input }) => renameAccount(ctx.db, ctx.person, input)),
-    disconnect: signedIn
+    disconnect: personal
       .use(refuseImpersonation)
       .input(signInMethodIdSchema)
       .mutation(({ ctx, input }) => disconnectMethod(ctx, ctx.person, input, ctx.headers)),
-    signOutOthers: signedIn
+    signOutOthers: personal
       .use(refuseImpersonation)
       .mutation(({ ctx }) => signOutOthers(ctx, ctx.headers)),
-    export: signedIn.query(({ ctx }) => exportAccount(ctx, ctx.person, ctx.headers)),
-    delete: signedIn
+    export: personal.query(({ ctx }) => exportAccount(ctx, ctx.person, ctx.headers)),
+    delete: personal
       .use(refuseImpersonation)
       .input(deleteAccountSchema)
       .mutation(({ ctx, input }) => deleteAccount(ctx.db, ctx.person, input)),
