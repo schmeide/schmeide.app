@@ -1,7 +1,18 @@
 # Apple's /usr/bin/make 3.81 ignores .SHELLFLAGS, so every recipe below would fail cryptically.
+# Saddle's done gate runs `sh -c` (no zsh alias), so `make` is /usr/bin/make. Hand that
+# invocation to GNU make 4: `gmake` on PATH, or Homebrew's gnubin `make` when PATH is minimal.
 ifneq (,$(filter 3.% 2.%,$(MAKE_VERSION)))
+_GMAKE := $(strip $(shell command -v gmake 2>/dev/null || { [ -x /opt/homebrew/opt/make/libexec/gnubin/make ] && echo /opt/homebrew/opt/make/libexec/gnubin/make; } || { [ -x /usr/local/opt/make/libexec/gnubin/make ] && echo /usr/local/opt/make/libexec/gnubin/make; } || true))
+ifeq ($(_GMAKE),)
 $(error GNU make 4 or newer is required (this is $(MAKE_VERSION)). Install it with `brew install make`, then run `gmake` instead of `make`)
+else
+_goals := $(or $(MAKECMDGOALS),_gnu-make)
+.PHONY: $(_goals) _gnu-make-reexec
+$(_goals): _gnu-make-reexec
+_gnu-make-reexec:
+	@$(_GMAKE) $(MAKECMDGOALS)
 endif
+else
 
 SHELL := /usr/bin/env
 .SHELLFLAGS = bash -e -o pipefail -c
@@ -299,3 +310,10 @@ env-%: ## Check if env var is defined
 .PHONY: help
 help: ## Display this help
 	awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_\/-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+# No ## comment: `make help` only lists targets that document themselves.
+.PHONY: gnu-make-version
+gnu-make-version:
+	@printf '%s\n' "$(MAKE_VERSION)"
+
+endif
