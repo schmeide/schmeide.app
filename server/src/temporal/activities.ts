@@ -94,6 +94,13 @@ import {
   touchesInterface,
   type ScreenCapture,
 } from "../services/designReview.ts";
+import {
+  CHECKING_SAFETY,
+  SAFE_TO_SHIP,
+  buildProblems,
+  notSafeToShip,
+  safetyReport,
+} from "../services/buildChecks.ts";
 import { THEMES, styleById } from "../services/designStyles.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
@@ -1426,7 +1433,11 @@ export const createActivities = (
             "checks",
             buildId,
             round,
-            { SCHMEIDE_COMMIT: commit },
+            {
+              SCHMEIDE_COMMIT: commit,
+              // The commit the build started from, for the secrets check to read what changed.
+              ...(project.stagingCommit && { SCHMEIDE_BASE: project.stagingCommit }),
+            },
             {}
           );
           await event(
@@ -1466,6 +1477,17 @@ export const createActivities = (
                     : marker.step === "passed"
                       ? "The built app is ready for phones"
                       : notReadyForPhones(marker.code ?? 0)
+                );
+                if (marker.step === "failed") failed = { ok: false, output };
+              } else if (marker.target === "files") {
+                // sandbox/files.ts prints safetyReport and exits with the number of problems.
+                if (marker.step === "start") output = "";
+                await say(
+                  marker.step === "start"
+                    ? CHECKING_SAFETY
+                    : marker.step === "passed"
+                      ? SAFE_TO_SHIP
+                      : notSafeToShip(marker.code ?? 0)
                 );
                 if (marker.step === "failed") failed = { ok: false, output };
               } else if (marker.step === "start") {
@@ -1990,6 +2012,13 @@ export const createActivities = (
         return { ok: false, output: phonesReport(problems) };
       }
       await event(buildId, "check", "The built app is ready for phones");
+      await event(buildId, "check", CHECKING_SAFETY);
+      const unsafe = await buildProblems(workspaceOf(project), project.stagingCommit ?? undefined);
+      if (unsafe.length > 0) {
+        await event(buildId, "check", notSafeToShip(unsafe.length));
+        return { ok: false, output: safetyReport(unsafe) };
+      }
+      await event(buildId, "check", SAFE_TO_SHIP);
       return { ok: true, output: "" };
     },
 

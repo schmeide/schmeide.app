@@ -581,6 +581,7 @@ describe("kubernetes mode", () => {
     const passing = `checks-${build.id}-0`;
     const failing = `checks-${build.id}-1`;
     const phones = `checks-${build.id}-2`;
+    const files = `checks-${build.id}-3`;
     const { config, kube, forgejo } = setup({
       [passing]: {
         lines: [
@@ -604,6 +605,16 @@ describe("kubernetes mode", () => {
           "- no stylesheet",
           "- no viewport",
           "::schmeide:: failed phones 2",
+        ],
+        exit: 0,
+      },
+      [files]: {
+        lines: [
+          "::schmeide:: passed phones",
+          "::schmeide:: start files",
+          "Schmeide's check of the code for secrets and calls to other services found:",
+          "- backend/aws.ts:1 has what looks like an AWS access key.",
+          "::schmeide:: failed files 1",
         ],
         exit: 0,
       },
@@ -635,6 +646,7 @@ describe("kubernetes mode", () => {
     };
 
     const notForPhones = await env.run(activities.runChecks, build.id, 2);
+    const unsafe = await env.run(activities.runChecks, build.id, 3);
 
     expect(ok).toEqual({ ok: true, output: "" });
     expect(failed).toEqual({ ok: false, output: "$ make test\nFAIL todos.test.ts\n" });
@@ -643,8 +655,13 @@ describe("kubernetes mode", () => {
       output:
         "Schmeide's check of the built app (frontend/dist) for phones found:\n- no stylesheet\n- no viewport\n",
     });
-    expect(readOnly).toEqual([true, true, true]);
-    expect(kube.deleted).toEqual([passing, failing, phones]);
+    expect(unsafe).toEqual({
+      ok: false,
+      output:
+        "Schmeide's check of the code for secrets and calls to other services found:\n- backend/aws.ts:1 has what looks like an AWS access key.\n",
+    });
+    expect(readOnly).toEqual([true, true, true, true]);
+    expect(kube.deleted).toEqual([passing, failing, phones, files]);
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining([
         "make check passed",
@@ -652,6 +669,8 @@ describe("kubernetes mode", () => {
         "Checking the built app for phones",
         "The built app is ready for phones",
         "The built app is not ready for phones (2 problems)",
+        "Checking the code for secrets and calls to other services",
+        "The code has a secret or calls another service (1 problem)",
       ])
     );
   });
