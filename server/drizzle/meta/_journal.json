@@ -204,6 +204,13 @@
       "when": 1795026193938,
       "tag": "0028_business_description",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1795036707836,
+      "tag": "0029_build_dependencies",
+      "breakpoints": true
     }
   ]
 }

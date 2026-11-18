@@ -16,7 +16,7 @@ import { MockActivityEnvironment } from "@temporalio/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { buildFiles, builds, files, projects, usage } from "../../db/schema.ts";
+import { buildDependencies, buildFiles, builds, files, projects, usage } from "../../db/schema.ts";
 import type { Cluster, Job, Kube, LogLine, Pod } from "../../kube/client.ts";
 import { KubeError } from "../../kube/client.ts";
 import { createAcr, type Acr } from "../../services/acr.ts";
@@ -145,6 +145,13 @@ const fakeForgejo = (root: string) => {
     deleteRepo: async (org: string, repo: string) => {
       deletedRepos.push(`${org}/${repo}`);
     },
+    fileAt: async (org: string, repo: string, ref: string, path: string) => {
+      try {
+        return git(bare(org, repo), "show", `${ref}:${path}`);
+      } catch {
+        return undefined;
+      }
+    },
     remote: (org: string, repo: string) => ({ url: bare(org, repo), env: {} }),
     sshRemote: (org: string, repo: string) => `ssh://forgejo/${org}/${repo}.git`,
   } satisfies Forgejo;
@@ -255,6 +262,17 @@ const setup = (scripts: Readonly<Record<string, Script>> = {}) => {
   writeFileSync(
     join(template, "frontend", "index.html"),
     "<html>\n  <head>\n    <title>Notes</title>\n  </head>\n</html>\n"
+  );
+  writeFileSync(
+    join(template, "frontend", "package-lock.json"),
+    JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        "": { name: "frontend" },
+        "node_modules/react": { version: "19.0.0", license: "MIT" },
+        "node_modules/vitest": { version: "3.0.0", license: "MIT", dev: true },
+      },
+    })
   );
   git(template, "init", "-q");
   git(template, "add", "-A");
@@ -582,6 +600,7 @@ describe("kubernetes mode", () => {
     const failing = `checks-${build.id}-1`;
     const phones = `checks-${build.id}-2`;
     const files = `checks-${build.id}-3`;
+    const packages = `checks-${build.id}-4`;
     const { config, kube, forgejo } = setup({
       [passing]: {
         lines: [
@@ -618,6 +637,16 @@ describe("kubernetes mode", () => {
         ],
         exit: 0,
       },
+      [packages]: {
+        lines: [
+          "::schmeide:: passed files",
+          "::schmeide:: start packages",
+          "Schmeide's check of the app's packages found:",
+          "- backend: lodash has a known critical security hole; update lodash to 4.17.21.",
+          "::schmeide:: failed packages 1",
+        ],
+        exit: 0,
+      },
       [failing]: {
         lines: [
           "::schmeide:: start check",
@@ -647,6 +676,7 @@ describe("kubernetes mode", () => {
 
     const notForPhones = await env.run(activities.runChecks, build.id, 2);
     const unsafe = await env.run(activities.runChecks, build.id, 3);
+    const vulnerable = await env.run(activities.runChecks, build.id, 4);
 
     expect(ok).toEqual({ ok: true, output: "" });
     expect(failed).toEqual({ ok: false, output: "$ make test\nFAIL todos.test.ts\n" });
@@ -660,8 +690,19 @@ describe("kubernetes mode", () => {
       output:
         "Schmeide's check of the code for secrets and calls to other services found:\n- backend/aws.ts:1 has what looks like an AWS access key.\n",
     });
-    expect(readOnly).toEqual([true, true, true, true]);
-    expect(kube.deleted).toEqual([passing, failing, phones, files]);
+    expect(vulnerable).toEqual({
+      ok: false,
+      output:
+        "Schmeide's check of the app's packages found:\n- backend: lodash has a known critical security hole; update lodash to 4.17.21.\n",
+    });
+    expect(readOnly).toEqual([true, true, true, true, true]);
+    expect(kube.deleted).toEqual([passing, failing, phones, files, packages]);
+    // Only the passing round records what the build ships, read from staging's lock files.
+    expect(
+      await db.select().from(buildDependencies).where(eq(buildDependencies.buildId, build.id))
+    ).toEqual([
+      { buildId: build.id, dir: "frontend", name: "react", version: "19.0.0", license: "MIT" },
+    ]);
     expect(await messages(build.id)).toEqual(
       expect.arrayContaining([
         "make check passed",
@@ -671,6 +712,8 @@ describe("kubernetes mode", () => {
         "The built app is not ready for phones (2 problems)",
         "Checking the code for secrets and calls to other services",
         "The code has a secret or calls another service (1 problem)",
+        "Checking the app's packages for security holes and licenses",
+        "The app's packages have a security hole or a license it cannot ship (1 problem)",
       ])
     );
   });

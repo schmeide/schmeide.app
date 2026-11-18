@@ -231,12 +231,18 @@ export const SAFE_TO_SHIP = "The code keeps no secrets and calls no other servic
 export const notSafeToShip = (count: number): string =>
   `The code has a secret or calls another service (${count} ${count === 1 ? "problem" : "problems"})`;
 
-// What the builder is told when the check fails.
-export const safetyReport = (problems: readonly string[]): string =>
+// What the builder is told when a check fails: the first few problems under `heading`.
+export const listReport = (heading: string, problems: readonly string[]): string =>
   [
-    "Schmeide's check of the code for secrets and calls to other services found:",
+    heading,
     ...problems.slice(0, MAX_SHOWN).map((problem) => `- ${problem}`),
     ...(problems.length > MAX_SHOWN
       ? [`- And ${problems.length - MAX_SHOWN} more like these.`]
       : []),
   ].join("\n");
+
+export const safetyReport = (problems: readonly string[]): string =>
+  listReport(
+    "Schmeide's check of the code for secrets and calls to other services found:",
+    problems
+  );

@@ -64,6 +64,7 @@ import {
   appendEvent,
   finishBuild as finishBuildRow,
   getBuild,
+  recordDependencies,
   recordUsage,
   runUsage,
   type Query,
@@ -101,6 +102,17 @@ import {
   notSafeToShip,
   safetyReport,
 } from "../services/buildChecks.ts";
+import {
+  APP_DIRS,
+  CHECKING_PACKAGES,
+  PACKAGES_OK,
+  appDependencies,
+  dependenciesOf,
+  packageProblems,
+  packagesNotOk,
+  packagesReport,
+  type Audit,
+} from "../services/packageChecks.ts";
 import { THEMES, styleById } from "../services/designStyles.ts";
 import { planBrief, planItemsOf } from "../services/interview.ts";
 import {
@@ -115,6 +127,7 @@ import {
   deleteProjectRows,
   markReleased,
   findProject,
+  removeProjectFiles,
   startNextChange,
   testDbPort,
   transition,
@@ -144,6 +157,8 @@ export type Config = {
   readonly agentCmd?: string;
   // How deploy asks a started app whether it answers; tests stand in for a running app.
   readonly fetch?: typeof fetch;
+  // How the host checks ask npm about known security holes; tests stand in for the registry.
+  readonly audit?: Audit;
   // SCHMEIDE_RUNNER=kubernetes: the code lives on Forgejo and the agent and the checks run as Jobs.
   // Unset is host mode: a local workspace, and the agent and make run on this machine.
   readonly runner?: KubeRunner;
@@ -212,6 +227,17 @@ export const DESIGN_WIDTH_PX = 360;
 
 const HEARTBEAT_MS = 10_000;
 const OUTPUT_TAIL = 12_000;
+
+// Schmeide's own checks in a checks pod: what each says as it starts, passes, and fails.
+const SANDBOX_CHECKS = {
+  phones: [
+    "Checking the built app for phones",
+    "The built app is ready for phones",
+    notReadyForPhones,
+  ],
+  files: [CHECKING_SAFETY, SAFE_TO_SHIP, notSafeToShip],
+  packages: [CHECKING_PACKAGES, PACKAGES_OK, packagesNotOk],
+} as const;
 const MAX_EVENT = 300;
 
 // Bash commands the agent may run; everything else is denied without prompting (dontAsk).
@@ -1468,26 +1494,17 @@ export const createActivities = (
               const marker = parseChecksMarker(text);
               if (!marker) {
                 output = `${output}${text}\n`.slice(-OUTPUT_TAIL);
-              } else if (marker.target === "phones") {
-                // sandbox/phones.ts prints phonesReport and exits with the number of problems.
+              } else if (marker.target in SANDBOX_CHECKS) {
+                // sandbox/<target>.ts prints its report and exits with the number of problems.
+                const [starting, passed, notPassed] =
+                  SANDBOX_CHECKS[marker.target as keyof typeof SANDBOX_CHECKS];
                 if (marker.step === "start") output = "";
                 await say(
                   marker.step === "start"
-                    ? "Checking the built app for phones"
+                    ? starting
                     : marker.step === "passed"
-                      ? "The built app is ready for phones"
-                      : notReadyForPhones(marker.code ?? 0)
-                );
-                if (marker.step === "failed") failed = { ok: false, output };
-              } else if (marker.target === "files") {
-                // sandbox/files.ts prints safetyReport and exits with the number of problems.
-                if (marker.step === "start") output = "";
-                await say(
-                  marker.step === "start"
-                    ? CHECKING_SAFETY
-                    : marker.step === "passed"
-                      ? SAFE_TO_SHIP
-                      : notSafeToShip(marker.code ?? 0)
+                      ? passed
+                      : notPassed(marker.code ?? 0)
                 );
                 if (marker.step === "failed") failed = { ok: false, output };
               } else if (marker.step === "start") {
@@ -1504,6 +1521,18 @@ export const createActivities = (
           if (failed) return failed;
           if (exit !== 0)
             throw new Error(`The checks pod failed (exit ${exit}): ${output.slice(-2000)}`);
+          const locks = await Promise.all(
+            APP_DIRS.map(async (dir) => {
+              const text = await runner.forgejo.fileAt(
+                org,
+                repo,
+                commit,
+                `${dir}/package-lock.json`
+              );
+              return text === undefined ? [] : dependenciesOf(dir, text);
+            })
+          );
+          await recordDependencies(db, buildId, locks.flat());
           return { ok: true, output: "" };
         } finally {
           await endJob(runner, project, name);
@@ -2019,6 +2048,14 @@ export const createActivities = (
         return { ok: false, output: safetyReport(unsafe) };
       }
       await event(buildId, "check", SAFE_TO_SHIP);
+      await event(buildId, "check", CHECKING_PACKAGES);
+      const packages = await packageProblems(workspaceOf(project), config.audit);
+      if (packages.length > 0) {
+        await event(buildId, "check", packagesNotOk(packages.length));
+        return { ok: false, output: packagesReport(packages) };
+      }
+      await event(buildId, "check", PACKAGES_OK);
+      await recordDependencies(db, buildId, await appDependencies(workspaceOf(project)));
       return { ok: true, output: "" };
     },
 
@@ -2196,6 +2233,7 @@ export const createActivities = (
         await hosting.acr.deleteImages(project.tenantId, project.slug);
       }
       await store.removeProject({ tenantId: project.tenantId, projectId });
+      await removeProjectFiles(db, config.dataDir, project);
       await deleteProjectRows(db, projectId);
     },
   };

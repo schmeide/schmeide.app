@@ -95,6 +95,15 @@ export const createForgejo = (config: ForgejoConfig) => {
         : ((await response.json()) as { commit: { id: string } }).commit.id;
     },
 
+    // A file's text at `ref`; undefined when the file or the repository is not there.
+    fileAt: async (org: string, repo: string, ref: string, path: string) => {
+      const response = await call(
+        "GET",
+        `${repoPath(org, repo)}/raw/${path.split("/").map(name).join("/")}?ref=${name(ref)}`
+      );
+      return response.status === 404 ? undefined : response.text();
+    },
+
     // Only the platform user may push main, and nobody may force-push it (decision 13); deploy
     // keys, which build pods hold, may not push it at all.
     protectMain: async (org: string, repo: string): Promise<void> => {
