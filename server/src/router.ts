@@ -70,7 +70,7 @@ import {
   removeMember,
   setBusinessState,
 } from "./services/businesses.ts";
-import { listEvents } from "./services/builds.ts";
+import { buildListSchema, listBuilds, listEvents } from "./services/builds.ts";
 import { listSummaries } from "./services/summaries.ts";
 import {
   getBusiness,
@@ -576,6 +576,8 @@ export const appRouter = t.router({
       .query(({ ctx, input }) => businessTime(ctx.db, ctx.tenantId, input)),
   }),
   builds: t.router({
+    // A project's builds that have started, newest first, a page at a time, each with its cost.
+    list: onProject(buildListSchema).query(({ ctx, input }) => listBuilds(ctx.db, input)),
     events: onBuild(eventsQuerySchema).query(({ ctx, input }) =>
       listEvents(ctx.db, input.buildId, input.afterId)
     ),

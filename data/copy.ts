@@ -636,6 +636,17 @@ export const copy = {
       canceled: "Canceled",
     },
     elapsed: "Time:",
+    history: {
+      title: "Past builds",
+      intro: "Every build before the latest one, newest first.",
+      empty:
+        "Only the first build so far. Each change you ask for is listed here once the next one starts.",
+      firstBuild: "The first build of your app.",
+      took: "Took",
+      cost: "Cost",
+      showLog: "Show its log",
+      more: "Show older builds",
+    },
     failureTitle: "What went wrong",
     summaryTitle: "What is happening",
     summaryWaiting: "An account of the build in plain words appears here as it goes.",

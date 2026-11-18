@@ -1,5 +1,6 @@
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { and, asc, eq, gt, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
@@ -12,6 +13,7 @@ import {
   type NewAgentRun,
   type NewUsage,
   type RunKind,
+  projectIdSchema,
 } from "../db/schema.ts";
 import { NotFoundError } from "./errors.ts";
 
@@ -44,6 +46,49 @@ export const getBuild = async (db: Db, buildId: number): Promise<Build> => {
   const [build] = await db.select().from(builds).where(eq(builds.id, buildId));
   if (!build) throw new NotFoundError(`Build ${buildId} not found`);
   return build;
+};
+
+// A page of a project's history, newest first. `cursor` is the id of the last build already shown.
+export const buildListSchema = projectIdSchema.extend({
+  cursor: z.number().int().positive().nullish(),
+  limit: z.number().int().min(1).max(100).default(20),
+});
+
+export type ListedBuild = Pick<
+  Build,
+  "id" | "kind" | "request" | "status" | "error" | "startedAt" | "finishedAt"
+> & { readonly costUsd: number };
+
+// Every build that has started, with what it cost the customer; waiting changes are not history yet.
+export const listBuilds = async (
+  db: Db,
+  { id, cursor, limit }: z.infer<typeof buildListSchema>
+): Promise<{ readonly builds: readonly ListedBuild[]; readonly nextCursor: number | null }> => {
+  const rows = await db
+    .select({
+      id: builds.id,
+      kind: builds.kind,
+      request: builds.request,
+      status: builds.status,
+      error: builds.error,
+      startedAt: builds.startedAt,
+      finishedAt: builds.finishedAt,
+      costUsd: sql<number>`coalesce(sum(${usage.costUsd}), 0)`.mapWith(Number),
+    })
+    .from(builds)
+    .leftJoin(usage, and(eq(usage.buildId, builds.id), customerUsage))
+    .where(
+      and(
+        eq(builds.projectId, id),
+        ne(builds.status, "queued"),
+        cursor ? lt(builds.id, cursor) : undefined
+      )
+    )
+    .groupBy(builds.id)
+    .orderBy(desc(builds.id))
+    .limit(limit + 1);
+  const page = rows.slice(0, limit);
+  return { builds: page, nextCursor: rows.length > limit ? (page.at(-1)?.id ?? null) : null };
 };
 
 // `canceled` records that the person stopped the build. It stores no error: nothing went wrong.
