@@ -24,6 +24,12 @@ import type { FileStore } from "./fileStore.ts";
 import { TYPE_LABEL, isPicture, sniffType } from "./fileTypes.ts";
 import { findProject } from "./projects.ts";
 import { csvTable, xlsxTable, type Table } from "./spreadsheet.ts";
+import {
+  acceptUpload,
+  passingScanner,
+  type FileScanner,
+  type NewUploadRefusal,
+} from "./fileScan.ts";
 import { stripMetadata } from "./stripMetadata.ts";
 
 const MB = 1024 * 1024;
@@ -55,6 +61,8 @@ export const REFUSAL_STATUS = {
   not_yours: 422,
   too_many_files: 409,
   business_full: 409,
+  unsafe: 422,
+  scan_unavailable: 503,
 } as const;
 export type Refusal = keyof typeof REFUSAL_STATUS;
 
@@ -82,6 +90,11 @@ export const cleanName = (name: string): string => {
 };
 
 export type FileDeps = { readonly db: Db; readonly files: FileStore };
+
+type ScanDeps = {
+  readonly scanner?: FileScanner;
+  readonly recordUploadRefusal?: (refusal: NewUploadRefusal) => Promise<unknown>;
+};
 
 export type Upload = {
   readonly tenantId: number;
@@ -129,11 +142,33 @@ const checked = (upload: Upload, limits: UploadLimits): { type: FileType; bytes:
 };
 
 export const uploadFile = async (
-  { db, files: store }: FileDeps,
+  { db, files: store, scanner = passingScanner, recordUploadRefusal }: FileDeps & ScanDeps,
   upload: Upload,
   limits: UploadLimits = UPLOAD_LIMITS
 ): Promise<FileRow> => {
-  const { type, bytes } = checked(upload, limits);
+  const { type, bytes: checkedBytes } = checked(upload, limits);
+  let bytes = checkedBytes;
+  try {
+    bytes = await acceptUpload({
+      type,
+      bytes: checkedBytes,
+      owner: upload.owner,
+      purpose: upload.purpose,
+      scanner,
+    });
+  } catch (error) {
+    if (error instanceof UploadRefusedError && error.code === "unsafe")
+      await recordUploadRefusal?.({
+        tenantId: upload.tenantId,
+        projectId: upload.projectId,
+        uploadedBy: upload.uploadedBy,
+        fileId: null,
+        name: cleanName(upload.name),
+        type,
+        detail: error.detail ?? error.message,
+      });
+    throw error;
+  }
   const name = cleanName(upload.name);
   return db.transaction(async (transaction) => {
     const tx = transaction as unknown as Db;

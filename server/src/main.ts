@@ -13,9 +13,16 @@ import {
   authConfigFromEnv,
   createAuth,
   enabledProviders,
+  isLocal,
   type AuthConfig,
 } from "./services/auth.ts";
 import { claudeEnv } from "./services/claudeEnv.ts";
+import {
+  createFileScanner,
+  recordUploadRefusal,
+  scanStoredFiles,
+  type FileScanner,
+} from "./services/fileScan.ts";
 import { createFileReader } from "./services/fileReader.ts";
 import { createLocalFileStore } from "./services/fileStore.ts";
 import { createInterviewer } from "./services/interviewer.ts";
@@ -152,6 +159,22 @@ const authConfig = role.serveApi
     })()
   : undefined;
 
+const scannerAddress = env.SCHMEIDE_CLAMAV_ADDRESS?.trim() || undefined;
+if (authConfig && !isLocal(authConfig.publicUrl) && !scannerAddress) {
+  console.error(
+    "SCHMEIDE_CLAMAV_ADDRESS must be set when SCHMEIDE_PUBLIC_URL is not localhost, so an upload is scanned before it is stored. Point it at ClamAV in the cluster, for example clamav.clamav.svc.cluster.local:3310."
+  );
+  process.exit(1);
+}
+const scanner: FileScanner = (() => {
+  try {
+    return createFileScanner(scannerAddress);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+})();
+
 const db = createDb(databaseUrl);
 const connection = await Connection.connect({ address: temporalAddress }).catch(
   (error: unknown) => {
@@ -198,13 +221,14 @@ const startWorker = async () => {
 
 const startApi = (authConfig: AuthConfig) => {
   const providers = enabledProviders(authConfig);
+  const fileStore = createLocalFileStore(config.dataDir);
   const app = buildApp(
     {
       ...deps,
       interviewer: createInterviewer({ ...config, model: config.interviewModel }),
       siteFetcher: createSiteFetcher(),
       reader: createFileReader({ ...config, model: config.interviewModel }),
-      files: createLocalFileStore(config.dataDir),
+      files: fileStore,
       websiteReader: createWebsiteReader({ ...config, model: config.websiteModel }),
       resources: createResourceReader(config.dataDir),
       auth: createAuth(db, authConfig),
@@ -212,16 +236,40 @@ const startApi = (authConfig: AuthConfig) => {
       designTeam: config.designTeam,
       buildsAdminsOnly: builds === "admins",
     },
-    { logger: true, allowOrigin: authConfig.publicUrl }
+    {
+      logger: true,
+      allowOrigin: authConfig.publicUrl,
+      scanner,
+      recordUploadRefusal: (refusal) => recordUploadRefusal(config.dataDir, refusal),
+    }
   );
   console.log(
     `Sign-in at ${authConfig.publicUrl} with password${providers.map((name) => `, ${name}`).join("")}. Approve a person with \`make access/approve EMAIL=...\`.`
   );
-  return app;
+  return { app, fileStore };
 };
 
 const worker = role.runWorker ? await startWorker() : undefined;
-const app = authConfig ? startApi(authConfig) : undefined;
+const started = authConfig ? startApi(authConfig) : undefined;
+const app = started?.app;
+if (started) {
+  const outcome = await scanStoredFiles({
+    db,
+    files: started.fileStore,
+    dataDir: config.dataDir,
+    scanner,
+    stamp: scannerAddress ?? "passing",
+  }).catch((error: unknown) => {
+    console.error("Stored files were not scanned. The next start will try again.", error);
+    return undefined;
+  });
+  if (outcome) console.log(`Stored file scan: ${outcome.status}, removed ${outcome.removed}.`);
+  console.log(
+    scannerAddress
+      ? `Upload scan: ClamAV at ${scannerAddress}.`
+      : "Upload scan: passing every file (set SCHMEIDE_CLAMAV_ADDRESS to scan with ClamAV)."
+  );
+}
 // A worker on its own answers only /healthz on PORT, for its probes.
 const health = app ? undefined : createHealthServer(() => worker?.getState() === "RUNNING");
 

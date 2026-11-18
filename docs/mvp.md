@@ -366,7 +366,8 @@ is:
   needs the session cookie, and takes the business header as tRPC does. It answers `201 { file }`, or
   `{ error: { code, message } }` with a message written for the person: `401 unauthorized`, `404 not_found` (also for
   a project in another business), `400 bad_request` or `empty`, `413 too_large`, `415 unsupported_type` or
-  `type_mismatch`, `422 damaged` or `not_yours`, `409 too_many_files` or `business_full`.
+  `type_mismatch`, `422 damaged`, `not_yours`, or `unsafe`, `409 too_many_files` or `business_full`,
+  `503 scan_unavailable`.
 - `files.list({ id })`, `files.rename({ id, fileId, displayName })`, and `files.delete({ id, fileId })`.
 - `files.read({ id, fileId })` returns `{ status: "read", proposals, table }` or
   `{ status: "failed", reason, message }`. Proposals are plan items by section. Nothing is added to the plan.
@@ -377,7 +378,24 @@ What the server does with a file:
 - Accepts PNG, JPEG, WebP, PDF, CSV, and XLSX, decided by the content. A declared type that does not match is refused.
   HEIC is not accepted. Pictures may be 5 MB, other files 10 MB; a project holds 50 files and a business 500 MB.
 - Removes camera, location, author, and comment details from a picture before storing it, and keeps only which way up
-  it is. A picture it cannot take apart is refused. PDFs and spreadsheets are stored as sent.
+  it is. A picture it cannot take apart is refused.
+- Scans the bytes after the type check and before anything is stored (`services/fileScan.ts`). A PDF with a script, a
+  launch action, or an attached file is refused from its structure, and so is an Excel file with macros, whatever the
+  scanner says. The scanner is ClamAV in the cluster (`SCHMEIDE_CLAMAV_ADDRESS`, the clamd `INSTREAM` command). That
+  follows the recommendation: ClamAV runs in the cluster with no internet egress except its signature updates, so a
+  customer file does not leave the platform. Deploying it belongs in `schmeide/iac`. On a localhost address with the
+  variable unset, a stand-in passes every file (`ponytail:`). A public address with it unset refuses to start.
+- A file the scan refuses answers `422 unsafe` and nothing is stored. The refusal is a JSON file under
+  `review/upload-refusals/` for the operator list (#277). If the scanner cannot be reached, or it times out, the
+  answer is `503 scan_unavailable` and the file is not stored.
+- A PDF that passes is stored as sent. A spreadsheet that is `mine` and `in_app` is rewritten first: a cell that
+  begins with `=`, `+`, `-`, or `@` gets a leading quote, so a spreadsheet program does not run it when the file is
+  copied into the app. `neutralizeSpreadsheet` is the same rewrite for a later download (#85). Any other spreadsheet
+  is stored as sent.
+- Files already on disk are scanned once, the first time the API starts against this scanner. One that fails is
+  removed and recorded. The marker is `review/stored-files-scanned`, and it names the scanner, so pointing the
+  variable at ClamAV later scans them again. If the scanner is down, the marker is not written and the next start
+  tries again.
 - Stores the bytes under `files/<business id>/<project id>/<file id>` in the data dir. The file name is kept as text
   only. Files stay until they or their project are deleted.
 - Reads a spreadsheet without the model: the first sheet's column names become proposals for what the app keeps, with
@@ -391,24 +409,25 @@ What the server does with a file:
 
 ## Environment
 
-| Variable                   | Default                                    | Meaning                              |
-| -------------------------- | ------------------------------------------ | ------------------------------------ |
-| `PORT`                     | `3100`                                     | API port (Vite proxies to it)        |
-| `DATABASE_URL`             | Postgres on `:5440`, database `schmeide`   | Customer database                    |
-| `TEMPORAL_ADDRESS`         | `localhost:7233`                           | Temporal frontend                    |
-| `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, files, logs, make shim   |
-| `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone       |
-| `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run   |
-| `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for questions and for reading  |
-| `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website          |
-| `SCHMEIDE_SUMMARY_MODEL`   | `haiku`                                    | Model for a build's running summary  |
-| `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs  |
-| `ANTHROPIC_API_KEY`        | unset (uses the CLI login)                 | Model credential in a container      |
-| `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude |
-| `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server   |
-| `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only   |
-| `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only     |
-| `SCHMEIDE_DESIGN_TEAM`     | unset (off)                                | `1` turns on the design team (below) |
+| Variable                   | Default                                    | Meaning                               |
+| -------------------------- | ------------------------------------------ | ------------------------------------- |
+| `PORT`                     | `3100`                                     | API port (Vite proxies to it)         |
+| `DATABASE_URL`             | Postgres on `:5440`, database `schmeide`   | Customer database                     |
+| `TEMPORAL_ADDRESS`         | `localhost:7233`                           | Temporal frontend                     |
+| `SCHMEIDE_DATA_DIR`        | `~/.schmeide`                              | Workspaces, files, logs, make shim    |
+| `SCHMEIDE_TEMPLATE`        | `https://github.com/schmeide/template.git` | Git URL or local path to clone        |
+| `SCHMEIDE_AGENT_MODEL`     | `opus`                                     | Fallback model for every agent run    |
+| `SCHMEIDE_INTERVIEW_MODEL` | `sonnet`                                   | Model for questions and for reading   |
+| `SCHMEIDE_WEBSITE_MODEL`   | `sonnet`                                   | Model for reading a website           |
+| `SCHMEIDE_SUMMARY_MODEL`   | `haiku`                                    | Model for a build's running summary   |
+| `SCHMEIDE_CLAUDE_BIN`      | `claude` on `PATH`                         | Claude Code executable the SDK runs   |
+| `ANTHROPIC_API_KEY`        | unset (uses the CLI login)                 | Model credential in a container       |
+| `SCHMEIDE_AGENT_CMD`       | unset                                      | Fake agent command instead of Claude  |
+| `SCHMEIDE_TASK_QUEUE`      | `schmeide`                                 | Temporal task queue of this server    |
+| `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only    |
+| `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only      |
+| `SCHMEIDE_DESIGN_TEAM`     | unset (off)                                | `1` turns on the design team (below)  |
+| `SCHMEIDE_CLAMAV_ADDRESS`  | unset (every file passes)                  | ClamAV `host:port` that scans uploads |
 
 ### Building on the cluster
 
@@ -472,6 +491,8 @@ decides, and the run kind is its only input.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
   `e2e-fake-server.log` is the `make e2e/fake` server's output.
 - `~/.schmeide/attachments/build-<id>/`: the files a change attached, staged read-only for the builder.
+- `~/.schmeide/review/upload-refusals/`: one JSON file per upload the scan refused, for the operator list (#277).
+- `~/.schmeide/review/stored-files-scanned`: written after files already stored have been scanned once.
 - `~/.claude/projects/<staging path, dashed>/` (or under `CLAUDE_CONFIG_DIR`): the agent's session transcripts.
 - `~/.schmeide/bin/make`: a link to GNU make, first on `PATH` for project runs and the agent.
 - `~/.schmeide/gitconfig`: neutral git identity used instead of your global git config.
@@ -496,8 +517,9 @@ a starting point until a lawyer has read them (#275).
 
 A deleted project's build logs, attachments and transcripts go with it: the sweep removes any whose build or project
 no longer exists, however new. Not yet done (#275): removing them at the moment of deletion (a call in the
-`removeProject` activity), keeping usage and audit rows of a deletion without personal details, refused requests and
-reports (which do not exist yet), and publishing the periods on the privacy page and in "Download my details".
+`removeProject` activity), keeping usage and audit rows of a deletion without personal details, deleting refused
+uploads (now under `review/upload-refusals/`, #276) and reports (which do not exist yet) after a year, and publishing
+the periods on the privacy page and in "Download my details".
 
 To bring a stopped app back by hand, production:
 `cd ~/.schmeide/production/<slug> && gmake up COMPOSE_PROJECT_NAME=schmeide-<slug> WEB_PORT=<port>` (from
@@ -675,15 +697,16 @@ on by default (#83). With it off, builds run exactly as above: no extra runs, th
 
 Each is marked in code with a `ponytail:` comment.
 
-| Dev mode                                          | Production target                            |
-| ------------------------------------------------- | -------------------------------------------- |
-| Sign-in limited to approved emails, set by hand   | Open sign-up, invitations, emailed codes     |
-| Local git directory per project                   | Self-hosted Forgejo repository               |
-| Agent runs on the host in the workspace           | Sandbox pod per job                          |
-| Checks run on the host via the project Makefile   | Kubernetes Job                               |
-| `make up` with Docker Compose, `localhost:<port>` | AKS namespace per tenant (`SCHMEIDE_RUNNER`) |
-| Builds of all projects share one worker           | Task queue per tenant                        |
-| Temporal dev server, in memory                    | A real Temporal cluster                      |
+| Dev mode                                          | Production target                                 |
+| ------------------------------------------------- | ------------------------------------------------- |
+| Sign-in limited to approved emails, set by hand   | Open sign-up, invitations, emailed codes          |
+| Local git directory per project                   | Self-hosted Forgejo repository                    |
+| Agent runs on the host in the workspace           | Sandbox pod per job                               |
+| Checks run on the host via the project Makefile   | Kubernetes Job                                    |
+| `make up` with Docker Compose, `localhost:<port>` | AKS namespace per tenant (`SCHMEIDE_RUNNER`)      |
+| Builds of all projects share one worker           | Task queue per tenant                             |
+| Temporal dev server, in memory                    | A real Temporal cluster                           |
+| Upload scan passes every file (`ponytail:`)       | ClamAV in the cluster (`SCHMEIDE_CLAMAV_ADDRESS`) |
 
 ## Known gaps
 

@@ -14,6 +14,7 @@ import type { Person } from "./services/auth.ts";
 import { assertProjectIn } from "./services/businesses.ts";
 import { BUSINESS_SUSPENDED, NotFoundError, UploadRefusedError } from "./services/errors.ts";
 import { declaredType } from "./services/fileTypes.ts";
+import type { FileScanner, NewUploadRefusal } from "./services/fileScan.ts";
 import {
   REFUSAL_STATUS,
   UPLOAD_LIMITS,
@@ -45,7 +46,11 @@ const refusal = (reply: FastifyReply, status: number, code: string, message: str
 export const registerUploads = (
   app: FastifyInstance,
   context: AppContext,
-  limits: UploadLimits = UPLOAD_LIMITS
+  limits: UploadLimits = UPLOAD_LIMITS,
+  scan: {
+    readonly scanner?: FileScanner;
+    readonly recordUploadRefusal?: (refusal: NewUploadRefusal) => Promise<unknown>;
+  } = {}
 ): void => {
   const callers = new WeakMap<FastifyRequest, Caller>();
   app.register(async (scope) => {
@@ -111,7 +116,7 @@ export const registerUploads = (
         }
         try {
           const file = await uploadFile(
-            context,
+            { ...context, ...scan },
             {
               tenantId: caller.tenantId,
               projectId: caller.projectId,
