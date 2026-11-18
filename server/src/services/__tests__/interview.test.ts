@@ -209,7 +209,9 @@ describe("restartInterview", () => {
     await startInterview(deps, project.id);
     await transition(db, project.id, ["draft"], { status: "spec_ready" });
 
-    await expect(restartInterview(deps, { id: project.id, need: "Something else" })).rejects.toThrow(
+    await expect(
+      restartInterview(deps, { id: project.id, need: "Something else" })
+    ).rejects.toThrow(
       "The questions can only start over while the app is “Describing”, and it is “Spec ready to review” now. Start a new project to describe it from the beginning."
     );
     expect(interviewer).toHaveBeenCalledTimes(1);

@@ -888,6 +888,19 @@ export const copy = {
     answerYouDecide: "Left to Schmeide",
     needPlan:
       "Your plan needs at least one thing under “What it does”. Answer a question first, or press “Write it myself”.",
+    changeNeed: "Change what you asked for",
+    needLabel: "What you need",
+    needEmpty: "Write a sentence about what you need.",
+    restartWarning: (answers: number, items: number) =>
+      `Starting over clears ${new Intl.ListFormat("en", { type: "conjunction" }).format([
+        "the questions so far",
+        ...(answers ? [answers === 1 ? "your 1 answer" : `your ${answers} answers`] : []),
+        ...(items
+          ? [items === 1 ? "the 1 item in your plan" : `the ${items} items in your plan`]
+          : []),
+      ])}, then asks the first question again from your new wording.`,
+    restart: "Start the questions over",
+    keepQuestions: "Keep these questions",
     discardWarning:
       "Answering more questions can change your plan. If it does, the spec below is thrown away and written again from the new plan.",
   },
