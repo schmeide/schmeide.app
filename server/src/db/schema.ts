@@ -360,6 +360,21 @@ export const buildFiles = pgTable(
   (table) => [primaryKey({ columns: [table.buildId, table.fileId] })]
 );
 
+// The production packages a passed build ships (#270), from the app's lock files.
+export const buildDependencies = pgTable(
+  "build_dependencies",
+  {
+    buildId: integer("build_id")
+      .notNull()
+      .references(() => builds.id, { onDelete: "cascade" }),
+    dir: text("dir").notNull(),
+    name: text("name").notNull(),
+    version: text("version").notNull(),
+    license: text("license"),
+  },
+  (table) => [primaryKey({ columns: [table.buildId, table.dir, table.name, table.version] })]
+);
+
 const fileId = createSelectSchema(files).shape.id;
 
 export const MAX_ATTACHED_FILES = 10;

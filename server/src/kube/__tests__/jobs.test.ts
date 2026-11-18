@@ -140,13 +140,14 @@ describe("runJob", () => {
     expect(script).toContain('git checkout -q --detach "$SCHMEIDE_COMMIT"');
     for (const { target } of CHECK_TARGETS) expect(script).toContain(checksMarker("start", target));
     // The phone check runs after make build, on what it built (#219), then the secrets and
-    // outside-calls check (#271).
+    // outside-calls check (#271), then the packages check (#270).
     expect(CHECK_TARGETS.map(({ target }) => target)).toEqual([
       "check",
       "test",
       "build",
       "phones",
       "files",
+      "packages",
     ]);
   });
 

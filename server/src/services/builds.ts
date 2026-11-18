@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
+  buildDependencies,
   buildEvents,
   builds,
   usage,
@@ -18,6 +19,20 @@ import {
 import { NotFoundError } from "./errors.ts";
 
 const EVENTS_PAGE = 500;
+
+// What a passed build ships (#270); a later round of the same build replaces it.
+export const recordDependencies = (
+  db: Db,
+  buildId: number,
+  dependencies: readonly { dir: string; name: string; version: string; license: string | null }[]
+): Promise<void> =>
+  db.transaction(async (tx) => {
+    await tx.delete(buildDependencies).where(eq(buildDependencies.buildId, buildId));
+    if (dependencies.length > 0)
+      await tx
+        .insert(buildDependencies)
+        .values(dependencies.map((dependency) => ({ buildId, ...dependency })));
+  });
 
 export const appendEvent = async (
   db: Db,

@@ -74,6 +74,20 @@ describe("forgejo", () => {
     expect(await forgejo.branchCommit("t3", "notes", "main")).toBeUndefined();
   });
 
+  it("reads a file at a commit, and nothing where there is none", async () => {
+    const { forgejo, calls } = fakeForgejo({
+      "GET /api/v1/repos/t3/notes/raw/frontend/package-lock.json": [200, { lockfileVersion: 3 }],
+    });
+
+    expect(await forgejo.fileAt("t3", "notes", "abc", "frontend/package-lock.json")).toBe(
+      '{"lockfileVersion":3}'
+    );
+    expect(calls.at(-1)?.path).toBe(
+      "/api/v1/repos/t3/notes/raw/frontend/package-lock.json?ref=abc"
+    );
+    expect(await forgejo.fileAt("t3", "notes", "abc", "backend/package-lock.json")).toBeUndefined();
+  });
+
   it("lets only the platform user push main, and no deploy key", async () => {
     const { forgejo, calls } = fakeForgejo({
       "GET /api/v1/user": [200, { login: "schmeide-platform" }],

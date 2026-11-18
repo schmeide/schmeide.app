@@ -22,6 +22,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
 import {
   agentRuns,
+  buildDependencies,
   buildFiles,
   builds,
   files,
@@ -483,6 +484,47 @@ describe("build activities", () => {
     const said = [checks.output, ...(await messages(build.id))].join("\n");
     expect(said).not.toContain(key);
     expect(readFileSync(join(dataDir, "logs", `build-${build.id}.log`), "utf8")).not.toContain(key);
+  });
+
+  it("fails a build that adds a package under a license an app may not ship, and records a passing build's packages", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, { ...config, audit: async () => "{}" });
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const lock = (packages: Readonly<Record<string, { version: string; license: string }>>) =>
+      writeFileSync(
+        join(dataDir, "projects", project.slug, "frontend", "package-lock.json"),
+        JSON.stringify({
+          lockfileVersion: 3,
+          packages: Object.fromEntries(
+            Object.entries(packages).map(([name, entry]) => [`node_modules/${name}`, entry])
+          ),
+        })
+      );
+
+    lock({ "copyleft-thing": { version: "2.0.0", license: "GPL-3.0" } });
+    const failing = (await env.run(activities.runChecks, build.id)) as Awaited<
+      ReturnType<typeof activities.runChecks>
+    >;
+    lock({ react: { version: "19.0.0", license: "MIT" } });
+    const passing = await env.run(activities.runChecks, build.id);
+
+    expect(failing.ok).toBe(false);
+    expect(failing.output).toContain("frontend: copyleft-thing@2.0.0 is licensed GPL-3.0");
+    expect(passing).toEqual({ ok: true, output: "" });
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Checking the app's packages for security holes and licenses",
+        "The app's packages have a security hole or a license it cannot ship (1 problem)",
+        "The app's packages have no fixable security hole and allowed licenses",
+      ])
+    );
+    expect(
+      await db.select().from(buildDependencies).where(eq(buildDependencies.buildId, build.id))
+    ).toEqual([
+      { buildId: build.id, dir: "frontend", name: "react", version: "19.0.0", license: "MIT" },
+    ]);
   });
 
   it("writes the page title and icon into the app and commits them, and takes the icon away again", async () => {
