@@ -881,11 +881,46 @@ export const createActivities = (
     return url;
   };
 
+  // Makes production run `commit` and answers its address. If it cannot start, production goes
+  // back to the commit it was running, `project.productionCommit`, once, and the step fails either
+  // way. An app with nothing live yet has nothing to go back to. Promote and roll back share it.
+  // Known limit: `make up` may already have run `commit`'s migrations against production's
+  // database before failing. The old code is safe on that database only if those migrations were
+  // additions, which the template does not enforce until schmeide/template#25 lands.
+  const moveProduction = async (
+    project: Project,
+    commit: string,
+    buildId: number
+  ): Promise<string> => {
+    const start = async (target: string) => {
+      if (!config.runner) await checkOutProduction(project, target, buildId);
+      return up(project, "production", buildId, target);
+    };
+    const reason = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+    const running = project.productionCommit;
+    try {
+      return await start(commit);
+    } catch (cause) {
+      if (running === null || running === commit) throw cause;
+      const failed = `Version could not start: ${reason(cause)}.`;
+      await event(buildId, "deploy", `Putting your live app back on ${running.slice(0, 12)}`);
+      try {
+        await start(assertCommit(running));
+      } catch (back) {
+        throw ApplicationFailure.nonRetryable(
+          `${failed} Your live app could not go back to the version it was running either: ${reason(back)}`
+        );
+      }
+      throw ApplicationFailure.nonRetryable(
+        `${failed} Your live app is back on the version it was running.`
+      );
+    }
+  };
+
   // Production runs `commit`; every passed build staging held is now live.
   // On the cluster, `main` records it, moved forward once production answers.
   const promote = async (project: Project, commit: string, buildId: number) => {
-    if (!config.runner) await checkOutProduction(project, commit, buildId);
-    const url = await up(project, "production", buildId, commit);
+    const url = await moveProduction(project, commit, buildId);
     // Recorded before main moves: production runs `commit` now, whether or not the push works.
     await db
       .update(projects)
