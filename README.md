@@ -9,11 +9,40 @@ Run `make` to see every target.
 ```sh
 make setup    # install nvm, Node, and dependencies
 make serve    # start the Vite dev server
+make serve/cloud  # the server and Vite against the cloud's Postgres and Temporal
 make build    # typecheck and build the deployable site into dist/
 make test     # run tests
 make check    # lint, typecheck, and format checks
 make fix      # apply lint and format fixes
 ```
+
+## Serving against the cloud
+
+`make serve/cloud` runs only the platform server and Vite on your machine, against the cloud's Postgres and Temporal,
+with no Docker containers for either (builds still use your local docker, git, and `claude`).
+`make serve/cloud/watch` also reloads the server on code changes.
+
+One-time setup:
+
+1. Get AKS access and install Telepresence, following [schmeide/iac](https://github.com/schmeide/iac).
+2. Read the Postgres password (schmeide/iac documents where it lives) and build the URL with `sslmode=require`:
+
+   ```sh
+   export DATABASE_URL='postgres://<user>:<password>@<host>:5432/schmeide?sslmode=require'
+   ```
+
+Each time: `telepresence connect`, then `make serve/cloud`. The target fails with a pointer to `telepresence connect`
+when Temporal (`temporal-frontend.temporal:7233`) is unreachable, and refuses to run on the local `DATABASE_URL`.
+
+The database is shared, so:
+
+- Migrations do not run by default. Pass `MIGRATE=1` to apply them.
+- The local logins are not seeded.
+- Your server is also a Temporal worker, and polls its own task queue, `schmeide-$USER` (override with
+  `SCHMEIDE_TASK_QUEUE`), so laptops do not take each other's builds. A build you start runs only on your worker: it
+  waits while your laptop is off.
+- Everyone shares the one `schmeide` database, so workflow IDs (`build-<build id>`) come from one sequence and cannot
+  collide. A per-developer database would also need its own Temporal namespace.
 
 ## Layout
 
