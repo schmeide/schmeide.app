@@ -109,6 +109,7 @@ import { getDesign, pickLook, pickLookSchema } from "./services/designs.ts";
 import { readWebsite, type WebsiteDeps } from "./services/website.ts";
 import {
   approveSpec,
+  buildWaitingChanges,
   createProject,
   deleteProject,
   discardStaging,
@@ -527,6 +528,10 @@ export const appRouter = t.router({
     ),
     discard: building(projectIdSchema).mutation(({ ctx, input }) =>
       discardStaging(ctx, { id: input.id, byUserId: ctx.person.id })
+    ),
+    // After a failed or canceled build; CONFLICT while one runs.
+    buildWaiting: building(projectIdSchema).mutation(({ ctx, input }) =>
+      buildWaitingChanges(ctx, input.id)
     ),
     stop: building(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
     delete: onProject(projectIdSchema).mutation(({ ctx, input }) => deleteProject(ctx, input.id)),

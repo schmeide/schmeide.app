@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useRef, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
-import { useRefreshProjects, useTRPC, type Build } from "../trpc";
+import { useRefreshProjects, useTRPC, type Build, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
 
 import stepStyles from "./Step.module.css";
@@ -114,13 +114,44 @@ function QueuedChange({ build, position }: { readonly build: Build; readonly pos
   );
 }
 
+// After a failed or canceled build the queue waits; this starts its oldest change.
+function BuildWaiting({ project }: { readonly project: Project }) {
+  const trpc = useTRPC();
+  const refresh = useRefreshProjects();
+  const start = useMutation(
+    trpc.projects.buildWaiting.mutationOptions({ onSettled: () => refresh() })
+  );
+  if (project.status !== "failed" && project.status !== "stopped") return null;
+  return (
+    <>
+      <div className={stepStyles.actions}>
+        <button
+          type="button"
+          onClick={() => start.mutate({ id: project.id })}
+          disabled={start.isPending}
+        >
+          {start.isPending ? copy.project.queueStarting : copy.project.queueBuildNow}
+        </button>
+      </div>
+      <ErrorNote error={start.error} />
+    </>
+  );
+}
+
 // Changes waiting for the running build, in the order they will be built.
-export function QueuedChanges({ queued }: { readonly queued: readonly Build[] }) {
+export function QueuedChanges({
+  project,
+  queued,
+}: {
+  readonly project: Project;
+  readonly queued: readonly Build[];
+}) {
   if (queued.length === 0) return null;
   return (
     <section aria-labelledby="queue" className={stepStyles.step}>
       <h2 id="queue">{copy.project.queueTitle}</h2>
       <p className={stepStyles.muted}>{copy.project.queueIntro}</p>
+      <BuildWaiting project={project} />
       <ol className={styles.list}>
         {queued.map((build, index) => (
           <QueuedChange key={build.id} build={build} position={index + 1} />

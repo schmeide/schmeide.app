@@ -15,6 +15,7 @@ import { appendEvent, finishBuild, getBuild, listEvents, recordUsage } from "../
 import { ConflictError, NotFoundError } from "../errors.ts";
 import {
   approveSpec,
+  buildWaitingChanges,
   createProject,
   deleteProject,
   deleteProjectRows,
@@ -575,6 +576,37 @@ describe("the change queue", () => {
     await pass(retry.build.id, project.id);
     expect((await startNextChange(deps, project.id))?.id).toBe(queued.build.id);
     await finishBuild(db, queued.build.id);
+  });
+
+  it("builds the oldest waiting change on request after a failed or canceled build", async () => {
+    const { deps, workflows, project, build } = await building();
+    const first = await requestChange(deps, { id: project.id, request: "first" });
+    const second = await requestChange(deps, { id: project.id, request: "second" });
+
+    // Refused while a build runs: the queue moves on by itself then.
+    await expect(buildWaitingChanges(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
+
+    await finishBuild(db, build.id, undefined, "canceled");
+    await transition(db, project.id, ["building"], { status: "stopped" });
+
+    expect((await buildWaitingChanges(deps, project.id)).id).toBe(first.build.id);
+    expect((await getBuild(db, first.build.id)).status).toBe("running");
+    expect((await getBuild(db, second.build.id)).status).toBe("queued");
+    expect((await findProject(db, project.id)).status).toBe("building");
+    expect(workflows.start).toHaveBeenLastCalledWith(
+      "buildWorkflow",
+      expect.objectContaining({ workflowId: `build-${first.build.id}` })
+    );
+    await expect(buildWaitingChanges(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
+
+    await finishBuild(db, first.build.id, undefined, "failed");
+    await transition(db, project.id, ["building"], { status: "failed" });
+    expect((await buildWaitingChanges(deps, project.id)).id).toBe(second.build.id);
+    await finishBuild(db, second.build.id);
+    await transition(db, project.id, ["building"], { status: "failed" });
+
+    // Nothing left waiting.
+    await expect(buildWaitingChanges(deps, project.id)).rejects.toBeInstanceOf(ConflictError);
   });
 
   it("edits and removes a queued change, and refuses once it has started", async () => {
