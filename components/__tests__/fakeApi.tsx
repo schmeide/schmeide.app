@@ -145,6 +145,8 @@ export const aBuild = (overrides: Partial<Build> = {}): Build => ({
   version: null,
   baseCommit: null,
   release: null,
+  additive: null,
+  fromCopyId: null,
   byUserId: null,
   startedAt: new Date(),
   finishedAt: null,
