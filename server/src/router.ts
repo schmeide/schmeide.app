@@ -154,7 +154,12 @@ export type Context = AppContext & {
   readonly responseCookies: string[];
 };
 
-const t = initTRPC.context<Context>().create({ transformer: superjson });
+// Stack traces in error responses are opt-in (SCHMEIDE_ENV=development, set by the Makefile), never
+// inferred from NODE_ENV, so a deployed image cannot leak file paths by accident.
+const t = initTRPC.context<Context>().create({
+  transformer: superjson,
+  isDev: process.env.SCHMEIDE_ENV === "development",
+});
 
 const procedure = t.procedure.use(async ({ next }) => {
   const result = await next();

@@ -28,7 +28,8 @@ COPY server server
 
 RUN mkdir /data && chown node:node /data
 USER node
-ENV SCHMEIDE_HOST=0.0.0.0 \
+ENV NODE_ENV=production \
+    SCHMEIDE_HOST=0.0.0.0 \
     PORT=3100 \
     SCHMEIDE_DATA_DIR=/data
 VOLUME /data
