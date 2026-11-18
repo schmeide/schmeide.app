@@ -18,6 +18,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
@@ -738,6 +739,12 @@ export class RollBackRefusedError extends ConflictError {
     this.copies = copies;
   }
 }
+
+export const rollBackSchema = z.object({
+  id: z.number().int().positive(),
+  version: z.number().int().positive(),
+  withInformationFrom: z.number().int().positive().optional(),
+});
 
 export const rollBackRequest = (version: number): string => `Put version ${version} live`;
 

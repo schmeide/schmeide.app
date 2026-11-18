@@ -2,7 +2,9 @@
 // running server, then deletes the project (deployment, volumes, workspace, rows) unless KEEP=1.
 // It signs in as an approved account it makes for the run and removes afterwards. Exits non-zero on failure. E2E_CONCURRENT=1 (set by `make e2e/fake`) builds two projects at once
 // and queues a change on the first while its build runs; the second then gets a page title and icon,
-// checked on the deployed app.
+// checked on the deployed app, is put live, and then goes back to its first version keeping a row
+// written to the live database after the change.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { createTRPCClient, httpLink } from "@trpc/client";
@@ -97,6 +99,55 @@ const checkSite = async (projectId: number) => {
   await expectSite(projectId, staged.project.previewUrl, true);
 };
 
+const titleAt = async (url: string) =>
+  /<title>(.*)<\/title>/.exec(await (await fetch(`${url}/`)).text())?.[1] ?? "";
+
+// SQL against the live app's database, through its Compose project as the server copies it.
+const liveSql = (slug: string, sql: string) =>
+  execFileSync("docker", [
+    "compose",
+    "-p",
+    `schmeide-${slug}`,
+    "exec",
+    "-T",
+    "db",
+    "psql",
+    "-U",
+    "postgres",
+    "-d",
+    "app",
+    "-tAc",
+    sql,
+  ])
+    .toString()
+    .trim();
+
+// After the change is live: writes a row, puts the first version live keeping today's
+// information, and checks production serves the first version's page with the row still there.
+const checkRollBack = async (
+  projectId: number,
+  slug: string,
+  first: { version: number; title: string }
+) => {
+  const log = logAs(projectId);
+  liveSql(
+    slug,
+    "CREATE TABLE e2e_marks (note text); INSERT INTO e2e_marks VALUES ('after the change')"
+  );
+  const { build } = await api.projects.rollBack.mutate({ id: projectId, version: first.version });
+  log(`build ${build.id} puts version ${first.version} live again`);
+  await waitForBuild(projectId, build.id);
+  const { project, liveVersion } = await api.projects.get.query({ id: projectId });
+  if (liveVersion !== first.version || !project.previewUrl)
+    throw new Error(`version ${liveVersion} is live, not ${first.version}`);
+  const title = await titleAt(project.previewUrl);
+  if (title !== first.title)
+    throw new Error(`the live app's page title is ${title}, not ${first.title}`);
+  if (liveSql(slug, "SELECT note FROM e2e_marks") !== "after the change")
+    throw new Error("the row written after the change is gone from the live app");
+  log(`version ${first.version} is live again with its page title and today's information`);
+};
+
 const expectSite = async (projectId: number, url: string, applied: boolean) => {
   const page = await (await fetch(`${url}/`)).text();
   if (page.includes("<title>E2E &lt;title&gt; &amp; icon</title>") !== applied)
@@ -158,7 +209,21 @@ const run = async (projectId: number, queueChange: boolean) => {
     log(`GET ${project.previewUrl}${path} -> ${response.status}`);
     if (response.status !== 200) throw new Error(`${path} returned ${response.status}`);
   }
-  if (concurrent && !queueChange) await checkSite(projectId);
+  if (concurrent && !queueChange) {
+    // The build is numbered as it finishes, just after the app goes live.
+    let { liveVersion } = await api.projects.get.query({ id: projectId });
+    for (
+      ;
+      liveVersion === null;
+      { liveVersion } = await api.projects.get.query({ id: projectId })
+    ) {
+      checkDeadline();
+      await sleep(1000);
+    }
+    const first = { version: liveVersion, title: await titleAt(project.previewUrl) };
+    await checkSite(projectId);
+    await checkRollBack(projectId, project.slug, first);
+  }
   return project.previewUrl;
 };
 
