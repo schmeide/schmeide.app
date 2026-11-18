@@ -19,7 +19,7 @@ import {
 } from "../db/schema.ts";
 import { recordUsage, type RunUsage } from "./builds.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
-import { findProject, transition } from "./projects.ts";
+import { findProject, statusWord, transition } from "./projects.ts";
 
 // After this many questions the interview ends whatever the model says, so it cannot run on.
 export const MAX_QUESTIONS = 30;
@@ -86,7 +86,7 @@ const editableProject = async (db: Db, id: number): Promise<Project> => {
   const project = await findProject(db, id);
   if (!EDITABLE.some((status) => status === project.status)) {
     throw new ConflictError(
-      `Project ${id} is ${project.status}; its plan can only change before it is built`
+      `The plan can only change before the app is built, and it is ${statusWord(project.status)} now.`
     );
   }
   return project;

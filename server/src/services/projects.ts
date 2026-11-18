@@ -57,6 +57,25 @@ const assertBuildsOn = ({ buildsOff }: Pick<Deps, "buildsOff">): void => {
 
 type Status = Project["status"];
 
+// A status as the page names it (`copy.status[status].label` in data/copy.ts; keep the two the
+// same), quoted, so an error never shows the enum value.
+export const statusWord = (status: Status): string =>
+  `“${
+    {
+      draft: "Describing",
+      spec_generating: "Writing the spec",
+      spec_ready: "Spec ready to review",
+      building: "Building",
+      live: "Live",
+      failed: "Build failed",
+      stopped: "Offline",
+    }[status]
+  }”`;
+
+// "A, B or C".
+const either = (words: readonly string[]): string =>
+  words.length < 2 ? words.join("") : `${words.slice(0, -1).join(", ")} or ${words.at(-1)}`;
+
 export const slugify = (name: string): string =>
   name
     .toLowerCase()
@@ -358,8 +377,9 @@ export const transition = async (
     .returning();
   if (project) return project;
   const current = await findProject(db, id);
+  // The page that asked showed an older status; the client refetches it on a conflict.
   throw new ConflictError(
-    `Project ${id} is ${current.status}; this needs it to be ${from.join(" or ")}`
+    `This page was out of date: the app is ${statusWord(current.status)} now, and this needs it to be ${either(from.map(statusWord))}.`
   );
 };
 
@@ -704,7 +724,9 @@ export const stopProject = async (
     return project;
   }
   if (!["live", "failed", "stopped"].includes(project.status)) {
-    throw new ConflictError(`Project ${id} is ${project.status}; there is no deployment to stop`);
+    throw new ConflictError(
+      `There is nothing to take offline: the app is ${statusWord(project.status)} now.`
+    );
   }
   await workflows.start<typeof stopWorkflow>("stopWorkflow", {
     taskQueue,
@@ -721,7 +743,13 @@ export const deleteProject = async (
 ): Promise<void> => {
   const project = await findProject(db, id);
   if (project.status === "building" || project.status === "spec_generating") {
-    throw new ConflictError(`Project ${id} is ${project.status}; stop it first`);
+    throw new ConflictError(
+      `The app cannot be deleted while it is ${statusWord(project.status)}. ${
+        project.status === "building"
+          ? "Stop the build first, then delete it."
+          : "Wait until the spec is written, then delete it."
+      }`
+    );
   }
   const handle = await workflows.start<typeof deleteWorkflow>("deleteWorkflow", {
     taskQueue,

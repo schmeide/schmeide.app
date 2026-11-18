@@ -418,6 +418,10 @@ describe("project state machine", () => {
     const { deps, workflows } = fakeWorkflows();
     const draft = await createProject(db, { name: `p ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
     await expect(approveSpec(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
+    // In the page's words for statuses, never the enum values or the project's id.
+    await expect(approveSpec(deps, draft.id)).rejects.toThrow(
+      "This page was out of date: the app is “Describing” now, and this needs it to be “Spec ready to review”."
+    );
 
     const ready = await specReady();
     const other = await specReady();
@@ -471,7 +475,9 @@ describe("project state machine", () => {
     expect(startArgs(workflows)).toContain("stopWorkflow");
 
     const draft = await createProject(db, { name: `p ${randomUUID()}`, tenantId: DEMO_TENANT_ID });
-    await expect(stopProject(deps, draft.id)).rejects.toBeInstanceOf(ConflictError);
+    await expect(stopProject(deps, draft.id)).rejects.toThrow(
+      "There is nothing to take offline: the app is “Describing” now."
+    );
   });
 });
 
@@ -670,7 +676,9 @@ describe("deleting a project", () => {
     const ready = await specReady();
     const { build } = await approveSpec(deps, ready.id);
     try {
-      await expect(deleteProject(deps, ready.id)).rejects.toBeInstanceOf(ConflictError);
+      await expect(deleteProject(deps, ready.id)).rejects.toThrow(
+        "The app cannot be deleted while it is “Building”. Stop the build first, then delete it."
+      );
     } finally {
       await finishBuild(db, build.id);
     }
