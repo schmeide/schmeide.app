@@ -16,7 +16,7 @@ _Why:_ Knowing how an order really travels shows where the app can save you the 
 
 **Answer:** The café sends its order by WhatsApp or email, usually the day before before 2pm. That afternoon I write tomorrow's bake list by hand from the messages, Tom and I bake overnight, and I deliver at 6am in the van. The café isn't billed until the end-of-month invoice, which I make in a spreadsheet, and I'm not sure of their exact payment terms after that.
 
-_3.7s, $0.015_
+_Took:_ 3.7s, $0.015
 
 ### 2. Roughly how many partner cafés do you supply, and how many orders or items does a typical day's bake list have?
 
@@ -26,7 +26,7 @@ _Choices:_ Under 5 cafés, a short list / 5 to 15 cafés, a medium list / More t
 
 **Answer:** 5 to 15 cafés, a medium list
 
-_5.2s, $0.019_
+_Took:_ 5.2s, $0.019
 
 ### 3. What do you sell, and do the cafés order the same things most days or does it change a lot?
 
@@ -36,7 +36,7 @@ _Choices:_ Mostly the same order every day / Same each week, with some days diff
 
 **Answer:** Same each week, with some days different
 
-_3.9s, $0.017; raises standing orders_
+_Took:_ 3.9s, $0.017; raises standing orders
 
 ### 4. Which part of this takes the most time or goes wrong most often today?
 
@@ -46,7 +46,7 @@ _Choices:_ Reading WhatsApp and email messages and writing the bake list / Missi
 
 **Answer:** Missing or wrong orders that arrive late or unclear
 
-_7.8s, $0.024_
+_Took:_ 7.8s, $0.024
 
 ### 5. When a café's order is late or unclear, what happens now, and what would you want the app to do about it?
 
@@ -56,7 +56,7 @@ _Choices:_ Bake their usual order anyway / Message the café to check / Leave it
 
 **Answer:** Message the café to check
 
-_3.5s, $0.017; builds on an answer_
+_Took:_ 3.5s, $0.017; builds on an answer
 
 ### 6. What would you most want to see at a glance first thing each morning?
 
@@ -66,7 +66,7 @@ _Choices:_ Which cafés haven't sent tomorrow's order yet / Tomorrow's full bake
 
 **Answer:** Today's delivery list
 
-_5.4s, $0.020_
+_Took:_ 5.4s, $0.020
 
 ### 7. A café realises at 4pm that they need more croissants tomorrow, after the 2pm close. What should happen?
 
@@ -76,7 +76,7 @@ _Choices:_ Refuse it; the order is locked at 2pm / Let them send it, and I decid
 
 **Answer:** Let them send it, and I decide whether to accept
 
-_6.5s, $0.021_
+_Took:_ 6.5s, $0.021
 
 ### 8. For the end-of-month invoices, which of these do you want the app to do on day one?
 
@@ -86,7 +86,7 @@ _Choices:_ Add up each café's deliveries and make the invoice / Just give me th
 
 **Answer:** Just give me the month's totals per café; I'll still invoice myself
 
-_5.9s, $0.021_
+_Took:_ 5.9s, $0.021
 
 ### 9. To total each café's month, the app needs prices. Does every café pay the same price for an item?
 
@@ -96,7 +96,7 @@ _Choices:_ Same price for everyone / Some cafés have their own prices / Prices 
 
 **Answer:** Some cafés have their own prices
 
-_7.5s, $0.023_
+_Took:_ 7.5s, $0.023
 
 ### 10. A café has sent tomorrow's order before 2pm, then wants to cancel or change it. Up to when should they be allowed to do that themselves?
 
@@ -106,7 +106,7 @@ _Choices:_ Until 2pm the day before, then they must ask me / Any time until I st
 
 **Answer:** Until 2pm the day before, then they must ask me
 
-_6.1s, $0.020_
+_Took:_ 6.1s, $0.020
 
 ## The plan at the end
 

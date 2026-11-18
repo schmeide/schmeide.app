@@ -212,7 +212,7 @@ const transcriptText = (
       "",
       `**Answer:** ${exchange.answer}`,
       "",
-      `_${(exchange.ms / 1000).toFixed(1)}s, ${money(exchange.costUsd)}${marks.length ? `; ${marks.join("; ")}` : ""}_`,
+      `_Took:_ ${(exchange.ms / 1000).toFixed(1)}s, ${money(exchange.costUsd)}${marks.length ? `; ${marks.join("; ")}` : ""}`,
     ].join("\n");
   });
   const plan = result.items.map(

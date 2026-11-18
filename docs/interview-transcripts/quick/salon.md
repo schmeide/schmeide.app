@@ -16,7 +16,7 @@ _Why:_ Knowing what an appointment is for tells me how booking should work for y
 
 **Answer:** We sell hair services: women's and men's cuts, color, highlights and blow-dries. Our clients are mostly regulars from the neighborhood, and some come in every six weeks.
 
-_3.9s, $0.014_
+_Took:_ 3.9s, $0.014
 
 ### 2. Today, how does a client get an appointment with you, from first asking to paying after the service?
 
@@ -24,7 +24,7 @@ _Why:_ Knowing how it works now shows what the online booking has to take over.
 
 **Answer:** Clients phone or message me on Instagram to ask for a slot, and I write it in the big paper book at the desk. They pay at the till by card after the appointment.
 
-_4.3s, $0.015_
+_Took:_ 4.3s, $0.015
 
 ### 3. How many people cut and color hair at Studio Lumen, and roughly how many appointments do you have in a normal week?
 
@@ -32,7 +32,7 @@ _Why:_ The number of stylists and appointments decides how the booking calendar 
 
 **Answer:** Three of us cut and color: me, Mia and Joe. Our junior only washes hair. We get about 120 appointments a week.
 
-_4.6s, $0.016_
+_Took:_ 4.6s, $0.016
 
 ### 4. What goes wrong most with the paper book and phone or Instagram bookings today?
 
@@ -42,7 +42,7 @@ _Choices:_ Double bookings or clashes / Clients not turning up / Time lost answe
 
 **Answer:** Double bookings or clashes
 
-_4.0s, $0.017_
+_Took:_ 4.0s, $0.017
 
 ### 5. When a clash happens, what usually causes it?
 
@@ -52,7 +52,7 @@ _Choices:_ Phone and Instagram bookings for the same slot / Different appointmen
 
 **Answer:** Phone and Instagram bookings for the same slot
 
-_4.4s, $0.017_
+_Took:_ 4.4s, $0.017
 
 ### 6. What would save you the most time each week, and what do you want to see at a glance on a Monday morning?
 
@@ -62,7 +62,7 @@ _Choices:_ Each stylist's week and open slots / Who is booked in today / Gaps an
 
 **Answer:** Each stylist's week and open slots
 
-_4.4s, $0.017_
+_Took:_ 4.4s, $0.017
 
 ### 7. When a client books online, how should they choose their slot?
 
@@ -72,7 +72,7 @@ _Choices:_ Pick a stylist, then see that stylist's open times / Pick a time, and
 
 **Answer:** Both ways should work
 
-_4.5s, $0.018_
+_Took:_ 4.5s, $0.018
 
 ### 8. Besides clients booking online, which of these steps should the app handle from the first day?
 
@@ -82,7 +82,7 @@ _Choices:_ You and staff enter phone and Instagram bookings in the same calendar
 
 **Answer:** You and staff enter phone and Instagram bookings in the same calendar, Reminders sent to clients before their appointment
 
-_6.3s, $0.020_
+_Took:_ 6.3s, $0.020
 
 ### 9. You take card payment at the till after the appointment. Should that stay as it is, or should the app take anything online?
 
@@ -92,7 +92,7 @@ _Choices:_ Payment stays at the till / Clients pay a deposit online when booking
 
 **Answer:** Clients pay a deposit online when booking
 
-_10.7s, $0.041; builds on an answer; raises no-shows; raises deposits and part-payments_
+_Took:_ 10.7s, $0.041; builds on an answer; raises no-shows; raises deposits and part-payments
 
 ### 10. If a client cancels or doesn't turn up after paying a deposit, what should happen to the deposit?
 
@@ -102,7 +102,7 @@ _Choices:_ Refunded if they cancel 24 hours ahead, otherwise kept / Always kept 
 
 **Answer:** Refunded if they cancel 24 hours ahead, otherwise kept
 
-_7.2s, $0.023; raises no-shows; raises cancellation rules_
+_Took:_ 7.2s, $0.023; raises no-shows; raises cancellation rules
 
 ## The plan at the end
 

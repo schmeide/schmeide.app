@@ -16,7 +16,7 @@ _Why:_ Knowing who sends the receipts and what you do with them shapes everythin
 
 **Answer:** I'm a self-employed bookkeeper with one part-time assistant. I look after about 40 small businesses, mostly tradespeople, a few shops, and two cafés, entering their receipts and statements into their accounting software and sending them a short monthly report.
 
-_3.7s, $0.014_
+_Took:_ 3.7s, $0.014
 
 ### 2. How do clients get you their receipts and statements today, and what happens to them once they arrive?
 
@@ -26,7 +26,7 @@ _Choices:_ Photos by text or WhatsApp / Email / Paper handed over or posted / Ba
 
 **Answer:** Photos by text or WhatsApp, Email, Paper handed over or posted
 
-_4.8s, $0.017; builds on an answer_
+_Took:_ 4.8s, $0.017; builds on an answer
 
 ### 3. Walk me through a typical month for one client: when do their receipts arrive, and how do you find out something is missing?
 
@@ -34,7 +34,7 @@ _Why:_ Chasing missing receipts is often where a bookkeeper's time goes, and it 
 
 **Answer:** Their receipts and bank statements usually come in during the month by email, WhatsApp, or as a shoebox of paper, and often a lot of it lands at the end of the quarter. I check my spreadsheet of what each client has sent this month, and if something's missing I chase them by email.
 
-_4.7s, $0.016; raises late payers_
+_Took:_ 4.7s, $0.016; raises late payers
 
 ### 4. What goes wrong or eats the most time today when you chase a client for missing receipts?
 
@@ -44,7 +44,7 @@ _Choices:_ Clients ignore or are slow to answer my chasing / I can't tell what i
 
 **Answer:** I can't tell what is missing until I sort everything
 
-_4.7s, $0.017_
+_Took:_ 4.7s, $0.017
 
 ### 5. What is the last step of a month for one client: after you enter everything, how does the monthly report reach them and does anything get paid or signed off?
 
@@ -54,7 +54,7 @@ _Choices:_ I email the report and that's it / I email the report and they must a
 
 **Answer:** I email the report and that's it
 
-_4.9s, $0.017_
+_Took:_ 4.9s, $0.017
 
 ### 6. On a Monday morning, what would you most want to see at a glance across your 40 clients?
 
@@ -64,7 +64,7 @@ _Choices:_ Which clients have sent nothing this month / What each client is stil
 
 **Answer:** What each client is still missing
 
-_6.2s, $0.020_
+_Took:_ 6.2s, $0.020
 
 ### 7. How do you work out that something is missing for a client?
 
@@ -74,7 +74,7 @@ _Choices:_ A bank statement line has no receipt / A fixed checklist each month (
 
 **Answer:** A fixed checklist each month (statements, takings, invoices)
 
-_6.1s, $0.021_
+_Took:_ 6.1s, $0.021
 
 ### 8. Which of these should the app do from the first day, with the rest staying as they are today?
 
@@ -84,7 +84,7 @@ _Choices:_ Clients send receipts and statements in / Tick off the monthly checkl
 
 **Answer:** Clients send receipts and statements in, Tick off the monthly checklist for each client, Send clients a reminder about what's missing
 
-_6.7s, $0.022_
+_Took:_ 6.7s, $0.022
 
 ### 9. You said every client sends statements, takings and invoices. Do some clients differ, such as cafés and shops with daily takings, or tradespeople with none?
 
@@ -94,7 +94,7 @@ _Choices:_ Everyone has exactly the same checklist / Each client has a slightly 
 
 **Answer:** Each client has a slightly different checklist
 
-_7.4s, $0.023; builds on an answer_
+_Took:_ 7.4s, $0.023; builds on an answer
 
 ### 10. Which of these has caused you real trouble when handling clients' receipts?
 
@@ -104,7 +104,7 @@ _Choices:_ A blurry photo I can't read / A receipt filed under the wrong client 
 
 **Answer:** A receipt filed under the wrong client or month, Items arriving too late at quarter end
 
-_8.0s, $0.024_
+_Took:_ 8.0s, $0.024
 
 ## The plan at the end
 

@@ -16,7 +16,7 @@ _Why:_ Invoicing differs a lot between homeowners, landlords and building contra
 
 **Answer:** We're a plumbing business with two plumbers, Dan and Priya, and I go out on jobs too. We do small fixes like leaks and blocked drains, usually the same day, and bigger jobs like new bathrooms, which get a quote first. Our customers are homeowners and a few letting agents who look after rented flats.
 
-_8.6s, $0.018_
+_Took:_ 8.6s, $0.018
 
 ### 2. Walk me through a small same-day fix, like a blocked drain: what happens from the phone call until the money is in? Who sends the invoice, and when?
 
@@ -24,7 +24,7 @@ _Why:_ Knowing how a job really ends in payment shows where invoices get late or
 
 **Answer:** A call or text comes in, I write it in my paper diary and send whoever is free, often Dan or Priya, and it's fixed the same day. They text me what they did and the parts they used, and that evening I type up the invoice in my Word template and email it as a PDF, so I send it. Homeowners pay by card or transfer, letting agents by transfer within a month, and I check the bank app once a week and tick off who has paid.
 
-_4.9s, $0.016_
+_Took:_ 4.9s, $0.016
 
 ### 3. In a normal week, about how many jobs do you invoice?
 
@@ -34,7 +34,7 @@ _Choices:_ Fewer than 10 / 10 to 20 / 20 to 40 / More than 40
 
 **Answer:** 20 to 40
 
-_7.0s, $0.021_
+_Took:_ 7.0s, $0.021
 
 ### 4. What goes wrong or takes the most time today: typing invoices each evening, chasing letting agents who pay late, or checking the bank app once a week?
 
@@ -44,7 +44,7 @@ _Choices:_ Typing up invoices each evening / Chasing late payers / Checking the 
 
 **Answer:** Typing up invoices each evening
 
-_3.9s, $0.017; builds on an answer; raises late payers_
+_Took:_ 3.9s, $0.017; builds on an answer; raises late payers
 
 ### 5. When you open the app on a Monday morning, what do you most want to see at a glance?
 
@@ -54,7 +54,7 @@ _Choices:_ Who still owes me money / Which letting agents are overdue / Jobs don
 
 **Answer:** Who still owes me money
 
-_3.9s, $0.018_
+_Took:_ 3.9s, $0.018
 
 ### 6. Plumbers now text you what they did and the parts used. Should Dan and Priya enter that themselves on their phones after each job, or keep texting you?
 
@@ -64,7 +64,7 @@ _Choices:_ Dan and Priya enter it themselves / They keep texting and I enter it 
 
 **Answer:** Dan and Priya enter it themselves
 
-_4.8s, $0.018; builds on an answer_
+_Took:_ 4.8s, $0.018; builds on an answer
 
 ### 7. You write each call or text in your paper diary and choose who goes. Should the app take over that step, or stay on paper for now?
 
@@ -74,7 +74,7 @@ _Choices:_ App takes over the diary: log the call and who is sent / Keep the pap
 
 **Answer:** Keep the paper diary for now
 
-_6.9s, $0.022; builds on an answer_
+_Took:_ 6.9s, $0.022; builds on an answer
 
 ### 8. For bigger jobs like new bathrooms, you quote first. Should the app write and send quotes, or do you keep doing quotes as you do now?
 
@@ -84,7 +84,7 @@ _Choices:_ App writes and sends quotes too, from day one / Quotes later; keep as
 
 **Answer:** Quotes later; keep as now for the first version
 
-_7.5s, $0.021; builds on an answer; raises a job changing after the quote_
+_Took:_ 7.5s, $0.021; builds on an answer; raises a job changing after the quote
 
 ### 9. Today you check the bank app once a week and tick off who has paid. On day one, should you tick invoices as paid yourself in the app?
 
@@ -94,7 +94,7 @@ _Choices:_ Yes, I tick them off myself in the app / I'd like it to match bank pa
 
 **Answer:** Yes, I tick them off myself in the app
 
-_6.6s, $0.022; builds on an answer_
+_Took:_ 6.6s, $0.022; builds on an answer
 
 ### 10. When you type up an invoice today, how do you work out the price?
 
@@ -104,7 +104,7 @@ _Choices:_ Call-out fee plus hourly rate plus parts / Fixed price for each kind 
 
 **Answer:** I decide the total each time
 
-_6.4s, $0.023_
+_Took:_ 6.4s, $0.023
 
 ## The plan at the end
 
