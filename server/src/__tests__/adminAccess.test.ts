@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
+import { copy } from "../../../data/copy.ts";
 import {
   adminActions,
   approvedEmails,
@@ -279,6 +280,7 @@ describe("removing a person from a business", () => {
     );
     expect(last.code).toBe("CONFLICT");
     expect(last.message).toContain("Add another owner first");
+    expect(last.message).toContain(`“${copy.business.suspend}”`);
     expect(
       (
         await mutate(
@@ -435,7 +437,7 @@ describe("a suspended business", () => {
     );
     expect(again.code).toBe("CONFLICT");
     expect(again.message).toContain("already suspended");
-    expect(again.message).toContain("“Restore this business”");
+    expect(again.message).toContain(`“${copy.business.restore}”`);
 
     const restored = await mutate(
       "admin.businesses.restore",
