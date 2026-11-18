@@ -1053,6 +1053,52 @@ describe("kubernetes mode", () => {
     expect(row.stagingCommit).toBe(live);
   });
 
+  it("pushes a passed build's version ref, and keeps it after a discard", async () => {
+    const { config, forgejo, root } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const repo = forgejo.bare(`t${project.tenantId}`, project.slug);
+    const live = git(repo, "rev-parse", "staging");
+    await db.update(builds).set({ commit: live }).where(eq(builds.id, build.id));
+    await env.run(activities.finishBuild, build.id);
+    expect((await db.select().from(builds).where(eq(builds.id, build.id)))[0]).toMatchObject({
+      version: 1,
+      commit: live,
+      baseCommit: null,
+    });
+    expect(git(repo, "rev-parse", "refs/schmeide/versions/1")).toBe(live);
+
+    const [change] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "change", request: "x", status: "running" })
+      .returning();
+    await env.run(activities.prepareWorkspace, change.id);
+    expect((await db.select().from(builds).where(eq(builds.id, change.id)))[0].baseCommit).toBe(
+      live
+    );
+    const ahead = builderCommit(root, repo);
+    await db.update(builds).set({ commit: ahead }).where(eq(builds.id, change.id));
+    await env.run(activities.finishBuild, change.id);
+    expect(git(repo, "rev-parse", "refs/schmeide/versions/2")).toBe(ahead);
+
+    const [discard] = await db
+      .insert(builds)
+      .values({
+        projectId: project.id,
+        kind: "discard",
+        request: "",
+        status: "running",
+        commit: live,
+      })
+      .returning();
+    await env.run(activities.release, discard.id);
+    expect(git(repo, "rev-parse", "staging")).toBe(live);
+    expect(git(repo, "rev-parse", "refs/schmeide/versions/2")).toBe(ahead);
+    expect((await db.select().from(builds).where(eq(builds.id, discard.id)))[0].version).toBe(null);
+  });
+
   it("stops both copies by scaling them to zero", async () => {
     const { config, hosting } = setup();
     const { project } = await newBuild();

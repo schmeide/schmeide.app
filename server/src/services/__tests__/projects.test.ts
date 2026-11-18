@@ -870,6 +870,55 @@ describe("the version being worked on", () => {
     return findProject(db, project.id);
   };
 
+  it("returns the version number of what is live and what is being worked on", async () => {
+    const project = await createProject(db, {
+      name: `n ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    const live = "c".repeat(40);
+    const working = "d".repeat(40);
+    await db
+      .update(projects)
+      .set({ productionCommit: live, stagingCommit: working })
+      .where(eq(projects.id, project.id));
+    await db.insert(builds).values([
+      {
+        projectId: project.id,
+        kind: "initial",
+        request: "spec",
+        status: "passed",
+        commit: live,
+        version: 1,
+      },
+      {
+        projectId: project.id,
+        kind: "change",
+        request: "x",
+        status: "passed",
+        commit: working,
+        version: 4,
+      },
+      {
+        projectId: project.id,
+        kind: "promote",
+        request: "",
+        status: "passed",
+        commit: working,
+      },
+    ]);
+
+    expect(await getProject(db, project.id)).toMatchObject({ liveVersion: 1, workingVersion: 4 });
+
+    await db
+      .update(projects)
+      .set({ productionCommit: "e".repeat(40), stagingCommit: null })
+      .where(eq(projects.id, project.id));
+    expect(await getProject(db, project.id)).toMatchObject({
+      liveVersion: null,
+      workingVersion: null,
+    });
+  });
+
   it("counts the changes customers do not see yet", async () => {
     expect((await getProject(db, (await anApp({}, 2)).id)).unreleased).toBe(2);
     expect((await getProject(db, (await anApp({}, 0)).id)).unreleased).toBe(0);

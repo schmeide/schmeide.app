@@ -128,23 +128,33 @@ export const buildStatus = pgEnum("build_status", [
   "canceled",
 ]);
 
-export const builds = pgTable("builds", {
-  id: serial("id").primaryKey(),
-  projectId: integer("project_id")
-    .notNull()
-    .references(() => projects.id),
-  kind: buildKind("kind").notNull(),
-  request: text("request").notNull(),
-  status: buildStatus("status").notNull().default("running"),
-  error: text("error"),
-  // The full commit of the project's repository this build deployed; null until it has. For
-  // `promote` and `discard`, the commit it moves its copy to.
-  commit: varchar("commit", { length: 40 }),
-  release: buildRelease("release"),
-  byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
-  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
-  finishedAt: timestamp("finished_at", { withTimezone: true }),
-});
+export const builds = pgTable(
+  "builds",
+  {
+    id: serial("id").primaryKey(),
+    projectId: integer("project_id")
+      .notNull()
+      .references(() => projects.id),
+    kind: buildKind("kind").notNull(),
+    request: text("request").notNull(),
+    status: buildStatus("status").notNull().default("running"),
+    error: text("error"),
+    // The full commit of the project's repository this build deployed; null until it has. For
+    // `promote` and `discard`, the commit it moves its copy to.
+    commit: varchar("commit", { length: 40 }),
+    // The project's version, from 1. Null until a passed `initial`, `change`, or `site` build has
+    // a commit of its own. `promote` and `discard` move a copy and get no number.
+    version: integer("version"),
+    // The commit the workspace was on when this build was prepared, before the builder ran.
+    // Null for the first build, which starts from the template commit.
+    baseCommit: varchar("base_commit", { length: 40 }),
+    release: buildRelease("release"),
+    byUserId: text("by_user_id").references(() => users.id, { onDelete: "set null" }),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (table) => [uniqueIndex("builds_project_version_idx").on(table.projectId, table.version)]
+);
 
 // Kept out of projects so project rows, polled by the UI, stay small.
 export const projectIcons = pgTable("project_icons", {

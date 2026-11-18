@@ -2,7 +2,21 @@ import { chmod, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WorkflowExecutionAlreadyStartedError, type WorkflowClient } from "@temporalio/client";
-import { and, asc, count, desc, eq, inArray, isNull, like, lt, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { Db } from "../db/client.ts";
 import {
@@ -306,6 +320,10 @@ export const getProject = async (
   unreleased: number;
   usage: UsageTotals;
   time: TimeTotals;
+  // The version number of production's commit, and of staging's. Null when that commit was never
+  // numbered (an app live before versions existed).
+  liveVersion: number | null;
+  workingVersion: number | null;
 }> => {
   const project = await findProject(db, id);
   const [latestBuild] = await db
@@ -354,6 +372,16 @@ export const getProject = async (
   const [by] = latestBuild?.byUserId
     ? await db.select({ name: users.name }).from(users).where(eq(users.id, latestBuild.byUserId))
     : [];
+  const versionOf = async (commit: string | null): Promise<number | null> => {
+    if (commit === null) return null;
+    const [row] = await db
+      .select({ version: builds.version })
+      .from(builds)
+      .where(and(eq(builds.projectId, id), eq(builds.commit, commit), isNotNull(builds.version)))
+      .orderBy(asc(builds.version))
+      .limit(1);
+    return row?.version ?? null;
+  };
   return {
     project,
     latestBuild: latestBuild ?? null,
@@ -365,6 +393,8 @@ export const getProject = async (
     unreleased: await unreleasedCount(db, id),
     usage: totals,
     time: { ...building, ...builder, builderUnrecorded: Boolean(unrecorded) },
+    liveVersion: await versionOf(project.productionCommit),
+    workingVersion: await versionOf(project.stagingCommit),
   };
 };
 

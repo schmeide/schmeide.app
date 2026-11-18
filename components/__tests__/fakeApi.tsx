@@ -142,6 +142,8 @@ export const aBuild = (overrides: Partial<Build> = {}): Build => ({
   status: "running",
   error: null,
   commit: null,
+  version: null,
+  baseCommit: null,
   release: null,
   byUserId: null,
   startedAt: new Date(),

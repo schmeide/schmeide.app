@@ -1385,6 +1385,104 @@ describe("the two copies", () => {
       expect(isCommit(text)).toBe(false);
     expect(isCommit("0123456789abcdef0123456789abcdef01234567; rm -rf /")).toBe(false);
   });
+
+  const versionRef = (workspace: string, version: number) =>
+    git(workspace, "rev-parse", "--verify", `refs/schmeide/versions/${version}`).trim();
+
+  it("gives a passed change the next number and a ref, and a failed build neither", async () => {
+    const { build, activities, env, workspace, anotherBuild, commitIn } = await prepared();
+    const first = headOf(workspace);
+    await db.update(builds).set({ commit: first }).where(eq(builds.id, build.id));
+    await env.run(activities.finishBuild, build.id);
+    expect(await buildRow(build.id)).toMatchObject({
+      version: 1,
+      baseCommit: null,
+      commit: first,
+    });
+    expect(versionRef(workspace, 1)).toBe(first);
+
+    const second = commitIn("second.ts");
+    const change = await anotherBuild({ commit: second });
+    await env.run(activities.finishBuild, change.id);
+    expect((await buildRow(change.id)).version).toBe(2);
+    expect(versionRef(workspace, 2)).toBe(second);
+
+    const failed = await anotherBuild();
+    await env.run(activities.finishBuild, failed.id, "make test failed");
+    expect(await buildRow(failed.id)).toMatchObject({
+      status: "failed",
+      version: null,
+      commit: null,
+    });
+    expect(() => versionRef(workspace, 3)).toThrow();
+    expect(versionRef(workspace, 2)).toBe(second);
+  });
+
+  it("keeps a discarded version's ref pointing at its commit", async () => {
+    const { project, build, activities, env, workspace, dataDir, anotherBuild, commitIn } =
+      await prepared();
+    const live = headOf(workspace);
+    await db.update(builds).set({ commit: live }).where(eq(builds.id, build.id));
+    await env.run(activities.finishBuild, build.id);
+    const ahead = commitIn("ahead.ts");
+    const change = await anotherBuild({ commit: ahead });
+    await env.run(activities.finishBuild, change.id);
+
+    await db
+      .update(projects)
+      .set({ stagingCommit: ahead, productionCommit: live })
+      .where(eq(projects.id, project.id));
+    const discard = await anotherBuild({ kind: "discard", commit: live });
+    await env.run(activities.release, discard.id);
+    await env.run(activities.finishBuild, discard.id);
+
+    expect(headOf(workspace)).toBe(live);
+    expect(versionRef(workspace, 2)).toBe(ahead);
+    expect(await buildRow(discard.id)).toMatchObject({ version: null, commit: live });
+    expect((await buildRow(change.id)).release).toBe("discarded");
+    // Fetching the commit still works once its version ref keeps it reachable.
+    const fetched = join(dataDir, "fetched");
+    mkdirSync(fetched);
+    git(fetched, "init", "-q");
+    git(fetched, "fetch", "-q", "--no-tags", workspace, ahead);
+    expect(git(fetched, "cat-file", "-t", ahead).trim()).toBe("commit");
+  });
+
+  it("records the workspace HEAD from before the builder as base_commit", async () => {
+    const { build, activities, env, workspace, anotherBuild, commitIn } = await prepared();
+    expect((await buildRow(build.id)).baseCommit).toBeNull();
+    const head = headOf(workspace);
+    const change = await anotherBuild();
+    await env.run(activities.prepareWorkspace, change.id);
+    expect((await buildRow(change.id)).baseCommit).toBe(head);
+    commitIn("built.ts");
+    expect((await buildRow(change.id)).baseCommit).toBe(head);
+    expect(headOf(workspace)).not.toBe(head);
+  });
+
+  it("writes refs for backfilled versions the first time the workspace is reused", async () => {
+    const { build, activities, env, workspace, dataDir, anotherBuild, commitIn } = await prepared();
+    const first = headOf(workspace);
+    const second = commitIn("second.ts");
+    const gone = "a".repeat(40);
+    await db
+      .update(builds)
+      .set({ version: 1, commit: first, status: "passed" })
+      .where(eq(builds.id, build.id));
+    await anotherBuild({ status: "passed", commit: second, version: 2 });
+    await anotherBuild({ status: "passed", commit: gone, version: 3 });
+    const next = await anotherBuild();
+
+    await env.run(activities.prepareWorkspace, next.id);
+
+    expect(versionRef(workspace, 1)).toBe(first);
+    expect(versionRef(workspace, 2)).toBe(second);
+    expect(() => versionRef(workspace, 3)).toThrow();
+    expect(readFileSync(join(dataDir, "logs", `build-${next.id}.log`), "utf8")).toContain(
+      `Version 3's commit ${gone} is already gone`
+    );
+    expect((await buildRow(next.id)).baseCommit).toBe(second);
+  });
 });
 
 // Stands in for the design lead: answers with `answer` as its structured output, or fails.

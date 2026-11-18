@@ -225,6 +225,13 @@
       "when": 1795038989542,
       "tag": "0031_project_shapes",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795039806431,
+      "tag": "0032_build_versions",
+      "breakpoints": true
     }
   ]
 }
