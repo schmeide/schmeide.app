@@ -28,9 +28,19 @@ export type PersonEntry = Outputs["admin"]["people"]["list"]["entries"][number];
 export type HostedProject = Outputs["admin"]["projects"]["list"]["entries"][number];
 export type ProjectResources = Outputs["admin"]["projects"]["resources"][number];
 export type UsageSummaryData = Outputs["admin"]["usage"]["summary"];
+export type BusinessDetails = Outputs["business"]["get"];
+export type Member = BusinessDetails["members"][number];
+export type Invitation = BusinessDetails["invitations"][number];
+export type MemberRole = Member["role"];
 
 // How often a spec in progress, a running build, or its log is checked.
 export const POLL_MS = 2000;
+
+export const useRefreshBusiness = () => {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return () => queryClient.invalidateQueries({ queryKey: trpc.business.pathKey() });
+};
 
 // Refetches every projects.* query after a change.
 export const useRefreshProjects = () => {

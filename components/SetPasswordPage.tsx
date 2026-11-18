@@ -8,6 +8,7 @@ import { signInWithPassword } from "../utils/authApi";
 import { navigate } from "../utils/navigation";
 import { carryPlan, nextPath, pathTo } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
+import { JoinBusiness } from "./JoinBusiness";
 import { Link } from "./Link";
 import { useSession } from "./SessionProvider";
 
@@ -26,11 +27,14 @@ export function SetPasswordPage() {
   const token = new URLSearchParams(search).get("token") ?? "";
   const invite = useQuery({ ...trpc.invites.get.queryOptions({ token }), enabled: token !== "" });
   const accept = useMutation(trpc.invites.accept.mutationOptions());
+  const join = useMutation(trpc.invites.join.mutationOptions());
   const [mismatch, setMismatch] = useState(false);
   const [signedOutAfter, setSignedOutAfter] = useState(false);
 
   const dead = token === "" || (invite.error && classifyError(invite.error) === "notFound");
-  const usedUp = accept.error && classifyError(accept.error) === "notFound";
+  const usedUp = [accept.error, join.error].some(
+    (error) => error && classifyError(error) === "notFound"
+  );
   if (dead || usedUp) {
     return (
       <>
@@ -63,6 +67,17 @@ export function SetPasswordPage() {
     navigate(carryPlan(nextPath(search), search));
   };
 
+  if (invite.data?.business && invite.data.hasAccount)
+    return (
+      <JoinBusiness
+        email={invite.data.email}
+        business={invite.data.business}
+        pending={join.isPending}
+        error={join.error}
+        onJoin={() => join.mutateAsync({ token })}
+      />
+    );
+
   return (
     <>
       <h1>{copy.routes.setPassword}</h1>
@@ -79,7 +94,9 @@ export function SetPasswordPage() {
           <p className={styles.intro}>
             {invite.data.hasAccount
               ? copy.setPasswordPage.resetIntro(invite.data.email)
-              : copy.setPasswordPage.intro(invite.data.email)}
+              : invite.data.business
+                ? copy.setPasswordPage.invitedIntro(invite.data.business, invite.data.email)
+                : copy.setPasswordPage.intro(invite.data.email)}
           </p>
           <div className={styles.column}>
             <form

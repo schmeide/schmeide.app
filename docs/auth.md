@@ -38,6 +38,8 @@ make access/admin EMAIL=person@example.com     # give an approved person who has
   password and signs the person out everywhere else. The newest link is the only one that works.
 - `access/remove` takes effect on the person's next request. Their account and projects are kept, and approving the
   address again gives them back.
+- `access/approve` for an address that has a waiting invitation to a business leaves that invitation in place.
+  `access/remove` withdraws every invitation for the address.
 - `TENANT=demo` on `access/approve` puts the person in an existing business (here, the one that holds the projects
   made before sign-in existed). Without it, a new person gets an empty business of their own.
 - These commands act on the database in `DATABASE_URL`. To approve someone on a hosted server, run them where that
@@ -148,6 +150,33 @@ projects, and the same guards. From a person's row at `/admin/people`, or a memb
   they still cannot sign in themselves. `access/remove` for the person leaves an admin's view of them alone.
 - Taking the admin role or approval away from the admin ends every view they have open.
 - Customers are not told at the time. The privacy text should say that staff can view an account to give support.
+
+## Invite a person to a business
+
+An owner of a business lets people into it from the Business page (`/business`), without these commands.
+
+- The owner types an email address and gets a one-time link, shown once. The server sends no email yet (#88), so the
+  owner copies the link and sends it. It works once and for 7 days, like the link `access/approve` prints.
+- Inviting an address puts it on the approved list when it is not there yet, so an owner can let a new person in.
+  A new person who opens the link sets a name and password and is an editor of that business. If they sign in with
+  a provider first instead, they join the business the invitation named.
+- A person who already has an account is not added until they accept: they open the link, sign in as that address,
+  and press "Join". The link never sets or changes the password of an existing account, so the owner who holds it
+  cannot use it to get into that account. Until the person joins, the owner sees only the address they typed.
+- "Make a new link" replaces the waiting link; the old one stops working. "Withdraw" removes the invitation. It also
+  takes the address off the approved list when this invitation is what put it there, the person has no account yet,
+  and no other business is waiting for them.
+- An address can be invited by several businesses. Each sees only its own invitation, and gets the same answer
+  whether or not the address is known elsewhere.
+- An owner cannot invite an address that `access/remove` took off the list. Approve it again with `access/approve`.
+- Removing a member, or leaving, ends that person's access to the business on their next request. They stay signed
+  in for their other businesses; a person left with none gets a new empty one on their next request.
+- Two roles: an owner changes the business, its members, and its invitations; an editor works on apps. A business
+  always keeps at least one owner.
+
+Known limit until email exists (#88): whoever holds an unused link for an address with no account can open that
+account. An owner could open one under an address that is not theirs. Invite only people you can send the link to
+directly, and withdraw links that were sent to the wrong place.
 
 ## Settings
 

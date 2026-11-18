@@ -91,7 +91,11 @@ describe("the approved list", () => {
 describe("an invite link", () => {
   it("opens an account, signs the person in, and works only once", async () => {
     const { email, token } = await approveEmail(db, anEmail());
-    expect((await trpc("invites.get", { token })).data).toEqual({ email, hasAccount: false });
+    expect((await trpc("invites.get", { token })).data).toEqual({
+      email,
+      hasAccount: false,
+      business: null,
+    });
 
     const accepted = await trpc("invites.accept", {
       token,
@@ -156,7 +160,11 @@ describe("an invite link", () => {
     const email = await aPerson();
     const before = await signIn(email);
     const { token } = await approveEmail(db, email);
-    expect((await trpc("invites.get", { token })).data).toEqual({ email, hasAccount: true });
+    expect((await trpc("invites.get", { token })).data).toEqual({
+      email,
+      hasAccount: true,
+      business: null,
+    });
 
     await trpc("invites.accept", { token, password: "a brand new password" });
 

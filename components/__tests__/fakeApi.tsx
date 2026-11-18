@@ -10,8 +10,11 @@ import type {
   Build,
   BuildEvent,
   BuildSummary,
+  BusinessDetails,
   Design,
   Interview,
+  Invitation,
+  Member,
   PlanItem,
   Project,
   Question,
@@ -205,6 +208,34 @@ export const anItem = (overrides: Partial<PlanItem> = {}): PlanItem => ({
   ...overrides,
 });
 
+export const aMember = (overrides: Partial<Member> = {}): Member => ({
+  userId: "user-olive",
+  name: "Olive Owner",
+  email: "olive@example.com",
+  role: "owner",
+  joinedAt: at,
+  isYou: true,
+  ...overrides,
+});
+
+export const anInvitation = (overrides: Partial<Invitation> = {}): Invitation => ({
+  email: "nia@example.com",
+  invitedAt: at,
+  expiresAt: new Date("2026-11-23T10:00:00Z"),
+  expired: false,
+  ...overrides,
+});
+
+export const aBusiness = (overrides: Partial<BusinessDetails> = {}): BusinessDetails => ({
+  id: 1,
+  name: "Demo business",
+  country: null,
+  role: "owner",
+  members: [aMember()],
+  invitations: [],
+  ...overrides,
+});
+
 // A single project whose state the test mutates; `get` reads it, `events` pages through `events`.
 export const projectServer = (state: {
   project: Project;
@@ -227,6 +258,7 @@ export const projectServer = (state: {
   "design.get": () => state.design ?? { enabled: false, current: null, styles: [] },
   "interview.get": () => state.interview ?? anInterview(),
   "projects.list": () => [state.project],
+  "business.get": () => aBusiness(),
   "projects.get": () => ({
     project: state.project,
     latestBuild: state.latestBuild ?? null,
