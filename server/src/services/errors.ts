@@ -11,9 +11,12 @@ export class DamagedFileError extends Error {}
 export class ReadUnavailableError extends Error {}
 export class UploadRefusedError extends Error {
   readonly code: string;
-  constructor(code: string, message: string) {
+  // Why the scan refused the file, for the operator record. The message is what the person sees.
+  readonly detail: string | undefined;
+  constructor(code: string, message: string, detail?: string) {
     super(message);
     this.code = code;
+    this.detail = detail;
   }
 }
 // The business is suspended (services/businesses.ts): its members cannot open it, and nothing in

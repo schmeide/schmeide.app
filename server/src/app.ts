@@ -3,6 +3,7 @@ import { fromNodeHeaders } from "better-auth/node";
 import Fastify from "fastify";
 import { appRouter, BUSINESS_HEADER, type AppContext, type Context } from "./router.ts";
 import { AUTH_PATH, AUTH_PATHS_WHILE_IMPERSONATING, currentPerson } from "./services/auth.ts";
+import type { FileScanner, NewUploadRefusal } from "./services/fileScan.ts";
 import type { UploadLimits } from "./services/files.ts";
 import { registerUploads } from "./uploads.ts";
 
@@ -12,11 +13,13 @@ type Options = {
   // that origin alone may call it from a browser, with the session cookie.
   readonly allowOrigin?: string;
   readonly uploadLimits?: UploadLimits;
+  readonly scanner?: FileScanner;
+  readonly recordUploadRefusal?: (refusal: NewUploadRefusal) => Promise<unknown>;
 };
 
 export const buildApp = (
   context: AppContext,
-  { logger = false, allowOrigin, uploadLimits }: Options = {}
+  { logger = false, allowOrigin, uploadLimits, scanner, recordUploadRefusal }: Options = {}
 ) => {
   const app = Fastify({ logger });
   // Every answer is about one signed-in person (or one origin), so nothing may keep a copy.
@@ -39,7 +42,7 @@ export const buildApp = (
     });
   }
   app.get("/healthz", async () => ({ ok: true }));
-  registerUploads(app, context, uploadLimits);
+  registerUploads(app, context, uploadLimits, { scanner, recordUploadRefusal });
   app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
     trpcOptions: {
