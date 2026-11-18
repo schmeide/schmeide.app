@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { App } from "../../App";
 import { copy } from "../../data/copy";
 import { signedOut, type Session } from "../../utils/session";
-import { RouteProblem } from "../RouteProblem";
+import { NotFoundPage } from "../NotFoundPage";
 import { Routes } from "../Routes";
 import { aProject, authServer, projectServer, renderWithApi } from "./fakeApi";
 
@@ -195,9 +195,9 @@ describe("the sign-in page as an entry page", () => {
   });
 });
 
-describe("the no-access page", () => {
+describe("the not found and no access page", () => {
   it("links back to schmeide.com as well as to the person's apps", () => {
-    renderWithApi(<RouteProblem kind="noAccess" />, {}, owner);
+    renderWithApi(<NotFoundPage />, {}, owner);
     expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");
     expect(screen.getByRole("link", { name: copy.problems.toMarketingSite })).toHaveAttribute(
       "href",

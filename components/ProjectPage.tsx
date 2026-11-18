@@ -9,7 +9,8 @@ import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { ProjectSetup } from "./ProjectSetup";
 import { ProjectWorkspace, type ProjectView } from "./ProjectWorkspace";
-import { RouteProblem } from "./RouteProblem";
+import { useDraft } from "./useDraft";
+import { NotFoundPage } from "./NotFoundPage";
 
 import styles from "./ProjectPage.module.css";
 
@@ -19,8 +20,9 @@ type Props = { readonly id: number; readonly view?: ProjectView };
 // with its views. `view` only matters in the second.
 export function ProjectPage({ id, view = "overview" }: Props) {
   const trpc = useTRPC();
-  // The change being typed; kept here so it survives a move between the views.
-  const [request, setRequest] = useState("");
+  // The change being typed; kept here so it survives a move between the views, and as a draft so
+  // it survives the page giving way.
+  const [request, setRequest] = useDraft(`change:${id}`);
   // The updatedAt of a live project the owner asked to take offline; polled until it changes.
   const [stoppingAt, setStoppingAt] = useState<number | null>(null);
   const query = useQuery(
@@ -60,10 +62,9 @@ export function ProjectPage({ id, view = "overview" }: Props) {
     </Link>
   );
   if (!query.data) {
-    // A project of a business the person is not in.
-    if (query.error && classifyError(query.error) === "forbidden") {
-      return <RouteProblem kind="noAccess" />;
-    }
+    // Gone, or of a business the person is not in: the same page, so neither says which.
+    const problem = query.error && classifyError(query.error);
+    if (problem === "notFound" || problem === "forbidden") return <NotFoundPage />;
     return (
       <>
         {back}

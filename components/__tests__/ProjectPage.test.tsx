@@ -552,8 +552,10 @@ describe("ProjectPage", () => {
         throw new ApiFailure("NOT_FOUND", "Project 7 not found");
       },
     });
-    expect(await screen.findByText(copy.errors.notFound)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: copy.project.back })).toHaveAttribute("href", "/");
+    expect(
+      await screen.findByRole("heading", { level: 1, name: copy.problems.title })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");
   });
 
   it("says there is no access, and with which email, for a project of another business", async () => {
@@ -563,7 +565,7 @@ describe("ProjectPage", () => {
       },
     });
     expect(
-      await screen.findByRole("heading", { level: 1, name: copy.problems.noAccess.title })
+      await screen.findByRole("heading", { level: 1, name: copy.problems.title })
     ).toBeInTheDocument();
     expect(screen.getByText(copy.problems.signedInAs("owner@demo.example"))).toBeInTheDocument();
     expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");

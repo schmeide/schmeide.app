@@ -387,18 +387,27 @@ export const copy = {
       mismatch: "That is not the email address of this account. Type it exactly as shown.",
     },
   },
+  // Not found and no access are one page, so it never tells a non-member that an app exists.
   problems: {
-    notFound: {
-      title: "Page not found",
-      body: "This address does not match anything here, or the app was deleted.",
-    },
-    noAccess: {
-      title: "No access",
-      body: "This page belongs to a business you are not a member of.",
-    },
+    title: "Page not found",
+    body: "This address does not lead to anything you can open: it may be mistyped, the app may have been deleted, or it belongs to a business you are not in.",
     signedInAs: (email: string) => `You are signed in as ${email}.`,
     action: "Go to your apps",
     toMarketingSite: "Go to schmeide.com",
+  },
+  signedOutPage: {
+    title: "You were signed out",
+    body: "Your session ended while this page was open; sign in to come back to it, with anything you typed and did not send still there.",
+    action: "Sign in and come back",
+  },
+  offline: {
+    title: "You are offline",
+    body: "This browser has no internet connection right now; anything you typed and did not send is kept.",
+    retrying: "Schmeide tries again by itself every 10 seconds.",
+  },
+  maintenance: {
+    title: "Schmeide is down for planned work",
+    body: (when: string) => `We are making improvements. Come back after ${when}.`,
   },
   list: {
     title: "Your apps",

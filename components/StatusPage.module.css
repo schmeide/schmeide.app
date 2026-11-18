@@ -1,0 +1,5 @@
+.page {
+  max-width: var(--prose-width);
+  /* A long email address wraps rather than widening the page. */
+  overflow-wrap: anywhere;
+}

@@ -242,16 +242,16 @@ describe("route guards", () => {
   it("says so when the address matches nothing", () => {
     open("/nowhere", owner);
     expect(
-      screen.getByRole("heading", { level: 1, name: copy.problems.notFound.title })
+      screen.getByRole("heading", { level: 1, name: copy.problems.title })
     ).toBeInTheDocument();
     expect(screen.getByRole("link", { name: copy.problems.action })).toHaveAttribute("href", "/");
-    expect(document.title).toBe(copy.pageTitle(copy.problems.notFound.title));
+    expect(document.title).toBe(copy.pageTitle(copy.problems.title));
   });
 
   it("has no page for viewing as a customer, even for an admin", () => {
     open("/admin/view-as", admin);
     expect(
-      screen.getByRole("heading", { level: 1, name: copy.problems.notFound.title })
+      screen.getByRole("heading", { level: 1, name: copy.problems.title })
     ).toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ import {
 } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
+import { useDraft } from "./useDraft";
 
 import stepStyles from "./Step.module.css";
 import styles from "./InterviewStep.module.css";
@@ -50,8 +51,11 @@ function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
   const heading = useRef<HTMLHeadingElement>(null);
   const fields = useRef<HTMLDivElement>(null);
   const [picked, setPicked] = useState<readonly string[]>([]);
-  const [other, setOther] = useState(false);
-  const [words, setWords] = useState("");
+  // Own words not yet sent are kept as a draft; one restored to a question with choices reopens
+  // "Other" so it shows. ponytail: a sent answer's draft stays until the tab closes; its question
+  // never comes back, so it is never shown.
+  const [words, setWords] = useDraft(`answer:${question.id}`);
+  const [other, setOther] = useState(question.kind !== "text" && words !== "");
   const [missing, setMissing] = useState(false);
   useEffect(() => {
     if (focus) heading.current?.focus();
