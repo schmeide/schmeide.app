@@ -536,7 +536,17 @@ describe("build activities", () => {
       { flag: "a" }
     );
     // Committed and recorded as staging's, so the secrets check reads only what changes after.
-    git(workspace, "commit", "-qam", "migrations check");
+    // The workspace is not beside a gitconfig, so name the author: CI's git has no identity to fall back on.
+    git(
+      workspace,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-qam",
+      "migrations check"
+    );
     await db
       .update(projects)
       .set({ stagingCommit: git(workspace, "rev-parse", "HEAD").trim() })
