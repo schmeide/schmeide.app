@@ -1,6 +1,6 @@
 {
-  "id": "44f64ffd-7943-4cca-b94c-58b72716bb18",
-  "prevId": "e0d4efb7-e46d-4a6a-9a4f-3231738a749c",
+  "id": "714eeb92-51a8-4e24-9f3e-d6cceae08c70",
+  "prevId": "a417588a-ffb4-45ec-9315-e510ae053fb6",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1013,6 +1013,13 @@
           "notNull": true,
           "default": "'[]'::jsonb"
         },
+        "why": {
+          "name": "why",
+          "type": "varchar(300)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
         "answer": {
           "name": "answer",
           "type": "jsonb",
@@ -1061,8 +1068,16 @@
           "primaryKey": true,
           "notNull": true
         },
-        "ready": {
-          "name": "ready",
+        "depth": {
+          "name": "depth",
+          "type": "interview_depth",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'thorough'"
+        },
+        "covered": {
+          "name": "covered",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
@@ -2305,6 +2320,11 @@
       "schema": "public",
       "values": ["png", "jpeg", "webp", "pdf", "csv", "xlsx"]
     },
+    "public.interview_depth": {
+      "name": "interview_depth",
+      "schema": "public",
+      "values": ["quick", "thorough"]
+    },
     "public.member_role": {
       "name": "member_role",
       "schema": "public",
@@ -2318,7 +2338,7 @@
     "public.plan_section": {
       "name": "plan_section",
       "schema": "public",
-      "values": ["who", "does", "screens", "keeps", "replaces"]
+      "values": ["business", "who", "does", "rules", "screens", "keeps", "replaces"]
     },
     "public.plan_source": {
       "name": "plan_source",
