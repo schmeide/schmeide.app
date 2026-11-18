@@ -1384,6 +1384,95 @@ describe("the two copies", () => {
     ).toEqual([]);
   });
 
+  // Version 1 was live, then version 2 was put live: production runs version 2.
+  const liveOnSecond = async () => {
+    const app = await prepared();
+    const { build, activities, env, commitIn, anotherBuild } = app;
+    await env.run(activities.deploy, build.id);
+    const first = (await buildRow(build.id)).commit ?? "";
+    const second = commitIn("second.ts");
+    await anotherBuild({ status: "passed", commit: second });
+    await env.run(activities.release, (await anotherBuild({ kind: "promote", commit: second })).id);
+    return { ...app, first, second };
+  };
+
+  it("rolls back keeping today's information: production runs the earlier version on today's database, after a copy", async () => {
+    const { project, activities, env, production, live, copying, ran, anotherBuild, first } =
+      await liveOnSecond();
+    const rollback = await anotherBuild({ kind: "rollback", commit: first });
+    const before = ran().length;
+
+    await env.run(activities.release, rollback.id);
+
+    expect(ran().slice(before)).toEqual([...copying, `up ${live} ${first} ${production}`]);
+    expect(headOf(production)).toBe(first);
+    expect(existsSync(join(production, "second.ts"))).toBe(false);
+    expect(await projectRow(project.id)).toMatchObject({ productionCommit: first, status: "live" });
+    expect(
+      await db.select().from(databaseCopies).where(eq(databaseCopies.buildId, rollback.id))
+    ).toHaveLength(1);
+  });
+
+  it("rolls back with the information from a copy: restores it after a fresh copy, then starts the earlier version", async () => {
+    const {
+      project,
+      activities,
+      env,
+      production,
+      live,
+      copying,
+      ran,
+      anotherBuild,
+      first,
+      restored,
+    } = await liveOnSecond();
+    const [then] = await db
+      .select()
+      .from(databaseCopies)
+      .where(eq(databaseCopies.projectId, project.id));
+    const rollback = await anotherBuild({ kind: "rollback", commit: first, fromCopyId: then.id });
+    const before = ran().length;
+
+    await env.run(activities.release, rollback.id);
+
+    const slug = `schmeide-${project.slug}`;
+    expect(ran().slice(before)).toEqual([
+      ...copying,
+      `down ${slug} ${production}`,
+      `docker compose -p ${slug} up -d --wait db ${production}`,
+      `docker compose -p ${slug} exec -T db dropdb -U postgres --force --if-exists app ${production}`,
+      `docker compose -p ${slug} exec -T db createdb -U postgres app ${production}`,
+      `docker compose -p ${slug} exec -T db pg_restore -U postgres --no-owner -d app ${production}`,
+      `up ${live} ${first} ${production}`,
+    ]);
+    expect(restored()).toBe(readFileSync(then.path, "utf8"));
+    const [fresh] = await db
+      .select()
+      .from(databaseCopies)
+      .where(eq(databaseCopies.buildId, rollback.id));
+    expect(readFileSync(fresh.path, "utf8")).not.toBe(restored());
+    expect((await projectRow(project.id)).productionCommit).toBe(first);
+  });
+
+  it("returns production to the live version when the earlier one cannot start", async () => {
+    const { project, activities, env, production, ran, anotherBuild, commitIn, second } =
+      await liveOnSecond();
+    const broken = commitIn("fail-up");
+    await anotherBuild({ status: "passed", commit: broken });
+    const rollback = await anotherBuild({ kind: "rollback", commit: broken });
+    const before = ran().length;
+
+    await expect(env.run(activities.release, rollback.id)).rejects.toThrow(
+      /^Version could not start: make up failed[\s\S]*\. Your live app is back on the version it was running\.$/
+    );
+
+    expect(ran().slice(before).at(-1)).toBe(
+      `up schmeide-${project.slug} ${project.webPort} ${second} ${production}`
+    );
+    expect(headOf(production)).toBe(second);
+    expect((await projectRow(project.id)).productionCommit).toBe(second);
+  });
+
   it("discards: staging goes back to production's commit with a fresh database, and production is not touched", async () => {
     const {
       project,

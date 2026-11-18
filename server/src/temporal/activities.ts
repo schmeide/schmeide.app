@@ -1080,7 +1080,16 @@ export const createActivities = (
       throw ApplicationFailure.nonRetryable(
         "That copy of your information is no longer kept, so nothing was changed."
       );
+    if (config.runner)
+      throw ApplicationFailure.nonRetryable("The cluster cannot restore a copy of information yet");
     const fresh = await copyProductionData(project, buildId, false);
+    await putBack(project, copy, buildId);
+    await keepCopies(project.id);
+    return fresh;
+  };
+
+  // Stops production, empties its database, and restores `copy` into it.
+  const putBack = async (project: Project, copy: DatabaseCopy, buildId: number) => {
     const dir = await composeDir(project, "production");
     if (!dir)
       throw ApplicationFailure.nonRetryable("Your live app has no checkout to restore into");
@@ -1104,8 +1113,6 @@ export const createActivities = (
       "deploy",
       `Your live app's information is back to ${copy.takenAt.toISOString()}`
     );
-    await keepCopies(project.id);
-    return fresh;
   };
 
   // Makes production run `commit` and answers its address. If it cannot start, production goes
@@ -1156,6 +1163,42 @@ export const createActivities = (
       .where(eq(projects.id, project.id));
     if (config.runner) await pushCommit(config.runner, project, buildId, commit, "main", false);
     await markReleased(db, project.id, "promoted");
+    await event(buildId, "deploy", `Live at ${url}`);
+  };
+
+  // Production runs an earlier version's `commit` (#228), on today's database after a copy, or
+  // on the information from `fromCopyId` after restoring it. Staging is not touched, and `release`
+  // flags stay as history: what is live is productionCommit. If the earlier version cannot start,
+  // moveProduction puts the live one back, and this puts back the information it had.
+  // ponytail: on the cluster `main` keeps the newest promote; productionCommit says what is live.
+  const rollBack = async (
+    project: Project,
+    commit: string,
+    buildId: number,
+    fromCopyId: number | null
+  ) => {
+    const fresh =
+      fromCopyId === null
+        ? await copyProductionData(project, buildId)
+        : await restoreProductionData(project, fromCopyId, buildId);
+    const running = project.productionCommit;
+    const url = await moveProduction(project, commit, buildId).catch(async (cause: unknown) => {
+      if (fromCopyId === null || !fresh || running === null) throw cause;
+      await event(buildId, "deploy", "Putting your live app's information back as it was");
+      try {
+        await putBack(project, fresh, buildId);
+        await up(project, "production", buildId, running);
+      } catch (back) {
+        throw ApplicationFailure.nonRetryable(
+          `${reasonOf(cause)} Its information could not be put back as it was: ${reasonOf(back)}`
+        );
+      }
+      throw cause;
+    });
+    await db
+      .update(projects)
+      .set({ previewUrl: url, productionCommit: commit })
+      .where(eq(projects.id, project.id));
     await event(buildId, "deploy", `Live at ${url}`);
   };
 
@@ -2513,7 +2556,8 @@ export const createActivities = (
     },
 
     // A `promote` build makes production run its commit; a `discard` build returns staging to its
-    // commit, production's, with an empty database. Neither runs the builder.
+    // commit, production's, with an empty database; a `rollback` puts an earlier version live.
+    // None runs the builder.
     async release(buildId: number): Promise<void> {
       const { build, project } = await stepOfBuild(buildId);
       const commit = assertCommit(build.commit);
@@ -2531,6 +2575,8 @@ export const createActivities = (
       }
       if (build.kind === "promote") {
         await promote(project, commit, buildId);
+      } else if (build.kind === "rollback") {
+        await rollBack(project, commit, buildId, build.fromCopyId);
       } else if (build.kind === "discard") {
         await resetStaging(project, commit, buildId);
         // Recorded as soon as the code is back, so a failure below cannot leave a discarded

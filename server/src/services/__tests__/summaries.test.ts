@@ -149,7 +149,7 @@ describe("build summaries", () => {
     expect(admin.runKinds.map(({ runKind }) => runKind)).toContain("summary");
   });
 
-  it("of a promote or a discard ask no model and say only what was done, once it ends", async () => {
+  it("of a promote, a discard, or a roll back ask no model and say only what was done, once it ends", async () => {
     const summarize = counting();
     const summaries = createSummaries(db, summarize, { ...quiet, batch: 1 });
     const cases = [
@@ -157,6 +157,8 @@ describe("build summaries", () => {
       ["promote", "make up failed", RELEASE_SUMMARIES.promote.failed],
       ["discard", undefined, RELEASE_SUMMARIES.discard.passed],
       ["discard", "make up failed", RELEASE_SUMMARIES.discard.failed],
+      ["rollback", undefined, RELEASE_SUMMARIES.rollback.passed],
+      ["rollback", "make up failed", RELEASE_SUMMARIES.rollback.failed],
     ] as const;
     for (const [kind, error, text] of cases) {
       const { projectId } = await aRunningBuild();

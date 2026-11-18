@@ -41,7 +41,7 @@ type Options = {
   readonly cancelDuringPrepare?: boolean;
   // Requests queued behind the build; each starts after the one before it passes.
   readonly queued?: readonly string[];
-  readonly kind?: "initial" | "site" | "promote" | "discard";
+  readonly kind?: "initial" | "site" | "promote" | "discard" | "rollback";
   // Turns the design team on, with a reviewer that finds a serious problem on its first review
   // only, or on every one.
   readonly review?: "once" | "never";
@@ -322,8 +322,8 @@ describe("buildWorkflow check and fix loop", () => {
     ]);
   }, 120_000);
 
-  it("moves a copy without the workspace or the agent for a promote or a discard", async () => {
-    for (const kind of ["promote", "discard"] as const) {
+  it("moves a copy without the workspace or the agent for a promote, a discard, or a roll back", async () => {
+    for (const kind of ["promote", "discard", "rollback"] as const) {
       const { outcome, prompts, events } = await runBuild({ fixOnRun: 1, kind });
 
       expect(outcome).toBe("passed");

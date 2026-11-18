@@ -9,6 +9,7 @@ import {
   agentRuns,
   buildSummaries,
   builds,
+  databaseCopies,
   projects,
   tenants,
   usage,
@@ -33,6 +34,8 @@ import {
   removeProjectFiles,
   removeQueuedChange,
   requestChange,
+  rollBackProduction,
+  RollBackRefusedError,
   setFeatures,
   setSite,
   startNextChange,
@@ -1020,5 +1023,207 @@ describe("the version being worked on", () => {
     await expect(
       db.update(projects).set({ webPort: 18_100 }).where(eq(projects.id, project.id))
     ).rejects.toThrow();
+  });
+});
+
+describe("putting an earlier version live", () => {
+  const commit = (version: number) => String(version).padStart(40, "0");
+  const aPerson = async () =>
+    (
+      await db
+        .insert(users)
+        .values({ id: randomUUID(), name: "Owner", email: `${randomUUID()}@example.com` })
+        .returning()
+    )[0];
+  // A live app with one numbered version per entry, each built on the one before, staging on the
+  // last and production on `live`. A version is additive unless its entry says otherwise.
+  const anApp = async (
+    versions: readonly { readonly additive?: boolean | null }[],
+    live: number,
+    set: Partial<typeof projects.$inferInsert> = {},
+    tenantId = DEMO_TENANT_ID
+  ) => {
+    const project = await createProject(db, { name: `r ${randomUUID()}`, tenantId });
+    await db
+      .update(projects)
+      .set({
+        status: "live",
+        spec: "## Features",
+        previewUrl: `http://localhost:${project.webPort}`,
+        stagingUrl: `http://localhost:${project.webPort + 10_000}`,
+        productionCommit: commit(live),
+        stagingCommit: commit(versions.length),
+        ...set,
+      })
+      .where(eq(projects.id, project.id));
+    await db.insert(builds).values(
+      versions.map(({ additive = true }, index) => ({
+        projectId: project.id,
+        kind: index === 0 ? ("initial" as const) : ("change" as const),
+        request: `version ${index + 1}`,
+        status: "passed" as const,
+        commit: commit(index + 1),
+        baseCommit: index === 0 ? null : commit(index),
+        version: index + 1,
+        additive,
+        release: index + 1 <= live ? ("promoted" as const) : null,
+      }))
+    );
+    return findProject(db, project.id);
+  };
+  const aCopy = async (projectId: number, version: number, takenAt: Date) => {
+    const [build] = await db
+      .insert(builds)
+      .values({ projectId, kind: "promote", request: "", status: "passed", commit: commit(1) })
+      .returning();
+    return (
+      await db
+        .insert(databaseCopies)
+        .values({ projectId, buildId: build.id, version, takenAt, path: "/nowhere", bytes: 1 })
+        .returning()
+    )[0];
+  };
+
+  it("puts an earlier version live with today's information, leaving staging alone", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp([{}, {}, {}], 3);
+
+    const { build } = await rollBackProduction(deps, {
+      id: project.id,
+      version: 1,
+      byUserId: person.id,
+    });
+
+    expect(build).toMatchObject({
+      kind: "rollback",
+      status: "running",
+      commit: commit(1),
+      request: "Put version 1 live",
+      byUserId: person.id,
+      fromCopyId: null,
+    });
+    expect(workflows.start).toHaveBeenCalledWith(
+      "buildWorkflow",
+      expect.objectContaining({ args: [project.id, build.id, "rollback"] })
+    );
+    expect(await findProject(db, project.id)).toMatchObject({
+      status: "building",
+      stagingCommit: commit(3),
+    });
+  });
+
+  it("refuses to keep today's information when a version live since changed how it is stored, and offers the copies that qualify", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp([{}, { additive: false }, {}], 3);
+    const older = await aCopy(project.id, 1, new Date("2026-11-10T09:00:00Z"));
+    const newest = await aCopy(project.id, 1, new Date("2026-11-12T14:02:00Z"));
+    await aCopy(project.id, 3, new Date("2026-11-13T08:00:00Z"));
+
+    const refused = await rollBackProduction(deps, {
+      id: project.id,
+      version: 1,
+      byUserId: person.id,
+    }).catch((error: unknown) => error);
+
+    expect(refused).toBeInstanceOf(RollBackRefusedError);
+    expect(refused).toBeInstanceOf(ConflictError);
+    expect((refused as RollBackRefusedError).message).toBe(
+      "Version 2 changed how your app stores its information, so version 1 cannot read it. You can go back to version 1 with the information from 12 November, 14:02 UTC."
+    );
+    expect((refused as RollBackRefusedError).copies).toEqual([
+      { id: newest.id, version: 1, takenAt: newest.takenAt },
+      { id: older.id, version: 1, takenAt: older.takenAt },
+    ]);
+    expect(workflows.start).not.toHaveBeenCalled();
+  });
+
+  it("counts a version whose template could not check its database changes as one that may have changed them", async () => {
+    const { deps } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp([{}, { additive: null }], 2);
+
+    await expect(
+      rollBackProduction(deps, { id: project.id, version: 1, byUserId: person.id })
+    ).rejects.toThrow(
+      "Version 2 may have changed how your app stores its information, so version 1 may not read it. No copy of the information from then was kept."
+    );
+  });
+
+  it("goes back with the information from a copy taken while that version or an earlier one was live", async () => {
+    const { deps } = fakeWorkflows();
+    const person = await aPerson();
+    const project = await anApp([{}, { additive: false }, {}], 3);
+    const then = await aCopy(project.id, 1, new Date("2026-11-12T14:02:00Z"));
+    const later = await aCopy(project.id, 3, new Date("2026-11-13T08:00:00Z"));
+
+    const { build } = await rollBackProduction(deps, {
+      id: project.id,
+      version: 1,
+      withInformationFrom: then.id,
+      byUserId: person.id,
+    });
+
+    expect(build).toMatchObject({ kind: "rollback", commit: commit(1), fromCopyId: then.id });
+    const other = await anApp([{}, {}, {}], 3);
+    await expect(
+      rollBackProduction(deps, {
+        id: other.id,
+        version: 1,
+        withInformationFrom: later.id,
+        byUserId: person.id,
+      })
+    ).rejects.toThrow("not taken while version 1 or an earlier one was live");
+  });
+
+  it("goes forward again to a version that was live, whose changes the database already holds", async () => {
+    const { deps } = fakeWorkflows();
+    const person = await aPerson();
+    // Version 3 was live, then the app went back to version 1.
+    const project = await anApp([{}, { additive: false }, {}], 1);
+    await db.insert(builds).values({
+      projectId: project.id,
+      kind: "promote",
+      request: "",
+      status: "passed",
+      commit: commit(3),
+    });
+
+    const { build } = await rollBackProduction(deps, {
+      id: project.id,
+      version: 3,
+      byUserId: person.id,
+    });
+
+    expect(build.commit).toBe(commit(3));
+  });
+
+  it("refuses with a plain reason, and starts nothing", async () => {
+    const { deps, workflows } = fakeWorkflows();
+    const person = await aPerson();
+    const [suspended] = await db
+      .insert(tenants)
+      .values({ slug: `s-${randomUUID()}`, state: "suspended", stateReason: "test" })
+      .returning();
+    const cases = [
+      [await anApp([{}, {}], 2, { status: "building" }), 1, "is being built"],
+      [await anApp([{}, {}], 2), 2, "Version 2 is already live"],
+      [await anApp([{}, {}], 2), 7, "Version 7 is not a version of this app"],
+      [await anApp([{}, {}], 2, {}, suspended.id), 1, "This business is suspended"],
+      [await anApp([{}, {}], 2, { productionCommit: "e".repeat(40) }), 1, "before Schmeide"],
+    ] as const;
+    for (const [project, version, reason] of cases)
+      await expect(
+        rollBackProduction(deps, { id: project.id, version, byUserId: person.id })
+      ).rejects.toThrow(reason);
+    expect(workflows.start).not.toHaveBeenCalled();
+  });
+
+  it("counts the versions on staging's line that live does not hold, whatever was promoted", async () => {
+    // Every version was promoted once; live has since gone back to version 1.
+    const project = await anApp([{}, {}, {}], 3, { productionCommit: commit(1) });
+
+    expect((await getProject(db, project.id)).unreleased).toBe(2);
   });
 });
