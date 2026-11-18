@@ -290,6 +290,65 @@ describe("InterviewStep", () => {
   });
 
   // Setup shows one step at a time, so the build replaces the plan and its questions.
+  it("starts the questions over from changed wording, after saying the answers and plan are cleared", async () => {
+    const { calls } = setup(
+      anInterview({
+        questions: [answered({ type: "choices", values: ["Just me"] })],
+        current: DUE,
+        items: [anItem(), anItem({ id: 22, section: "who", text: "Only the owner" })],
+      }),
+      {
+        "interview.restart": () => anInterview({ current: WHO }),
+      },
+      aProject({ need: "Send invoices" })
+    );
+
+    const change = await screen.findByRole("button", { name: copy.interview.changeNeed });
+    expect(screen.getByText("Send invoices")).toBeInTheDocument();
+    await userEvent.click(change);
+    const field = screen.getByRole("textbox", { name: copy.interview.needLabel });
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue("Send invoices");
+    expect(screen.getByText(copy.interview.restartWarning(1, 2))).toBeVisible();
+    expect(calls.some((call) => call.path === "interview.restart")).toBe(false);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "Book my lessons");
+    await userEvent.click(screen.getByRole("button", { name: copy.interview.restart }));
+
+    expect(await screen.findByRole("heading", { name: WHO.text })).toHaveFocus();
+    expect(calls).toContainEqual({
+      path: "interview.restart",
+      input: { id: 7, need: "Book my lessons" },
+    });
+    expect(screen.queryByRole("textbox", { name: copy.interview.needLabel })).toBeNull();
+  });
+
+  it("keeps the questions when changing the wording is canceled, and asks for words when it is empty", async () => {
+    const { calls } = setup(anInterview({ current: WHO }), {}, aProject({ need: "Send invoices" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.interview.changeNeed }));
+    await userEvent.clear(screen.getByRole("textbox", { name: copy.interview.needLabel }));
+    await userEvent.click(screen.getByRole("button", { name: copy.interview.restart }));
+    expect(screen.getByRole("alert")).toHaveTextContent(copy.interview.needEmpty);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.interview.keepQuestions }));
+    expect(screen.getByRole("button", { name: copy.interview.changeNeed })).toHaveFocus();
+    expect(screen.getByRole("group", { name: WHO.text })).toBeVisible();
+    expect(calls.some((call) => call.path === "interview.restart")).toBe(false);
+  });
+
+  it("does not offer to start over once a spec is written", async () => {
+    setup(
+      anInterview({ questions: [answered({ type: "text", value: "Me" })], finished: true }),
+      {},
+      aProject({ status: "spec_ready", spec: "# Spec", need: "Send invoices" })
+    );
+
+    await screen.findByRole("heading", { name: copy.project.specTitle });
+    expect(screen.queryByRole("button", { name: copy.interview.changeNeed })).toBeNull();
+  });
+
   it("leaves the plan and its questions to the describe step once the app is being built", async () => {
     setup(
       anInterview({

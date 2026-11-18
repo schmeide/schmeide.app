@@ -239,6 +239,99 @@ function Plan({ interview, fresh }: PlanProps) {
   );
 }
 
+type RestartProps = {
+  readonly need: string;
+  readonly answers: number;
+  readonly items: number;
+  readonly busy: boolean;
+  readonly onRestart: (need: string) => void;
+};
+
+// The prompt the questions follow from, and a way to change it and start them over. The warning
+// sits beside the button that clears, so it is read before anything is lost.
+function Restart({ need, answers, items, busy, onRestart }: RestartProps) {
+  const fieldId = useId();
+  const errorId = useId();
+  const change = useRef<HTMLButtonElement>(null);
+  const [editing, setEditing] = useState(false);
+  const [words, setWords] = useState(need);
+  const [missing, setMissing] = useState(false);
+  // Set when the form is closed by hand, so focus goes back to the button that opened it.
+  const closed = useRef(false);
+  useEffect(() => {
+    if (!editing && closed.current) change.current?.focus();
+  }, [editing]);
+  const close = () => {
+    closed.current = true;
+    setEditing(false);
+    setMissing(false);
+  };
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const text = words.trim();
+    setMissing(!text);
+    if (text) onRestart(text);
+  };
+
+  if (!editing) {
+    return (
+      <div className={styles.restart}>
+        {need && (
+          <details>
+            <summary>{copy.project.showNeed}</summary>
+            <p className={stepStyles.need}>{need}</p>
+          </details>
+        )}
+        <div className={stepStyles.actions}>
+          <button
+            type="button"
+            ref={change}
+            disabled={busy}
+            onClick={() => {
+              setWords(need);
+              setEditing(true);
+            }}
+          >
+            {copy.interview.changeNeed}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={onSubmit} className={stepStyles.form} noValidate>
+      <label htmlFor={fieldId}>{copy.interview.needLabel}</label>
+      <textarea
+        id={fieldId}
+        rows={4}
+        maxLength={2000}
+        value={words}
+        autoFocus
+        aria-invalid={missing}
+        aria-describedby={missing ? errorId : undefined}
+        onChange={(event) => {
+          setWords(event.target.value);
+          setMissing(false);
+        }}
+      />
+      {missing && (
+        <p id={errorId} role="alert">
+          {copy.interview.needEmpty}
+        </p>
+      )}
+      <p className={stepStyles.warning}>{copy.interview.restartWarning(answers, items)}</p>
+      <div className={stepStyles.actions}>
+        <button type="submit" data-variant="primary" disabled={busy}>
+          {copy.interview.restart}
+        </button>
+        <button type="button" onClick={close}>
+          {copy.interview.keepQuestions}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 type Props = {
   readonly project: Project;
   readonly interview: Interview;
@@ -272,6 +365,7 @@ export function InterviewStep({
   };
   const start = useMutation(trpc.interview.start.mutationOptions({ onSuccess: store }));
   const answer = useMutation(trpc.interview.answer.mutationOptions({ onSuccess: store }));
+  const restart = useMutation(trpc.interview.restart.mutationOptions({ onSuccess: store }));
   const generate = useMutation(
     trpc.projects.generateSpec.mutationOptions({ onSettled: () => refresh() })
   );
@@ -280,8 +374,8 @@ export function InterviewStep({
   const reviewing = project.status === "spec_ready";
   const open = project.status === "draft" || (reviewing && editing);
   const started = interview.current !== null || interview.questions.length > 0;
-  const thinking = start.isPending || answer.isPending;
-  const failure = answer.error ?? start.error;
+  const thinking = start.isPending || answer.isPending || restart.isPending;
+  const failure = answer.error ?? start.error ?? restart.error;
   const unavailable = failure !== null && classifyError(failure) === "unavailable";
   const fresh = new Set(
     known ? interview.items.filter((item) => !known.has(item.id)).map((item) => item.id) : []
@@ -295,6 +389,10 @@ export function InterviewStep({
   const onAnswer = (question: Question) => (given: Answer) => {
     remember();
     answer.mutate({ id: project.id, questionId: question.id, answer: given });
+  };
+  const onRestart = (need: string) => {
+    remember();
+    restart.mutate({ id: project.id, need });
   };
   const onWriteSpec = () => {
     const ready = interview.items.some((item) => item.section === "does");
@@ -315,6 +413,15 @@ export function InterviewStep({
         {open && (
           <div className={styles.ask}>
             {specFailed && <p role="alert">{copy.project.specFailed[specFailed]}</p>}
+            {project.status === "draft" && started && !restart.isPending && (
+              <Restart
+                need={project.need}
+                answers={interview.questions.length}
+                items={interview.items.length}
+                busy={thinking}
+                onRestart={onRestart}
+              />
+            )}
             {reviewing && <p className={stepStyles.warning}>{copy.interview.discardWarning}</p>}
             {!started && !thinking && (
               <>
