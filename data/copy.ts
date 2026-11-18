@@ -46,7 +46,7 @@ export const copy = {
     billing: "Billing",
     business: "Business",
     account: "Account",
-    welcome: "Your business",
+    welcome: "Set up your business",
     admin: "Admin",
     adminBusinesses: "Businesses",
     adminBusiness: "Business",
@@ -291,6 +291,26 @@ export const copy = {
     askForAccess: "Ask for early access",
     signIn: "Already invited? Sign in",
     planKept: "The plan you chose comes with you. It will be ready when you set up payment.",
+  },
+  // The first-run page (/welcome): a signed-in person with no business yet sets one up.
+  firstRun: {
+    intro:
+      "A few details and you can start on your first app. You can change the name and country later.",
+    yourNameLabel: "Your name",
+    yourNameMissing: "Type your name.",
+    nameLabel: "Business name",
+    // Matches the name the server gives a business when none is typed (startBusiness).
+    defaultName: (yourName: string) => `${yourName}’s business`,
+    nameHint: "Optional. Leave it empty to use the name shown.",
+    countryLabel: "Country",
+    countryNone: "Choose a country",
+    countryHint: "Used for tax, and for which terms apply to your business.",
+    countryMissing: "Choose the country your business is in.",
+    descriptionLabel: "What the business does",
+    descriptionHint:
+      "Optional. One line, such as “A bakery with two shops”. It gives the interview about your first app a head start.",
+    save: "Set up my business",
+    saving: "Setting up your business…",
   },
   setPasswordPage: {
     intro: (email: string) =>

@@ -1,0 +1,46 @@
+.intro {
+  max-width: var(--lead-width);
+  font-size: var(--text-lead);
+  color: var(--color-muted);
+}
+
+/* One narrow column of stacked fields; each control fills it, so 320px never scrolls sideways. */
+.form {
+  display: grid;
+  gap: var(--space-s);
+  max-width: 32rem;
+  margin-top: var(--space-l);
+}
+
+.form > * {
+  min-width: 0;
+}
+
+.form label {
+  margin-top: var(--space-s);
+  font-weight: 600;
+}
+
+.form button {
+  justify-self: start;
+  max-width: 100%;
+  margin-top: var(--space-m);
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
+
+.select {
+  width: 100%;
+  min-height: var(--hit-target);
+  padding: 0 var(--space-m);
+  background: var(--color-field);
+  border: 2px solid var(--color-field-border);
+  border-radius: var(--radius-input);
+  color: inherit;
+  font: inherit;
+}
