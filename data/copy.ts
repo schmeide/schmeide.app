@@ -678,7 +678,9 @@ export const copy = {
     requesting: "Sending…",
     queueTitle: "Waiting changes",
     queueIntro:
-      "These run one after another, top first, each once the build before it finishes. If a build fails or is canceled, they wait until a later change is built successfully. You can still edit or remove them.",
+      "These run one after another, top first, each once the build before it finishes. If a build fails or is canceled, they wait for you to build them, so you can edit or remove them first.",
+    queueBuildNow: "Build the waiting changes now",
+    queueStarting: "Starting…",
     queueEdit: "Edit",
     queueEditLabel: (position: number) => `Edit waiting change ${position}`,
     queueEditFieldLabel: (position: number) => `Waiting change ${position}`,

@@ -141,7 +141,7 @@ export function Designer({
               <StopButton project={project} onStop={onStop} />
             </div>
           )}
-          <QueuedChanges queued={queued} />
+          <QueuedChanges project={project} queued={queued} />
         </div>
       </div>
 

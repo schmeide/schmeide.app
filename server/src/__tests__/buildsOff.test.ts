@@ -57,7 +57,7 @@ describe("with builds off", () => {
     expect(await db.select().from(builds).where(eq(builds.projectId, project.id))).toEqual([]);
   });
 
-  it("refuses a change and a stop", async () => {
+  it("refuses a change, a stop, and building the waiting changes", async () => {
     const owner = await aSignedInPerson(app, deps);
     const project = await createProject(db, { name: "Stopped", tenantId: owner.tenantId });
     await transition(db, project.id, ["draft"], { status: "stopped" });
@@ -65,10 +65,11 @@ describe("with builds off", () => {
     expect(
       await callApi(app, "projects.requestChange", { id: project.id, request: "x" }, owner.cookie)
     ).toMatchObject({ code: "CONFLICT", message: BUILDS_OFF });
-    expect(await callApi(app, "projects.stop", { id: project.id }, owner.cookie)).toMatchObject({
-      code: "CONFLICT",
-      message: BUILDS_OFF,
-    });
+    for (const procedure of ["projects.stop", "projects.buildWaiting"])
+      expect(await callApi(app, procedure, { id: project.id }, owner.cookie)).toMatchObject({
+        code: "CONFLICT",
+        message: BUILDS_OFF,
+      });
     expect(workflows.start).not.toHaveBeenCalled();
   });
 

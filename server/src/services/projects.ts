@@ -641,30 +641,59 @@ export const discardStaging = (
     return project.productionCommit;
   });
 
+// Starts the project's oldest queued change, moving the project out of one of `from`.
+const startOldestQueued = async (
+  deps: Deps,
+  tx: Db,
+  project: Project,
+  from: readonly Status[]
+): Promise<Build | undefined> => {
+  const [next] = await tx
+    .select({ id: builds.id })
+    .from(builds)
+    .where(and(eq(builds.projectId, project.id), eq(builds.status, "queued")))
+    .orderBy(asc(builds.id))
+    .limit(1);
+  if (!next) return undefined;
+  await transition(tx, project.id, from, { status: "building" });
+  const [build] = await tx
+    .update(builds)
+    .set({ status: "running", startedAt: new Date() })
+    .where(eq(builds.id, next.id))
+    .returning();
+  await startWorkflow(deps, tx, project, build);
+  return build;
+};
+
 // When a build passes: starts the project's oldest queued change. Safe to repeat (an activity retry,
 // or a restart replaying it): it does nothing while a build runs or the project is not live, so a
-// failed or canceled build leaves the queue waiting until a later build passes. Nor while its
-// business is suspended: the queue waits, as after a cancel.
+// failed or canceled build leaves the queue waiting until a later build passes or the person asks
+// for it (buildWaitingChanges). Nor while its business is suspended: the queue waits, as after a
+// cancel.
 export const startNextChange = (deps: Deps, projectId: number): Promise<Build | undefined> =>
   deps.db.transaction(async (raw) => {
     const tx = raw as unknown as Db;
     const project = await lockProject(tx, projectId);
     if (project.status !== "live" || (await hasRunningBuild(tx, projectId))) return undefined;
     if (await businessSuspended(tx, project.tenantId)) return undefined;
-    const [next] = await tx
-      .select({ id: builds.id })
-      .from(builds)
-      .where(and(eq(builds.projectId, projectId), eq(builds.status, "queued")))
-      .orderBy(asc(builds.id))
-      .limit(1);
-    if (!next) return undefined;
-    await transition(tx, projectId, ["live"], { status: "building" });
-    const [build] = await tx
-      .update(builds)
-      .set({ status: "running", startedAt: new Date() })
-      .where(eq(builds.id, next.id))
-      .returning();
-    await startWorkflow(deps, tx, project, build);
+    return startOldestQueued(deps, tx, project, ["live"]);
+  });
+
+// After a failed or canceled build: starts the oldest waiting change, which the queue then follows.
+export const buildWaitingChanges = (deps: Deps, projectId: number): Promise<Build> =>
+  deps.db.transaction(async (raw) => {
+    assertBuildsOn(deps);
+    const tx = raw as unknown as Db;
+    const project = await lockProject(tx, projectId);
+    if (project.status === "building" || (await hasRunningBuild(tx, projectId)))
+      throw new ConflictError(
+        "A change is being built, and the waiting changes follow it by themselves. This page updates as they start."
+      );
+    const build = await startOldestQueued(deps, tx, project, ["failed", "stopped"]);
+    if (!build)
+      throw new ConflictError(
+        "There are no waiting changes left to build. Request a change to build the app again."
+      );
     return build;
   });
 
