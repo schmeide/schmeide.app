@@ -100,7 +100,10 @@ describe("ProjectPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: copy.project.addRequest }));
     await userEvent.type(screen.getByLabelText(copy.project.requestLabel(2)), "   ");
     await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
-    expect(screen.getByRole("alert")).toHaveTextContent(copy.project.needFeatures);
+    const request = screen.getByLabelText(copy.project.requestLabel(1));
+    expect(request).toBeInvalid();
+    expect(request).toHaveAccessibleDescription(copy.project.needFeatures);
+    expect(request).toHaveFocus();
     expect(calls.map((call) => call.path)).not.toContain("projects.setFeatures");
   });
 
@@ -508,7 +511,10 @@ describe("ProjectPage", () => {
       await screen.findByLabelText(copy.project.site.iconLabel),
       new File([new Uint8Array(256 * 1024 + 1)], "huge.png", { type: "image/png" })
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(copy.project.site.iconTooBig);
+    const icon = screen.getByLabelText(copy.project.site.iconLabel);
+    expect(icon).toBeInvalid();
+    expect(icon).toHaveAccessibleDescription(copy.project.site.iconTooBig);
+    expect(icon).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: copy.project.site.save }));
     await waitFor(() =>
       expect(calls).toContainEqual({ path: "projects.setSite", input: { id: 7, title: "" } })

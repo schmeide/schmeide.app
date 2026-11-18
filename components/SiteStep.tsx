@@ -65,17 +65,24 @@ export function SiteStep({ project, hasIcon }: Props) {
           id="site-icon"
           type="file"
           accept=".png,.ico,image/png,image/x-icon,image/vnd.microsoft.icon"
+          aria-invalid={tooBig || undefined}
+          aria-describedby={tooBig ? "site-icon-error" : undefined}
           onChange={(event) => {
             const file = event.target.files?.[0] ?? null;
             const big = Boolean(file && file.size > ICON_MAX_BYTES);
             setTooBig(big);
             setIcon(big ? null : file);
+            if (big) event.currentTarget.focus();
           }}
         />
+        {tooBig && (
+          <p id="site-icon-error" className={styles.fieldError}>
+            {copy.project.site.iconTooBig}
+          </p>
+        )}
         <p className={styles.muted}>
           {hasIcon ? copy.project.site.iconSet : copy.project.site.iconNone}
         </p>
-        {tooBig && <p role="alert">{copy.project.site.iconTooBig}</p>}
         <div className={styles.actions}>
           <button type="submit" disabled={save.isPending}>
             {save.isPending ? copy.project.saving : copy.project.site.save}
