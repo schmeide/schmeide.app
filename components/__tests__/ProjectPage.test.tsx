@@ -553,7 +553,8 @@ describe("ProjectPage", () => {
     await userEvent.click(await screen.findByRole("button", { name: copy.project.delete }));
     expect(screen.getByText(copy.project.deleteConfirm("Invoices"))).toBeInTheDocument();
     expect(calls.some((call) => call.path === "projects.delete")).toBe(false);
-    await userEvent.click(screen.getByRole("button", { name: copy.project.deleteYes }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Delete project" }));
     expect(calls).toContainEqual({ path: "projects.delete", input: { id: 7 } });
     await waitFor(() => expect(window.location.pathname).toBe("/"));
   });

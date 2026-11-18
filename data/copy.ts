@@ -724,8 +724,8 @@ export const copy = {
     delete: "Delete project",
     deleteConfirm: (name: string) =>
       `Delete “${name}”? This removes your live app and the version being worked on, everything stored in both, their links, the code that was built, the spec, and the build history. This cannot be undone.`,
-    deleteYes: "Yes, delete it",
-    deleteNo: "Keep it",
+    deleteYes: "Delete project",
+    deleteNo: "Cancel",
     deleting: "Deleting… this can take a few seconds.",
   },
   interview: {
