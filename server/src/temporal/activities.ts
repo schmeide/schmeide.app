@@ -17,7 +17,7 @@ import { join, relative, resolve } from "node:path";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure, CancelledFailure } from "@temporalio/common";
-import { and, asc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
 import {
@@ -1137,6 +1137,9 @@ export const createActivities = (
         buildId,
         env
       );
+      // A clone does not fetch refs/schmeide, so backfilled versions are pushed from here, before
+      // `work` can move staging and leave a commit unreachable.
+      await restoreVersionRefs(project, buildId, dir, env, true);
       await work(dir, env);
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -1680,6 +1683,144 @@ export const createActivities = (
     return [...changed.output.split("\n"), ...added.output.split("\n")].filter(Boolean);
   };
 
+  // A version is a passed build with a commit of its own. promote and discard move a copy.
+  const VERSION_KINDS = ["initial", "change", "site"] as const;
+
+  const versionRef = (version: number) => `refs/schmeide/versions/${version}`;
+
+  const hasNumberedVersion = async (projectId: number) =>
+    (
+      await db
+        .select({ id: builds.id })
+        .from(builds)
+        .where(and(eq(builds.projectId, projectId), isNotNull(builds.version)))
+        .limit(1)
+    ).length > 0;
+
+  const hasEarlierBuild = async (projectId: number, buildId: number) =>
+    (
+      await db
+        .select({ id: builds.id })
+        .from(builds)
+        .where(
+          and(
+            eq(builds.projectId, projectId),
+            lt(builds.id, buildId),
+            inArray(builds.kind, [...VERSION_KINDS])
+          )
+        )
+        .limit(1)
+    ).length > 0;
+
+  // The commit the workspace was on before the builder ran. The first build starts from the
+  // template, so it records none, including when prepare is retried after the workspace exists.
+  const recordBaseCommit = async (project: Project, buildId: number, head: string) => {
+    if (!isCommit(head) || !(await hasEarlierBuild(project.id, buildId))) return;
+    await db
+      .update(builds)
+      .set({ baseCommit: head })
+      .where(and(eq(builds.id, buildId), isNull(builds.baseCommit)));
+  };
+
+  // Refs for versions already numbered, including the migration's backfill. A commit that is gone
+  // is logged and skipped. Nothing deletes these refs except removing the project.
+  const restoreVersionRefs = async (
+    project: Project,
+    buildId: number,
+    dir: string,
+    env: Record<string, string>,
+    push: boolean
+  ) => {
+    const rows = await db
+      .select({ version: builds.version, commit: builds.commit })
+      .from(builds)
+      .where(and(eq(builds.projectId, project.id), isNotNull(builds.version)))
+      .orderBy(asc(builds.version));
+    for (const row of rows) {
+      if (row.version === null || row.commit === null || !isCommit(row.commit)) continue;
+      const ref = versionRef(row.version);
+      if (push) {
+        const remote = await run("git", ["ls-remote", "origin", ref], { cwd: dir, env });
+        const [sha] = remote.output.trim().split(/\s+/);
+        if (remote.code === 0 && sha === row.commit) continue;
+      } else {
+        const current = await run("git", ["rev-parse", "--verify", "-q", ref], { cwd: dir, env });
+        if (current.code === 0 && current.output.trim() === row.commit) continue;
+      }
+      const object = await run("git", ["cat-file", "-e", `${row.commit}^{commit}`], {
+        cwd: dir,
+        env,
+      });
+      if (object.code !== 0) {
+        await log(
+          buildId,
+          `Version ${row.version}'s commit ${row.commit} is already gone, so no ref was written`
+        );
+        continue;
+      }
+      if (!push) await mustRun(project, "git", ["update-ref", ref, row.commit], dir, buildId, env);
+      else
+        await mustRun(
+          project,
+          "git",
+          ["push", "-q", "origin", `${row.commit}:${ref}`],
+          dir,
+          buildId,
+          env
+        );
+    }
+  };
+
+  const nextVersion = async (projectId: number): Promise<number> => {
+    const [row] = await db
+      .select({
+        version: sql<number>`coalesce(max(${builds.version}), 0)`.mapWith(Number),
+      })
+      .from(builds)
+      .where(eq(builds.projectId, projectId));
+    return row.version + 1;
+  };
+
+  // Writes refs/schmeide/versions/<n> at `commit`. On the cluster the ref is pushed to Forgejo.
+  const pinVersion = async (project: Project, buildId: number, commit: string, version: number) => {
+    const ref = versionRef(version);
+    if (config.runner) {
+      await onClone(config.runner, project, buildId, (dir, env) =>
+        mustRun(project, "git", ["push", "-q", "origin", `${commit}:${ref}`], dir, buildId, env)
+      );
+      return;
+    }
+    const dir = workspaceOf(project);
+    if (!(await exists(join(dir, ".git")))) return;
+    await mustRun(
+      project,
+      "git",
+      ["update-ref", ref, commit],
+      dir,
+      buildId,
+      projectEnv(project, config.dataDir)
+    );
+  };
+
+  // The next version number for a passed initial, change, or site build that has its own commit.
+  // A retry that already numbered it only makes sure the ref exists.
+  const keepVersion = async (project: Project, buildId: number) => {
+    const build = await getBuild(db, buildId);
+    if (!(VERSION_KINDS as readonly string[]).includes(build.kind)) return;
+    if (build.commit === null || !isCommit(build.commit)) return;
+    let version = build.version;
+    if (version === null) {
+      const [saved] = await db
+        .update(builds)
+        .set({ version: await nextVersion(project.id) })
+        .where(and(eq(builds.id, buildId), isNull(builds.version)))
+        .returning({ version: builds.version });
+      version = saved?.version ?? (await getBuild(db, buildId)).version;
+    }
+    if (version === null) return;
+    await pinVersion(project, buildId, build.commit, version);
+  };
+
   return {
     async generateSpec(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);
@@ -1742,8 +1883,14 @@ export const createActivities = (
         // first, so it is never without its rule.
         const { forgejo } = config.runner;
         const { org, repo } = repoOf(project);
-        if (await forgejo.branchCommit(org, repo, "staging")) {
+        const existing = await forgejo.branchCommit(org, repo, "staging");
+        if (existing) {
           await event(buildId, "step", "Reusing the project's repository");
+          await recordBaseCommit(project, buildId, existing);
+          // A clone is only worth it once a version needs its ref on the remote. Later activities
+          // that clone restore any still missing.
+          if (await hasNumberedVersion(project.id))
+            await onClone(config.runner, project, buildId, async () => {});
           return;
         }
         await event(buildId, "step", "Copying the template into a new repository");
@@ -1777,6 +1924,14 @@ export const createActivities = (
       const workspace = workspaceOf(project);
       if (await stat(join(workspace, ".git")).catch(() => undefined)) {
         await event(buildId, "step", "Reusing the project workspace");
+        await restoreVersionRefs(
+          project,
+          buildId,
+          workspace,
+          projectEnv(project, config.dataDir),
+          false
+        );
+        await recordBaseCommit(project, buildId, await headOf(project));
         return;
       }
       await event(buildId, "step", "Copying the template into a fresh workspace");
@@ -2148,6 +2303,18 @@ export const createActivities = (
     async release(buildId: number): Promise<void> {
       const { build, project } = await stepOfBuild(buildId);
       const commit = assertCommit(build.commit);
+      // Before a discard moves `main`, so a version's commit stays reachable from its ref.
+      if (!config.runner) {
+        const dir = workspaceOf(project);
+        if (await exists(join(dir, ".git")))
+          await restoreVersionRefs(
+            project,
+            buildId,
+            dir,
+            projectEnv(project, config.dataDir),
+            false
+          );
+      }
       if (build.kind === "promote") {
         await promote(project, commit, buildId);
       } else if (build.kind === "discard") {
@@ -2172,6 +2339,8 @@ export const createActivities = (
       outcome: "failed" | "canceled" = "failed"
     ): Promise<void> {
       const { project } = await projectOfBuild(buildId);
+      // Numbered only once the build passes. A failure, a cancel, and a promote or discard get none.
+      if (outcome !== "canceled" && !error) await keepVersion(project, buildId);
       if (await stat(workspaceOf(project)).catch(() => undefined)) {
         await removeReferenceCopies(
           project,

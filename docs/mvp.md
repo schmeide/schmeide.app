@@ -240,7 +240,12 @@ Print an invoice as a clean page I can save as a PDF
       (below). On failure the output goes back to the same agent session, up to 3 fix rounds, then
       the build fails with the last output.
    4. `deploy`: commits anything the builder left uncommitted, so what ships is one commit, and
-      records it (`builds.commit`). Then `make up` in the workspace for **staging** (Compose project
+      records it (`builds.commit`). A passed `initial`, `change`, or `site` build becomes the project's
+      next version, numbered from 1 (`builds.version`). The workspace keeps that commit at
+      `refs/schmeide/versions/<n>`, and nothing deletes those refs except deleting the project, so each
+      version is kept for good. The build records the commit it started from (`builds.base_commit`);
+      the first build, which starts from the template, records none. Then `make up` in the workspace
+      for **staging** (Compose project
       `schmeide-<slug>_staging`, web port + 10000) and a wait for `/` and `/api/healthz` to answer
       200: status `live`, with `stagingUrl` and `stagingCommit`. Production is left alone, except for an
       app's first passed build: with nothing live to protect, it is promoted at once (below), so a new
@@ -283,7 +288,8 @@ Print an invoice as a clean page I can save as a PDF
    `git clean -ffdx`), staging's containers and database volume are removed
    (`docker compose -p schmeide-<slug>_staging down --volumes`), and `make up` starts staging again
    with an empty database its migrations build up; its passed builds are marked
-   `release = discarded` and no longer count as built. Both answer `CONFLICT` while a build runs, when
+   `release = discarded` and no longer count as built. The discarded version's ref stays, so its commit
+   is not lost. Both answer `CONFLICT` while a build runs, when
    there is nothing to do, and (discard) when production's commit was never recorded; a suspended
    business can do neither. Each counts toward building time like any build. No model runs for
    either: its summary is one fixed sentence, written when it ends (`RELEASE_SUMMARIES`).
