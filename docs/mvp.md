@@ -617,6 +617,24 @@ The worker's identity needs, on the registry, `listBuildSourceUploadUrl/action`,
 limited to `apps/`: a quick run in ABAC mode pushes as its caller, and a delete removes the repositories. The
 cluster's kubelet identity needs Container Registry Repository Reader on `apps/` to pull.
 
+## App shapes
+
+The template ships working starting points for common kinds of app, in `docs/shapes/` (#100): `assets`, `bookings`,
+`customers`, `dashboard`, `deals`, `handbook`, `invoices`, `orders`, `requests` and `stock`, plus `notes`, the sample
+a build replaces. A first build keeps the shapes the spec needs and the template deletes the rest, so the agent adapts
+working code instead of starting from nothing.
+
+`services/shapes.ts` picks them with `chooseShapes`. `make shape/list` gives the shapes the template has, and a shape
+is chosen when the spec mentions its name (singular or plural) or one of its keywords, as a whole word, ignoring case:
+`bookings` on "appointments" or "schedule", `invoices` on "quote" or "receipt", `stock` on "inventory", and so on.
+The chosen shapes keep the order the spec first mentions them: the first is the home page and the order is the menu's.
+If none matches, only `notes` is kept and the build replaces it. `make shape/keep` then deletes the others, and the
+build prompt names the kept shapes and their docs.
+
+The match is by keyword, so a passing word can keep a shape the build then has to drop. The choice is stored in
+`projects.shapes` (a `jsonb` list, default `[]`, migration `0031_project_shapes.sql`). A template with no `shapes/`
+directory is used whole and stores nothing.
+
 ## How built apps are made to work on a phone
 
 Three things, all in this repo, so they reach every build whatever the workspace was copied from:
