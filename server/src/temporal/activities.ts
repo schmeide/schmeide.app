@@ -127,6 +127,7 @@ import {
   deleteProjectRows,
   markReleased,
   findProject,
+  removeProjectFiles,
   startNextChange,
   testDbPort,
   transition,
@@ -2232,6 +2233,7 @@ export const createActivities = (
         await hosting.acr.deleteImages(project.tenantId, project.slug);
       }
       await store.removeProject({ tenantId: project.tenantId, projectId });
+      await removeProjectFiles(db, config.dataDir, project);
       await deleteProjectRows(db, projectId);
     },
   };

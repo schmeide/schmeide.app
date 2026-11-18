@@ -41,7 +41,7 @@ import { reviewFeedbackPrompt, type ScreenCapture } from "../../services/designR
 import { DEFAULT_STYLE } from "../../services/designStyles.ts";
 import { JPEG, PNG, WEBP } from "../../services/__tests__/fileFixtures.ts";
 import { createLocalFileStore } from "../../services/fileStore.ts";
-import { createProject, transition } from "../../services/projects.ts";
+import { createProject, transcriptsDir, transition } from "../../services/projects.ts";
 import {
   AGENT_ALLOWED_TOOLS,
   BUILDER_PLUGIN,
@@ -937,6 +937,27 @@ describe("removing a project", () => {
     expect(existsSync(folder)).toBe(false);
     expect(await db.select().from(files).where(eq(files.projectId, project.id))).toEqual([]);
     expect(await db.select().from(projects).where(eq(projects.id, project.id))).toEqual([]);
+  });
+
+  it("deletes its builds' logs and its agent transcripts", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild("change");
+    const claude = join(dataDir, "claude");
+    vi.stubEnv("CLAUDE_CONFIG_DIR", claude);
+    const log = join(dataDir, "logs", `build-${build.id}.log`);
+    const transcripts = transcriptsDir(claude, join(dataDir, "projects", project.slug));
+    mkdirSync(join(dataDir, "logs"), { recursive: true });
+    writeFileSync(log, "built\n");
+    mkdirSync(transcripts, { recursive: true });
+    writeFileSync(join(transcripts, "session.jsonl"), "{}\n");
+
+    await new MockActivityEnvironment().run(
+      createActivities(deps, config).removeProject,
+      project.id
+    );
+
+    expect(existsSync(log)).toBe(false);
+    expect(existsSync(transcripts)).toBe(false);
   });
 });
 
