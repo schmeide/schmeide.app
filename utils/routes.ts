@@ -27,6 +27,7 @@ const table = {
   adminProjects: { path: "/admin/projects", access: "admin" },
   adminUsage: { path: "/admin/usage", access: "admin" },
   adminAudit: { path: "/admin/audit", access: "admin" },
+  adminReview: { path: "/admin/review", access: "admin" },
   help: { path: "/help", access: "public" },
   // The front door from schmeide.com. It renders nothing: `goTo` sends the person on.
   go: { path: "/go", access: "public" },

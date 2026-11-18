@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { initTRPC } from "@trpc/server";
 import { and, eq, isNull } from "drizzle-orm";
 import superjson from "superjson";
@@ -14,6 +17,7 @@ import {
   removeAccess,
 } from "../services/access.ts";
 import { COMMAND_LINE, withAudit } from "../services/audit.ts";
+import { recordFlaggedRequest } from "../services/review.ts";
 import {
   aSignedInAdmin,
   aSignedInPerson,
@@ -27,8 +31,10 @@ import {
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
 
+const dataDir = mkdtempSync(join(tmpdir(), "schmeide-audit-review-"));
 const deps: AppContext = {
   db,
+  dataDir,
   workflows: { start: vi.fn(), getHandle: vi.fn() as never },
   taskQueue: "test",
   interviewer: vi.fn(),
@@ -65,6 +71,13 @@ const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
   const teammate = await aSignedInPerson(app, deps, { joins: owner.tenantId });
   const leavingAdmin = await aSignedInAdmin(app, deps);
   const reason = "audit walk";
+  const review = await recordFlaggedRequest(dataDir, {
+    tenantId: owner.tenantId,
+    projectId: null,
+    requestText: "patient records",
+    rule: "health-records",
+    outcome: "refused",
+  });
   return {
     "admin.impersonation.start": { email: owner.email, reason },
     "admin.access.approve": { email: anEmail(), reason },
@@ -76,6 +89,7 @@ const walkInputs = async (): Promise<Readonly<Record<string, unknown>>> => {
     "admin.businesses.restore": { id: owner.tenantId, reason },
     "admin.admins.grant": { email: anEmail(), reason },
     "admin.admins.revoke": { email: leavingAdmin.email, reason },
+    "admin.review.close": { id: review.id, disposition: "no_action", reason },
   };
 };
 

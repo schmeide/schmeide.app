@@ -232,6 +232,7 @@ const startApi = (authConfig: AuthConfig) => {
       files: fileStore,
       websiteReader: createWebsiteReader({ ...config, model: config.websiteModel }),
       resources: createResourceReader(config.dataDir),
+      dataDir: config.dataDir,
       auth: createAuth(db, authConfig),
       providers,
       designTeam: config.designTeam,

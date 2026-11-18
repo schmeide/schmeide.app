@@ -97,6 +97,14 @@ import {
 import type { FileReader } from "./services/fileReader.ts";
 import type { FileStore } from "./services/fileStore.ts";
 import type { ResourceReader } from "./services/resources.ts";
+import {
+  closeReviewSchema,
+  listReviewItems,
+  pageReviewItems,
+  reviewListSchema,
+  reviewOpen,
+  writeClosure,
+} from "./services/review.ts";
 import { businessTime, usageSummary } from "./services/usageSummary.ts";
 import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
@@ -163,6 +171,9 @@ export type AppContext = Deps &
     readonly reader: FileReader;
     // What hosted projects take up, read from the container runtime and the disk when asked.
     readonly resources: ResourceReader;
+    // Review records live under this directory (services/review.ts). Absent in tests that
+    // never open the review list: it is empty, and closing an item is not found.
+    readonly dataDir?: string;
     readonly auth: Auth;
     // The sign-in providers that have credentials, for the sign-in page.
     readonly providers: readonly Provider[];
@@ -407,6 +418,32 @@ export const appRouter = t.router({
         .input(auditQuerySchema)
         .query(({ ctx, input }) => listAdminActions(ctx.db, input)),
       filters: admin.query(({ ctx }) => auditFilters(ctx.db)),
+    }),
+    // Flagged requests, tier changes, refused uploads, app reports, and repeated refusals.
+    review: t.router({
+      list: admin.input(reviewListSchema).query(async ({ ctx, input }) => {
+        const items = ctx.dataDir ? await listReviewItems(ctx.db, ctx.dataDir) : [];
+        return pageReviewItems(items, input.cursor, input.limit);
+      }),
+      open: admin.query(async ({ ctx }) =>
+        reviewOpen(ctx.dataDir ? await listReviewItems(ctx.db, ctx.dataDir) : [])
+      ),
+      close: adminMutation("review.close")
+        .input(closeReviewSchema)
+        .mutation(async ({ ctx, input }) => {
+          if (!ctx.dataDir) throw new NotFoundError("That review item does not exist");
+          const items = await listReviewItems(ctx.db, ctx.dataDir);
+          const item = items.find((entry) => entry.id === input.id);
+          if (!item) throw new NotFoundError("That review item does not exist");
+          const recorded = await writeClosure(
+            ctx.dataDir,
+            item,
+            { disposition: input.disposition, reason: input.reason },
+            ctx.person.email
+          );
+          ctx.audit({ targetTenantId: recorded.targetTenantId, detail: recorded.detail });
+          return null;
+        }),
     }),
     // Every business and every person, read-only; see services/directory.ts.
     businesses: t.router({

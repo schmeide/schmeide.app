@@ -1,0 +1,102 @@
+.intro {
+  max-width: var(--lead-width);
+  font-size: var(--text-lead);
+  color: var(--color-muted);
+}
+
+.status {
+  font-variant-numeric: tabular-nums;
+}
+
+.list {
+  list-style: none;
+  margin: var(--space-l) 0 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-m);
+}
+
+.item {
+  min-width: 0;
+  padding: var(--space-m);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+}
+
+.kind {
+  margin: 0;
+  font-size: var(--text-title);
+}
+
+.when {
+  margin: var(--space-xs) 0 0;
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.facts {
+  display: grid;
+  gap: var(--space-s);
+  margin: var(--space-m) 0 0;
+}
+
+.facts div {
+  min-width: 0;
+}
+
+.facts dt {
+  color: var(--color-muted);
+  font-size: var(--text-label);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.overdue {
+  margin: var(--space-s) 0 0;
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-s) var(--space-m);
+  margin: var(--space-m) 0 0;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-s);
+  max-width: 26rem;
+  margin-top: var(--space-m);
+}
+
+.form label {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.form select {
+  width: 100%;
+  min-height: var(--hit-target);
+  padding: 0.75rem 1rem;
+  font: inherit;
+  color: inherit;
+  background: var(--color-field);
+  border: 2px solid var(--color-field-border);
+  border-radius: var(--radius-input);
+}
+
+.form button {
+  margin-top: var(--space-s);
+}
+
+.more {
+  margin-top: var(--space-m);
+}

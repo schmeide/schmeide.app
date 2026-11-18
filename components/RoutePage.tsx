@@ -10,6 +10,7 @@ import { AdminBusinessesPage } from "./AdminBusinessesPage";
 import { AdminPage } from "./AdminPage";
 import { AdminPeoplePage } from "./AdminPeoplePage";
 import { AdminProjectsPage } from "./AdminProjectsPage";
+import { AdminReviewPage } from "./AdminReviewPage";
 import { AdminUsagePage } from "./AdminUsagePage";
 import { BusinessPage } from "./BusinessPage";
 import { FirstRun } from "./FirstRun";
@@ -46,6 +47,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   adminProjects: () => <AdminProjectsPage />,
   adminUsage: () => <AdminUsagePage />,
   adminAudit: () => <AdminAuditPage />,
+  adminReview: () => <AdminReviewPage />,
   help: placeholder("help"),
   go: () => null,
   signIn: () => <SignInPage />,
@@ -54,7 +56,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   terms: placeholder("terms"),
   privacy: placeholder("privacy"),
   acceptableUse: placeholder("acceptableUse"),
-  report: placeholder("report"),
+  report: () => <PlaceholderPage title={copy.routes.report} note={copy.report.lookedAt} />,
 };
 
 type Props = { readonly name: RouteName; readonly params: RouteParams };

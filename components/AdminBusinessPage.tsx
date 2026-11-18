@@ -47,6 +47,10 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
 
   const { business, members, projects } = query.data;
   const suspended = business.state === "suspended";
+  const carried = new URLSearchParams(window.location.search);
+  const carriedReason = carried.get("reason") ?? undefined;
+  const carriedAction = carried.get("action");
+  const carriedEmail = carried.get("email");
   // Over more than the hundred apps read at once, the sums are unknown rather than short.
   const totals =
     projects.length === 0 || resources.data
@@ -98,17 +102,23 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
             <AdminActionForm
               hint={copy.business.restoreHint}
               action={copy.business.restoreAction}
+              defaultReason={carriedReason}
               run={({ reason }) =>
                 client.admin.businesses.restore.mutate({ id, reason }).then(() => null)
               }
             />
           </details>
         ) : (
-          <details key="suspend" className={styles.action}>
+          <details
+            key="suspend"
+            className={styles.action}
+            open={carriedAction === "suspend" || undefined}
+          >
             <summary>{copy.business.suspend}</summary>
             <AdminActionForm
               hint={copy.business.suspendHint}
               action={copy.business.suspendAction}
+              defaultReason={carriedReason}
               run={({ reason }) =>
                 client.admin.businesses.suspend.mutate({ id, reason }).then(() => null)
               }
@@ -129,7 +139,13 @@ export function AdminBusinessPage({ id }: { readonly id: number }) {
                 <td>{member.email}</td>
                 <td>{copy.business.roles[member.role]}</td>
                 <td>
-                  <ViewAsDisclosure name={member.name} email={member.email} admin={member.admin} />
+                  <ViewAsDisclosure
+                    name={member.name}
+                    email={member.email}
+                    admin={member.admin}
+                    defaultReason={carriedReason}
+                    open={carriedAction === "view" && carriedEmail === member.email}
+                  />
                   <details>
                     <summary>{copy.business.removeMember(member.name)}</summary>
                     <AdminActionForm

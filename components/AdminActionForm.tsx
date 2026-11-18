@@ -18,6 +18,8 @@ type Props = {
   // Fields to type besides the reason, which every action needs.
   readonly fields?: readonly ActionField[];
   readonly action: string;
+  // A reason carried from another page, which the admin can edit.
+  readonly defaultReason?: string;
   // Calls the server with what was typed, the reason trimmed. Answers a set-password token when
   // the server sent one, which is shown here once and kept nowhere else.
   readonly run: (values: Readonly<Record<string, string>>) => Promise<string | null | void>;
@@ -25,7 +27,7 @@ type Props = {
 
 // An admin action that changes something, after the admin gives a reason. Every admin list is
 // loaded again once it is done.
-export function AdminActionForm({ hint, fields = [], action, run }: Props) {
+export function AdminActionForm({ hint, fields = [], action, defaultReason, run }: Props) {
   const trpc = useTRPC();
   const { providers } = useSession();
   const queryClient = useQueryClient();
@@ -73,6 +75,7 @@ export function AdminActionForm({ hint, fields = [], action, run }: Props) {
         name="reason"
         required
         maxLength={500}
+        defaultValue={defaultReason}
         aria-invalid={missingReason || undefined}
         aria-describedby={`${id}-hint${missingReason ? ` ${id}-error` : ""}`}
       />

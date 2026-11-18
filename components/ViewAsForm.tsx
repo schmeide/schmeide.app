@@ -11,11 +11,13 @@ import styles from "./ViewAsForm.module.css";
 type Props = {
   // The person to view as. Left out, the admin types their email.
   readonly email?: string;
+  // A reason carried from another page, which the admin can edit.
+  readonly defaultReason?: string;
 };
 
 // Starts viewing the app as a person, after the admin gives a reason, which the audit log keeps.
 // The admin then lands on the person's home (SessionProvider).
-export function ViewAsForm({ email }: Props) {
+export function ViewAsForm({ email, defaultReason }: Props) {
   const { startViewingAs } = useSession();
   const id = useId();
   const [missingReason, setMissingReason] = useState(false);
@@ -47,6 +49,7 @@ export function ViewAsForm({ email }: Props) {
         name="reason"
         required
         maxLength={500}
+        defaultValue={defaultReason}
         aria-invalid={missingReason || undefined}
         aria-describedby={`${id}-hint${missingReason ? ` ${id}-error` : ""}`}
       />

@@ -1,4 +1,8 @@
+import { useQuery } from "@tanstack/react-query";
+
 import { copy } from "../data/copy";
+import { useTRPC } from "../trpc";
+import { ageOf } from "../utils/reviewAge";
 import { pathTo, type RouteName } from "../utils/routes";
 import { Link } from "./Link";
 
@@ -12,9 +16,21 @@ const SECTIONS: readonly RouteName[] = [
   "adminProjects",
   "adminUsage",
   "adminAudit",
+  "adminReview",
 ];
 
 export function AdminPage() {
+  const trpc = useTRPC();
+  const open = useQuery(trpc.admin.review.open.queryOptions());
+  const reviewLabel = () => {
+    const summary = open.data;
+    if (!summary || summary.count === 0) return copy.routes.adminReview;
+    const parts = summary.oldestAt ? ageOf(summary.oldestAt, new Date()) : null;
+    const age = parts ? copy.review.age(parts.amount, parts.unit) : null;
+    return age
+      ? `${copy.routes.adminReview} ${copy.review.openCount(summary.count)}, ${copy.review.oldest(age)}`
+      : `${copy.routes.adminReview} ${copy.review.openCount(summary.count)}`;
+  };
   return (
     <>
       <header>
@@ -26,7 +42,7 @@ export function AdminPage() {
           {SECTIONS.map((name) => (
             <li key={name}>
               <Link to={pathTo(name)} className={styles.section}>
-                {copy.routes[name]}
+                {name === "adminReview" ? reviewLabel() : copy.routes[name]}
               </Link>
             </li>
           ))}
