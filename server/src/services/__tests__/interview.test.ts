@@ -11,6 +11,7 @@ import {
   getInterview,
   planBrief,
   removePlanItem,
+  restartInterview,
   startInterview,
   updatePlanItem,
   type Interviewer,
@@ -166,6 +167,53 @@ describe("startInterview", () => {
     const { deps } = scripted();
 
     await expect(startInterview(deps, 2_000_000_000)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe("restartInterview", () => {
+  it("changes the prompt, clears the questions and the plan, and asks a new first question", async () => {
+    const project = await newProject();
+    const { deps, interviewer } = scripted(
+      turn({ add: [{ section: "does", text: "Send invoices", phase: "day_one" }], question: WHO }),
+      turn({ add: [{ section: "who", text: "Just me", phase: "day_one" }], question: WHEN }),
+      turn({ question: WHEN })
+    );
+    const first = await startInterview(deps, project.id);
+    if (!first.current) throw new Error("expected a question");
+    await answerQuestion(deps, {
+      id: project.id,
+      questionId: first.current.id,
+      answer: { type: "choices", values: ["Just me"] },
+    });
+
+    const interview = await restartInterview(deps, { id: project.id, need: "  Book my lessons  " });
+
+    expect((await findProject(db, project.id)).need).toBe("Book my lessons");
+    expect(interviewer).toHaveBeenLastCalledWith({
+      project: expect.objectContaining({ id: project.id, need: "Book my lessons" }),
+      items: [],
+      trail: [],
+    });
+    expect(interview.questions).toEqual([]);
+    expect(interview.items).toEqual([]);
+    expect(interview.finished).toBe(false);
+    expect(interview.current).toMatchObject({ ...WHEN, answer: null });
+    expect(
+      await db.select().from(interviewQuestions).where(eq(interviewQuestions.projectId, project.id))
+    ).toHaveLength(1);
+  });
+
+  it("refuses once the project has left draft, and changes nothing", async () => {
+    const project = await newProject();
+    const { deps, interviewer } = scripted(turn({ question: WHO }));
+    await startInterview(deps, project.id);
+    await transition(db, project.id, ["draft"], { status: "spec_ready" });
+
+    await expect(restartInterview(deps, { id: project.id, need: "Something else" })).rejects.toThrow(
+      "The questions can only start over while the app is “Describing”, and it is “Spec ready to review” now. Start a new project to describe it from the beginning."
+    );
+    expect(interviewer).toHaveBeenCalledTimes(1);
+    expect((await getInterview(db, project.id)).current).toMatchObject(WHO);
   });
 });
 

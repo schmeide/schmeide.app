@@ -104,6 +104,8 @@ import {
   answerQuestion,
   getInterview,
   removePlanItem,
+  restartInterview,
+  restartInterviewSchema,
   startInterview,
   updatePlanItem,
   type Interviewer,
@@ -639,6 +641,10 @@ export const appRouter = t.router({
     get: onProject(projectIdSchema).query(({ ctx, input }) => getInterview(ctx.db, input.id)),
     // Asks the first question, or the next one after a turn that failed.
     start: onProject(projectIdSchema).mutation(({ ctx, input }) => startInterview(ctx, input.id)),
+    // New wording of the prompt: clears the questions and the plan, and asks the first one again.
+    restart: onProject(restartInterviewSchema).mutation(({ ctx, input }) =>
+      restartInterview(ctx, input)
+    ),
     answer: onProject(answerQuestionSchema).mutation(({ ctx, input }) =>
       answerQuestion(ctx, input)
     ),

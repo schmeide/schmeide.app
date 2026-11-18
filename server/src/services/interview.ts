@@ -3,12 +3,14 @@ import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
   ITEM_MAX,
+  NEED_MAX,
   PLAN_SECTIONS,
   interviewQuestions,
   interviews,
   planItems,
   planPhase,
   planSection,
+  projectIdSchema,
   projects,
   questionKind,
   type Answer,
@@ -203,6 +205,37 @@ export const startInterview = async (
     if (!open) await applyTurn(tx, id, turn, "schmeide");
   });
   return getInterview(db, id);
+};
+
+export const restartInterviewSchema = projectIdSchema.extend({
+  need: z.string().trim().min(1).max(NEED_MAX),
+});
+
+// Starts the questions over from new wording of the prompt: the old questions, and the plan drawn
+// from their answers, are cleared and the first question is asked again. Only while describing;
+// once a spec is written the plan is changed through it instead.
+export const restartInterview = async (
+  deps: InterviewDeps,
+  input: { readonly id: number; readonly need: string }
+): Promise<Interview> => {
+  await deps.db.transaction(async (transaction) => {
+    const tx = transaction as unknown as Db;
+    const [project] = await tx
+      .update(projects)
+      .set({ need: input.need.trim() })
+      .where(and(eq(projects.id, input.id), eq(projects.status, "draft")))
+      .returning({ id: projects.id });
+    if (!project) {
+      const current = await findProject(tx, input.id);
+      throw new ConflictError(
+        `The questions can only start over while the app is ${statusWord("draft")}, and it is ${statusWord(current.status)} now. Start a new project to describe it from the beginning.`
+      );
+    }
+    await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, input.id));
+    await tx.delete(interviews).where(eq(interviews.projectId, input.id));
+    await tx.delete(planItems).where(eq(planItems.projectId, input.id));
+  });
+  return startInterview(deps, input.id);
 };
 
 const fits = (question: Question, answer: Answer): boolean => {
