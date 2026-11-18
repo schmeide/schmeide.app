@@ -8,6 +8,7 @@
     "start": "node src/main.ts",
     "test": "vitest run",
     "e2e": "node e2e/run.ts",
+    "interview:eval": "node src/eval/run.ts",
     "access": "node src/cli/access.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node src/migrate.ts"

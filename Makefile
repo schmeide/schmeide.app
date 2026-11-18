@@ -232,6 +232,12 @@ test/server: node_modules ## Migrate and run server tests against an existing DA
 e2e: node_modules ## Real Claude run of the to-do fixture against `make serve`, then delete it (KEEP=1 keeps it)
 	$(JS_EXEC) run e2e -w server
 
+.PHONY: interview/eval
+interview/eval: node_modules ## Real Claude run of the interview against the scripted owners; writes docs/interview-transcripts (OWNER=plumber, DEPTH=quick, MODEL=opus)
+	$(JS_EXEC) run interview:eval -w server -- --depth $(or $(DEPTH),thorough) \
+		$(if $(OWNER),--owner $(OWNER)) $(if $(MODEL),--model $(MODEL))
+	$(JS_EXEC) exec prettier -- --write docs/interview-transcripts >/dev/null
+
 E2E_FAKE_PORT ?= 3199
 
 .PHONY: e2e/fake

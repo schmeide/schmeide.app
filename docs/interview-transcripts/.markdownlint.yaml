@@ -1,0 +1,3 @@
+# Generated transcripts keep long questions and tables on one line.
+extends: ../../.markdownlint.yaml
+MD013: false

@@ -307,21 +307,35 @@ A second way to describe a project, beside `projects.setFeatures`: the server as
 time and keeps a plan up to date from the answers. The screen is "Start the questions" on the project page; the
 API is:
 
-- `interview.start({ id })` asks the first question, or the next one after a turn that failed. It
-  does nothing while a question is waiting or once the interview has finished.
+- `interview.start({ id, depth? })` asks the first question, or the next one after a turn that
+  failed. It does nothing while a question is waiting or once the interview has finished. A
+  `depth` given here is set first.
+- `interview.setDepth({ id, depth })` picks `quick` (a sketch of about 5 minutes, 10 questions at
+  most) or `thorough` (about 20 minutes, 30 questions at most; the default, recommended on screen).
+  It can change at any time; going deeper reopens an interview that stopped at the shorter limit.
 - `interview.answer({ id, questionId, answer })` stores the answer, changes the plan, and asks the
   next question. An answer is `{ type: "choices", values }`, `{ type: "yes_no", value }`,
   `{ type: "text", value }` (the person's own words, accepted on any question), or
   `{ type: "you_decide" }`.
-- `interview.get({ id })` returns the plan items, the answered questions, the waiting question, the
-  status of each plan section (`not_started`, `sketched`, `ready`), and whether it has finished.
+- `interview.get({ id })` returns the plan items, the answered questions (each with a `why` line),
+  the waiting question, the status of each plan section (`not_started`, `sketched`, `ready`), the
+  depth and its limit, the checklist points settled, the current stage, and whether it has finished.
 - `interview.addItem`, `interview.updateItem`, and `interview.removeItem` edit the plan directly.
 
-The plan has four sections: `who` uses the app, what it `does`, its `screens`, and what it `keeps`.
-Each item is for `day_one` or `later`, and is marked `you` or `schmeide` by who it came from.
+The plan's sections: `business` (what it is, and what the app is for), `who` uses the app, what it
+`does`, its `rules`, its `screens`, what it `keeps`, and what it `replaces`. Each item is for
+`day_one` or `later`, and is marked `you` or `schmeide` by who it came from.
 
-- Each question is one model call, made while the request waits: about 4 seconds and about 1 cent
-  with `sonnet`. The interview ends after 30 questions at most.
+The interview goes through stages in order (`STAGES` in `server/src/services/interview.ts`): the
+business, the jobs, the rules, the people, the information, and day one. Each stage has a checklist;
+the model reports which points an answer settled, the stage is the first with a point still open,
+and a section is `ready` only when every point of the stages that fill it is settled. The prompt
+asks it to understand the business first, build each question on earlier answers, raise what such
+businesses usually forget as questions, notice contradictions, and give each question a one-line
+reason. `docs/interview-eval.md` runs it against scripted owners.
+
+- Each question is one model call on `SCHMEIDE_INTERVIEW_MODEL` (`sonnet`), made while the request
+  waits. The interview ends at its depth's limit.
 - When the model cannot produce a turn the call answers `SERVICE_UNAVAILABLE`, the question stays
   open, and the same call can be sent again.
 - A project with plan items needs no typed requests: `projects.generateSpec` writes the spec from
