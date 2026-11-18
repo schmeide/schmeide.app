@@ -13,7 +13,7 @@ import {
   users,
 } from "../db/schema.ts";
 import { withAudit, type Actor, type AuditTarget } from "./audit.ts";
-import type { Auth } from "./auth.ts";
+import type { Auth, Person } from "./auth.ts";
 import { joinBusiness } from "./businesses.ts";
 import { ConflictError, ForbiddenError, NotFoundError } from "./errors.ts";
 import { slugify } from "./projects.ts";
@@ -25,6 +25,14 @@ const INVITE_MS = INVITE_DAYS * 24 * 60 * 60 * 1000;
 const DEAD_LINK = "This link is not valid any more";
 
 const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
+
+export const newLink = (now: Date) => {
+  const token = randomBytes(32).toString("base64url");
+  return { token, tokenHash: hashToken(token), expiresAt: new Date(now.getTime() + INVITE_MS) };
+};
+
+export const HAS_ACCOUNT =
+  "This address already has an account. Sign in with it, then open the link again to join.";
 
 export const isApproved = async (db: Db, email: string): Promise<boolean> => {
   const [row] = await db
@@ -44,8 +52,7 @@ export const approveEmail = async (
   { tenantId, now = new Date() }: { readonly tenantId?: number; readonly now?: Date } = {}
 ): Promise<{ readonly email: string; readonly token: string; readonly expiresAt: Date }> => {
   const email = emailSchema.parse(rawEmail);
-  const token = randomBytes(32).toString("base64url");
-  const expiresAt = new Date(now.getTime() + INVITE_MS);
+  const { token, tokenHash, expiresAt } = newLink(now);
   await db.transaction(async (tx) => {
     await tx
       .insert(approvedEmails)
@@ -56,8 +63,10 @@ export const approveEmail = async (
       });
     const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.email, email));
     if (user && tenantId) await joinBusiness(tx as unknown as Db, user.id, tenantId);
-    await tx.delete(invites).where(and(eq(invites.email, email), isNull(invites.usedAt)));
-    await tx.insert(invites).values({ email, tokenHash: hashToken(token), expiresAt });
+    await tx
+      .delete(invites)
+      .where(and(eq(invites.email, email), isNull(invites.usedAt), isNull(invites.tenantId)));
+    await tx.insert(invites).values({ email, tokenHash, expiresAt });
   });
   return { email, token, expiresAt };
 };
@@ -362,7 +371,7 @@ const insertTenant = async (db: Db, name: string): Promise<number> => {
 const liveInvite = async (db: Db, token: string, now: Date) => {
   // The join drops a link whose address was taken off the list (the row cascades away anyway).
   const [invite] = await db
-    .select({ id: invites.id, email: invites.email })
+    .select({ id: invites.id, email: invites.email, tenantId: invites.tenantId })
     .from(invites)
     .innerJoin(approvedEmails, eq(approvedEmails.email, invites.email))
     .where(
@@ -376,15 +385,45 @@ const liveInvite = async (db: Db, token: string, now: Date) => {
   return invite;
 };
 
-// What the set-password page shows: whose link this is, and whether they already have an account.
+// What the set-password page shows: whose link this is, whether they already have an account,
+// and the business an owner invited them to (null for a plain set-password link).
 export const getInvite = async (
   db: Db,
   token: string,
   now = new Date()
-): Promise<{ readonly email: string; readonly hasAccount: boolean }> => {
+): Promise<{
+  readonly email: string;
+  readonly hasAccount: boolean;
+  readonly business: string | null;
+}> => {
   const invite = await liveInvite(db, token, now);
   const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, invite.email));
-  return { email: invite.email, hasAccount: Boolean(user) };
+  const [tenant] = invite.tenantId
+    ? await db.select({ name: tenants.name }).from(tenants).where(eq(tenants.id, invite.tenantId))
+    : [];
+  return { email: invite.email, hasAccount: Boolean(user), business: tenant?.name ?? null };
+};
+
+const spend = async (db: Db, id: number, now: Date): Promise<void> => {
+  const spent = await db
+    .update(invites)
+    .set({ usedAt: now })
+    .where(and(eq(invites.id, id), isNull(invites.usedAt)))
+    .returning();
+  if (spent.length === 0) throw new NotFoundError(DEAD_LINK);
+};
+
+export const joinByInvite = async (
+  db: Db,
+  person: Person,
+  token: string,
+  now = new Date()
+): Promise<{ readonly businessId: number }> => {
+  const { id, email, tenantId } = await liveInvite(db, token, now);
+  if (!tenantId || email !== person.email) throw new NotFoundError(DEAD_LINK);
+  await spend(db, id, now);
+  await joinBusiness(db, person.id, tenantId);
+  return { businessId: tenantId };
 };
 
 // Sets the password for the link's address: a new account for a new person, a reset (ending
@@ -394,17 +433,13 @@ export const acceptInvite = async (
   input: { readonly token: string; readonly name?: string; readonly password: string },
   now = new Date()
 ): Promise<{ readonly email: string }> => {
-  const { id, email } = await liveInvite(db, input.token, now);
+  const { id, email, tenantId } = await liveInvite(db, input.token, now);
   const { internalAdapter, password } = await auth.$context;
   const existing = await internalAdapter.findUserByEmail(email);
   // Checked before the link is spent, so a new person who left the name out can try again.
   if (!existing && !input.name) throw new NotFoundError("A name is needed to open an account");
-  const spent = await db
-    .update(invites)
-    .set({ usedAt: now })
-    .where(and(eq(invites.id, id), isNull(invites.usedAt)))
-    .returning();
-  if (spent.length === 0) throw new NotFoundError(DEAD_LINK);
+  if (existing && tenantId) throw new ConflictError(HAS_ACCOUNT);
+  await spend(db, id, now);
 
   const hash = await password.hash(input.password);
   if (!existing) {
@@ -429,6 +464,7 @@ export const acceptInvite = async (
       accountId: user.id,
       password: hash,
     });
+    if (tenantId) await joinBusiness(db, user.id, tenantId);
     return { email };
   }
   const userId = existing.user.id;

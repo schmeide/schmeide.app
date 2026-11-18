@@ -159,6 +159,7 @@ describe("taking a person's access away and giving it back", () => {
     expect((await callApi(app, "invites.get", { token })).data).toEqual({
       email,
       hasAccount: false,
+      business: null,
     });
     // Nothing the log keeps or lists carries it.
     const rows = await auditOf(admin.email);

@@ -308,6 +308,82 @@ export const copy = {
     dead: "It was already used, it is more than 7 days old, or a newer link replaced it. Ask the person who invited you for a new one.",
     toSignIn: "Go to sign in",
     savedButSignedOut: "Your password is saved. Sign in with it to continue.",
+    invitedIntro: (business: string, email: string) =>
+      `You are invited to join ${business}. Choose a password for ${email}. You will sign in with it from now on.`,
+    joinTitle: (business: string) => `Join ${business}`,
+    joinIntro: (business: string, email: string) =>
+      `${email} is invited to work on the apps of ${business}. Your own business and your password stay as they are.`,
+    join: (business: string) => `Join ${business}`,
+    joining: "Joining…",
+    joinSignIn: (email: string) =>
+      `This address already has an account. Sign in as ${email} and you come back here to join.`,
+    joinSignInAction: "Sign in to join",
+    joinWrongPerson: (invited: string, current: string) =>
+      `This invitation is for ${invited}, but you are signed in as ${current}. Sign out, sign in as ${invited}, then open the link again.`,
+  },
+  businessPage: {
+    readOnly:
+      "You are an editor of this business. Only an owner can change its name and country, its members, and its invitations.",
+    gone: "That was already changed or removed by someone else. The page shows how things are now.",
+    details: {
+      title: "Name and country",
+      nameLabel: "Business name",
+      nameMissing: "Type a name for the business.",
+      countryLabel: "Country",
+      countryNone: "Not chosen yet",
+      save: "Save name and country",
+      saving: "Saving…",
+      saved: "Saved.",
+    },
+    members: {
+      title: (count: number) => `Members (${count})`,
+      roleHelp:
+        "An owner can do everything. An editor can make and change apps, but cannot change the business, its members, or billing.",
+      roles: { owner: "Owner", editor: "Editor" },
+      you: "(you)",
+      joined: (date: string) => `Joined ${date}`,
+      alone: "You are the only member. Invite someone below to work on the apps with you.",
+      onlyOwner:
+        "You are the only owner, so you cannot leave or become an editor. Make someone else an owner first.",
+      makeOwner: (name: string) => `Make ${name} an owner`,
+      makeOwnerConfirm: (name: string) =>
+        `An owner can do everything here, including removing you. Keep ${name} beside you as a second owner, or hand the business over and become an editor yourself.`,
+      makeOwnerToo: (name: string) => `Make ${name} an owner too`,
+      handOver: (name: string) => `Make ${name} the owner and me an editor`,
+      changeNothing: "Change nothing",
+      makeEditor: (name: string) => `Make ${name} an editor`,
+      remove: (name: string) => `Remove ${name}`,
+      removeConfirm: (name: string, business: string) =>
+        `Remove ${name} from ${business}? They lose its apps at once. Their account, and any other business they are in, stay as they are.`,
+      keep: (name: string) => `Keep ${name}`,
+      leave: (business: string) => `Leave ${business}`,
+      leaveConfirm: (business: string) =>
+        `Leave ${business}? You lose its apps at once. If it is your only business, you get a new, empty one.`,
+      stay: "Stay a member",
+      working: "Working…",
+    },
+    invitations: {
+      title: "Invitations",
+      intro:
+        "Schmeide does not send email yet. Type the person’s email address to get a link, then send the link to them yourself. They join as an editor.",
+      emailLabel: "Email address of the person to invite",
+      emailMissing: "Type their email address, for example name@example.com.",
+      add: "Create an invitation link",
+      adding: "Creating…",
+      linkLabel: (email: string) => `Invitation link for ${email}`,
+      linkHelp: (days: number) =>
+        `Copy this link now and send it to them. It is shown only this once, works one time, and stops working after ${days} days. If it gets lost, make a new link in the list below.`,
+      copyLink: "Copy the link",
+      copied: "Copied.",
+      copyFailed: "Could not copy. Select the link and copy it yourself.",
+      waitingTitle: (count: number) => `Waiting (${count})`,
+      none: "No invitations are waiting.",
+      invited: (date: string) => `Invited ${date}`,
+      expired: "Its link is too old to use. Make a new link.",
+      renew: (email: string) => `Make a new link for ${email}`,
+      renewHelp: "Making a new link stops the old one from working.",
+      withdraw: (email: string) => `Withdraw the invitation for ${email}`,
+    },
   },
   // What a member of a suspended business sees in place of its pages.
   suspended: {

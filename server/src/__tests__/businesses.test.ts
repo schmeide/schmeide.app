@@ -69,6 +69,16 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "account.signOutOthers": undefined,
   "account.export": undefined,
   "account.delete": { email: "nobody@example.com" },
+  "invites.join": { token: "no-such-token" },
+  "business.get": undefined,
+  "business.update": { name: "Taken over", country: null },
+  "business.invite": { email: "taken-over@example.com" },
+  "business.reissueInvitation": { email: "taken-over@example.com" },
+  "business.withdrawInvitation": { email: "taken-over@example.com" },
+  "business.removeMember": { userId: "no-such-person" },
+  "business.leave": undefined,
+  "business.setRole": { userId: "no-such-person", role: "owner" },
+  "business.transferOwnership": { userId: "no-such-person" },
   "projects.list": undefined,
   "projects.create": { name: `walk ${randomUUID()}` },
   "projects.get": { id },
@@ -105,6 +115,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
 const takesAnId = (input: unknown) => typeof input === "object" && input !== null;
 // The caller's own account: about the person, never a project or build.
 const isOwnAccount = (path: string) => path.startsWith("account.");
+// These act on the caller's own business and take no project or build; members.test.ts walks them.
+const ownBusiness = (path: string) => path.startsWith("business.");
 
 // A project with a spec and a running build, in the given business.
 const aBuiltProject = async (tenantId: number) => {
@@ -158,7 +170,8 @@ describe("every procedure", () => {
           !OPEN.includes(path) &&
           !isOwnAccount(path) &&
           takesAnId(calls[path]) &&
-          path !== "projects.create"
+          path !== "projects.create" &&
+          !ownBusiness(path)
       );
       expect(scoped.length).toBeGreaterThan(15);
       for (const path of scoped)

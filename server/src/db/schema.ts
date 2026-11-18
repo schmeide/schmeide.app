@@ -38,6 +38,7 @@ export const tenants = pgTable("tenants", {
   // Why and when the state last changed; null for a business that has never changed state.
   stateReason: text("state_reason"),
   stateChangedAt: timestamp("state_changed_at", { withTimezone: true }),
+  country: varchar("country", { length: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -648,17 +649,30 @@ export const approvedEmails = pgTable("approved_emails", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-// A one-time link that lets an approved person set their password. Only the token's hash is kept.
-export const invites = pgTable("invites", {
-  id: serial("id").primaryKey(),
-  email: text("email")
-    .notNull()
-    .references(() => approvedEmails.email, { onDelete: "cascade" }),
-  tokenHash: text("token_hash").notNull().unique(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  usedAt: timestamp("used_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+// A one-time link. With no business it lets an approved person set their password. With one it
+// is an owner's invitation to that business: it opens an account for a new person, or lets a
+// signed-in person join, and never changes an existing password. Only the token's hash is kept.
+export const invites = pgTable(
+  "invites",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email")
+      .notNull()
+      .references(() => approvedEmails.email, { onDelete: "cascade" }),
+    tenantId: integer("tenant_id").references(() => tenants.id),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("invites_waiting_idx")
+      .on(table.tenantId, table.email)
+      .where(sql`${table.usedAt} is null`),
+  ]
+);
+
+export type MemberRole = (typeof memberRole.enumValues)[number];
 
 export const websiteReads = pgTable(
   "website_reads",

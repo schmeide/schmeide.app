@@ -12,9 +12,9 @@ const ada: Session = {
 };
 const PASSWORD = "correct horse battery";
 
-const open = (path: string, invites: Handlers) => {
+const open = (path: string, invites: Handlers, session: Session = signedOut) => {
   window.history.replaceState(null, "", path);
-  const { handlers } = authServer({ session: signedOut, account: { ...ada, password: PASSWORD } });
+  const { handlers } = authServer({ session, account: { ...ada, password: PASSWORD } });
   return renderWithApi(
     <App isPublicSite={false} />,
     { ...handlers, "projects.list": () => [], ...invites },
@@ -77,6 +77,94 @@ describe("the set-password page", () => {
       "autocomplete",
       "new-password"
     );
+  });
+
+  it("tells a new person which business invited them", async () => {
+    open("/set-password?token=abc", {
+      "invites.get": () => ({
+        email: "ada@example.com",
+        hasAccount: false,
+        business: "Bob’s bikes",
+      }),
+    });
+    expect(
+      await screen.findByText(copy.setPasswordPage.invitedIntro("Bob’s bikes", "ada@example.com"))
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText(copy.setPasswordPage.nameLabel)).toBeInTheDocument();
+  });
+
+  describe("for an invitation to a person who already has an account", () => {
+    const invited: Handlers = {
+      "invites.get": () => ({
+        email: "ada@example.com",
+        hasAccount: true,
+        business: "Bob’s bikes",
+      }),
+    };
+
+    it("never asks for a password, and sends a signed-out person to sign in and back", async () => {
+      open("/set-password?token=abc", invited);
+      expect(
+        await screen.findByRole("heading", {
+          level: 1,
+          name: copy.setPasswordPage.joinTitle("Bob’s bikes"),
+        })
+      ).toBeInTheDocument();
+      expect(screen.queryByLabelText(copy.setPasswordPage.passwordLabel)).toBeNull();
+      expect(screen.getByText(copy.setPasswordPage.joinSignIn("ada@example.com"))).toBeVisible();
+      expect(
+        screen.getByRole("link", { name: copy.setPasswordPage.joinSignInAction })
+      ).toHaveAttribute("href", "/sign-in?next=%2Fset-password%3Ftoken%3Dabc");
+    });
+
+    it("lets that person join once signed in, and takes them to the business", async () => {
+      const state = { joined: false };
+      const calls = open(
+        "/set-password?token=abc",
+        {
+          ...invited,
+          "invites.join": () => {
+            state.joined = true;
+            return { businessId: 2 };
+          },
+          "session.get": () => ({
+            ...ada,
+            businesses: state.joined
+              ? [...ada.businesses, { id: 2, name: "Bob’s bikes" }]
+              : ada.businesses,
+            providers: [],
+          }),
+        },
+        ada
+      );
+      await userEvent.click(
+        await screen.findByRole("button", { name: copy.setPasswordPage.join("Bob’s bikes") })
+      );
+      await waitFor(() => expect(window.location.pathname).toBe("/"));
+      expect(calls.find((call) => call.path === "invites.join")?.input).toEqual({ token: "abc" });
+      expect(await screen.findByRole("combobox", { name: copy.shell.businessLabel })).toHaveValue(
+        "2"
+      );
+    });
+
+    it("tells a person signed in under another address to switch", async () => {
+      open("/set-password?token=abc", {
+        "invites.get": () => ({
+          email: "bea@example.com",
+          hasAccount: true,
+          business: "Bob’s bikes",
+        }),
+        "session.get": () => ({ ...ada, providers: [] }),
+      });
+      expect(
+        await screen.findByText(
+          copy.setPasswordPage.joinWrongPerson("bea@example.com", "ada@example.com")
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: copy.setPasswordPage.join("Bob’s bikes") })
+      ).toBeNull();
+    });
   });
 
   it.each([

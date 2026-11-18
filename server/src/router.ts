@@ -42,6 +42,7 @@ import {
   approveAccess,
   createBusiness,
   getInvite,
+  joinByInvite,
   grantAdminRole,
   listAdmins,
   removeAccess,
@@ -67,6 +68,7 @@ import {
   assertBuildIn,
   assertProjectIn,
   businessesOf,
+  roleIn,
   removeMember,
   setBusinessState,
 } from "./services/businesses.ts";
@@ -104,6 +106,20 @@ import {
   updatePlanItem,
   type Interviewer,
 } from "./services/interview.ts";
+import {
+  getBusiness as getOwnBusiness,
+  invitationSchema,
+  inviteToBusiness,
+  memberRoleSchema,
+  memberSchema,
+  reissueInvitation,
+  removeMember as removeFromBusiness,
+  setMemberRole,
+  transferOwnership,
+  updateBusiness,
+  updateBusinessSchema,
+  withdrawInvitation,
+} from "./services/members.ts";
 import { siteSchema } from "./services/site.ts";
 import { getDesign, pickLook, pickLookSchema } from "./services/designs.ts";
 import { readWebsite, type WebsiteDeps } from "./services/website.ts";
@@ -283,6 +299,16 @@ export const adminMutation = (action: string) =>
       return result;
     })
   );
+
+const ownerOnly = signedIn.use(async ({ ctx, next }) => {
+  if ((await roleIn(ctx.db, ctx.tenantId, ctx.person.id)) !== "owner")
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message:
+        "Only an owner of this business can do this. Ask an owner to do it, or to make you an owner.",
+    });
+  return next();
+});
 
 // A procedure about one project (`id`) or one build (`buildId`). Either in another business
 // answers NOT_FOUND, exactly as one that does not exist.
@@ -502,6 +528,37 @@ export const appRouter = t.router({
       .use(refuseImpersonation)
       .input(acceptInviteSchema)
       .mutation(({ ctx, input }) => acceptInvite(ctx, input)),
+    join: signedIn
+      .use(refuseImpersonation)
+      .input(inviteTokenSchema)
+      .mutation(({ ctx, input }) => joinByInvite(ctx.db, ctx.person, input.token)),
+  }),
+  business: t.router({
+    get: signedIn.query(({ ctx }) => getOwnBusiness(ctx.db, ctx.tenantId, ctx.person.id)),
+    update: ownerOnly
+      .input(updateBusinessSchema)
+      .mutation(({ ctx, input }) => updateBusiness(ctx.db, ctx.tenantId, input)),
+    invite: ownerOnly
+      .input(invitationSchema)
+      .mutation(({ ctx, input }) => inviteToBusiness(ctx.db, ctx.tenantId, input.email)),
+    reissueInvitation: ownerOnly
+      .input(invitationSchema)
+      .mutation(({ ctx, input }) => reissueInvitation(ctx.db, ctx.tenantId, input.email)),
+    withdrawInvitation: ownerOnly
+      .input(invitationSchema)
+      .mutation(({ ctx, input }) => withdrawInvitation(ctx.db, ctx.tenantId, input.email)),
+    removeMember: ownerOnly
+      .input(memberSchema)
+      .mutation(({ ctx, input }) => removeFromBusiness(ctx.db, ctx.tenantId, input.userId)),
+    leave: signedIn.mutation(({ ctx }) => removeFromBusiness(ctx.db, ctx.tenantId, ctx.person.id)),
+    setRole: ownerOnly
+      .input(memberRoleSchema)
+      .mutation(({ ctx, input }) => setMemberRole(ctx.db, ctx.tenantId, input)),
+    transferOwnership: ownerOnly
+      .input(memberSchema)
+      .mutation(({ ctx, input }) =>
+        transferOwnership(ctx.db, ctx.tenantId, ctx.person.id, input.userId)
+      ),
   }),
   projects: t.router({
     list: signedIn.query(({ ctx }) => listProjects(ctx.db, ctx.tenantId)),

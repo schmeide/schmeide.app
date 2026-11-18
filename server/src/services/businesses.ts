@@ -1,9 +1,18 @@
 // Businesses (tenants) and who belongs to them. Every API call acts inside one business, and
 // nothing in another business can be seen or changed from it.
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { approvedEmails, builds, memberships, projects, tenants, users } from "../db/schema.ts";
+import {
+  approvedEmails,
+  builds,
+  invites,
+  memberships,
+  projects,
+  tenants,
+  users,
+  type MemberRole,
+} from "../db/schema.ts";
 import type { AuditTarget } from "./audit.ts";
 import type { Person } from "./auth.ts";
 import { BusinessSuspendedError, ConflictError, NotFoundError } from "./errors.ts";
@@ -38,8 +47,19 @@ export const businessesOf = async (db: Db, person: Person): Promise<readonly Bus
       .select({ tenantId: approvedEmails.tenantId })
       .from(approvedEmails)
       .where(eq(approvedEmails.email, person.email));
-    if (approval?.tenantId) await joinBusiness(tx, person.id, approval.tenantId);
-    else {
+    if (approval?.tenantId) {
+      await joinBusiness(tx, person.id, approval.tenantId);
+      await tx
+        .update(invites)
+        .set({ usedAt: new Date() })
+        .where(
+          and(
+            eq(invites.email, person.email),
+            eq(invites.tenantId, approval.tenantId),
+            isNull(invites.usedAt)
+          )
+        );
+    } else {
       const [tenant] = await tx
         .insert(tenants)
         .values({ slug: `b-${randomUUID()}`, name: `${person.name}’s business` })
@@ -69,6 +89,18 @@ export const joinBusiness = async (
     .insert(memberships)
     .values({ userId, tenantId, role: role ?? (anyone ? "editor" : "owner") })
     .onConflictDoNothing();
+};
+
+export const roleIn = async (
+  db: Db,
+  tenantId: number,
+  userId: string
+): Promise<MemberRole | undefined> => {
+  const [membership] = await db
+    .select({ role: memberships.role })
+    .from(memberships)
+    .where(and(eq(memberships.tenantId, tenantId), eq(memberships.userId, userId)));
+  return membership?.role;
 };
 
 export const findTenantBySlug = async (db: Db, slug: string): Promise<number> => {
