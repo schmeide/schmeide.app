@@ -8,7 +8,7 @@ export const copy = {
   // Addresses outside this app.
   outbound: {
     marketingSite: `${MARKETING_SITE}/`,
-    earlyAccess: `${MARKETING_SITE}/early-access/`,
+    earlyAccess: `${MARKETING_SITE}/#early-access`,
   },
   hero: {
     headline: "Schmeide",
