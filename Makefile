@@ -37,7 +37,8 @@ OUT_DIR ?= ./dist
 
 # Platform server (server/). Ports match compose.yaml.
 PORT ?= 3100
-DATABASE_URL ?= postgres://postgres:postgres@localhost:5440/schmeide
+LOCAL_DATABASE_URL := postgres://postgres:postgres@localhost:5440/schmeide
+DATABASE_URL ?= $(LOCAL_DATABASE_URL)
 TEST_DATABASE_URL ?= postgres://postgres:postgres@localhost:5441/schmeide
 TEMPORAL_ADDRESS ?= localhost:7233
 SCHMEIDE_DATA_DIR ?= $(HOME)/.schmeide
@@ -110,6 +111,43 @@ serve/watch: infra/up node_modules ## Like serve, but the server reloads on code
 	$(MAKE) db/seed
 	echo "App: http://localhost:5173  API: http://localhost:$(PORT)  Temporal UI: http://localhost:8233"
 	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
+
+# serve/cloud: the UI and server against the cloud's Postgres and Temporal, over
+# `telepresence connect`. No Docker for either; builds still use local docker, git and claude.
+# - DATABASE_URL has no cloud default (it carries the admin password); see the README.
+# - Migrations are opt-in (MIGRATE=1) because the database is shared.
+# - The server is also the Temporal worker. Each developer polls their own task queue so
+#   laptops don't steal each other's tasks; a build you start only runs on your worker, and
+#   waits while your laptop is off.
+# - Everyone shares the one `schmeide` database, so workflow IDs (`build-<build id>`) come from
+#   one sequence and can't collide. A per-developer database would also need its own namespace.
+CLOUD_TEMPORAL_ADDRESS ?= temporal-frontend.temporal:7233
+serve/cloud serve/cloud/watch serve/cloud/check: TEMPORAL_ADDRESS = $(CLOUD_TEMPORAL_ADDRESS)
+serve/cloud serve/cloud/watch serve/cloud/check: export SCHMEIDE_TASK_QUEUE ?= schmeide-$(USER)
+
+.PHONY: serve/cloud
+serve/cloud: serve/cloud/check ## Server and Vite against the cloud's Postgres and Temporal (telepresence; DATABASE_URL required; MIGRATE=1 migrates)
+	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run start -w server" "$(JS_EXEC) run dev"
+
+.PHONY: serve/cloud/watch
+serve/cloud/watch: serve/cloud/check ## Like serve/cloud, but the server reloads on code changes
+	$(JS_EXEC) exec concurrently -- -k -n server,web "$(JS_EXEC) run dev -w server" "$(JS_EXEC) run dev"
+
+.PHONY: serve/cloud/check
+serve/cloud/check: node_modules ## Check the cloud is reachable and DATABASE_URL is set; MIGRATE=1 also migrates it
+	if [ "$$DATABASE_URL" = "$(LOCAL_DATABASE_URL)" ]; then
+		echo "Error: set DATABASE_URL to the cloud database, e.g."
+		echo "  export DATABASE_URL='postgres://<user>:<password>@<host>:5432/schmeide?sslmode=require'"
+		echo "The README's \"Serving against the cloud\" section says where the password lives."
+		exit 1
+	fi
+	host=$${TEMPORAL_ADDRESS%:*}; port=$${TEMPORAL_ADDRESS##*:}
+	if ! nc -z -w 3 "$$host" "$$port" >/dev/null 2>&1; then
+		echo "Error: cannot reach Temporal at $$TEMPORAL_ADDRESS. Run \`telepresence connect\` and retry."
+		exit 1
+	fi
+	$(if $(MIGRATE),$(JS_EXEC) run db:migrate -w server)
+	echo "App: http://localhost:5173  API: http://localhost:$(PORT)  Temporal: $$TEMPORAL_ADDRESS  Task queue: $$SCHMEIDE_TASK_QUEUE"
 
 .PHONY: serve/web
 serve/web: node_modules ## Run only the Vite dev server
@@ -309,7 +347,7 @@ env-%: ## Check if env var is defined
 
 .PHONY: help
 help: ## Display this help
-	awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_\/-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z0-9_\/-]+:.*?##/ { printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 # No ## comment: `make help` only lists targets that document themselves.
 .PHONY: gnu-make-version

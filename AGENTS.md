@@ -34,15 +34,16 @@ For a pure refactor, run the existing tests before and after.
   target for it rather than running raw commands.
 - `make help` lists every target and is the default goal.
 
-| Target       | What it does                                         |
-| ------------ | ---------------------------------------------------- |
-| `make setup` | Install nvm, the Node version in `.nvmrc`, deps      |
-| `make serve` | Vite dev server with hot module replacement          |
-| `make build` | Typecheck and build `dist/` — what CI/CD ships       |
-| `make test`  | Run the Vitest suite once                            |
-| `make check` | ESLint, `tsc`, Prettier, and markdownlint            |
-| `make fix`   | Apply ESLint, Prettier, and markdownlint fixes       |
-| `make clean` | Remove `dist/`, `coverage/`, and Vite's module cache |
+| Target             | What it does                                                           |
+| ------------------ | ---------------------------------------------------------------------- |
+| `make setup`       | Install nvm, the Node version in `.nvmrc`, deps                        |
+| `make serve`       | Vite dev server with hot module replacement                            |
+| `make serve/cloud` | Server and Vite against the cloud's Postgres and Temporal (see README) |
+| `make build`       | Typecheck and build `dist/` — what CI/CD ships                         |
+| `make test`        | Run the Vitest suite once                                              |
+| `make check`       | ESLint, `tsc`, Prettier, and markdownlint                              |
+| `make fix`         | Apply ESLint, Prettier, and markdownlint fixes                         |
+| `make clean`       | Remove `dist/`, `coverage/`, and Vite's module cache                   |
 
 ## Development assumptions
 
