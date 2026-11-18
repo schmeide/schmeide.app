@@ -54,6 +54,7 @@ import {
   projectDesigns,
   projectIcons,
   projects,
+  tenants,
   type BuildEventKind,
   type FileRow,
   type NewAgentRun,
@@ -135,6 +136,7 @@ import {
   type Deps,
 } from "../services/projects.ts";
 import { COPIES, copyOf, webPortOf, type Copy } from "../services/resources.ts";
+import { writePrivacy } from "../services/privacyNotice.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
 
@@ -1006,7 +1008,8 @@ export const createActivities = (
     await mustRun(project, "git", ["commit", "-q", "-m", "start from the schmeide template"], dir);
   };
 
-  // The page title and icon, written into the app in `workspace` and committed there.
+  // The page title, icon, privacy notice and footer, written into the app in `workspace` and
+  // committed there.
   const writeSite = async (project: Project, buildId: number, workspace: string) => {
     const frontend = join(workspace, "frontend");
     const html = await readFile(join(frontend, "index.html"), "utf8").catch(() => undefined);
@@ -1029,6 +1032,18 @@ export const createActivities = (
       join(frontend, "index.html"),
       withSite(html, project.pageTitle ?? project.name, type)
     );
+    const [tenant] = await db
+      .select({ name: tenants.name })
+      .from(tenants)
+      .where(eq(tenants.id, project.tenantId));
+    // Contact, retention (#56) and region (#260) are not recorded yet; the page says so.
+    await writePrivacy(workspace, {
+      business: tenant?.name ?? "",
+      appUrl: project.previewUrl ?? project.stagingUrl,
+      contact: null,
+      retention: null,
+      region: null,
+    });
     await mustRun(
       project,
       "git",
