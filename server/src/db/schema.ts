@@ -268,8 +268,17 @@ export const projectDesigns = pgTable("project_designs", {
     .$onUpdate(() => new Date()),
 });
 
-// The plan the interview builds: the same parts the spec has, plus who uses the app.
-export const PLAN_SECTIONS = ["who", "does", "screens", "keeps", "replaces"] as const;
+// The plan the interview builds: the same parts the spec has, plus the business it serves, who uses
+// the app, and the rules that break a simple version of it.
+export const PLAN_SECTIONS = [
+  "business",
+  "who",
+  "does",
+  "rules",
+  "screens",
+  "keeps",
+  "replaces",
+] as const;
 export const planSection = pgEnum("plan_section", PLAN_SECTIONS);
 // `schmeide`: an item the model added that the person did not state themselves.
 export const planSource = pgEnum("plan_source", ["you", "schmeide"]);
@@ -313,18 +322,26 @@ export const interviewQuestions = pgTable("interview_questions", {
   text: varchar("text", { length: ITEM_MAX }).notNull(),
   kind: questionKind("kind").notNull(),
   choices: jsonb("choices").$type<readonly string[]>().notNull().default([]),
+  // One short line on why it is asked, so a pointed question reads as care, not as a quiz.
+  why: varchar("why", { length: ITEM_MAX }).notNull().default(""),
   answer: jsonb("answer").$type<Answer>(),
   askedAt: timestamp("asked_at", { withTimezone: true }).notNull().defaultNow(),
   answeredAt: timestamp("answered_at", { withTimezone: true }),
 });
 
-// What the model last said about the interview as a whole.
+// How far the person wants the questions to go: a quick sketch, or the thorough interview.
+export const INTERVIEW_DEPTHS = ["quick", "thorough"] as const;
+export const interviewDepth = pgEnum("interview_depth", INTERVIEW_DEPTHS);
+
+// Where the interview stands as a whole.
 export const interviews = pgTable("interviews", {
   projectId: integer("project_id")
     .primaryKey()
     .references(() => projects.id),
-  // Sections the model considers complete enough to build from.
-  ready: jsonb("ready").$type<readonly PlanSection[]>().notNull().default([]),
+  depth: interviewDepth("depth").notNull().default("thorough"),
+  // The checklist points the answers have settled (see services/interview.ts); a section is ready
+  // when every point it needs is here.
+  covered: jsonb("covered").$type<readonly string[]>().notNull().default([]),
   // The model has no more questions, or the question limit was reached.
   finished: boolean("finished").notNull().default(false),
 });
@@ -500,6 +517,7 @@ export type RunKind = (typeof agentRunKind.enumValues)[number];
 export type NewUsage = typeof usage.$inferInsert;
 export type NewAgentRun = typeof agentRuns.$inferInsert;
 export type PlanSection = (typeof PLAN_SECTIONS)[number];
+export type InterviewDepth = (typeof INTERVIEW_DEPTHS)[number];
 export type PlanItem = typeof planItems.$inferSelect;
 export type Question = typeof interviewQuestions.$inferSelect;
 export type FileRow = typeof files.$inferSelect;

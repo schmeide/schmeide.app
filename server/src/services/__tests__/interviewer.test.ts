@@ -41,8 +41,13 @@ const TURN = {
   add: [{ section: "who", text: "Only the owner", phase: "day_one" }],
   update: [],
   remove: [],
-  ready: ["who"],
-  question: { text: "Do invoices have a due date?", kind: "yes_no", choices: [] },
+  covered: ["people.roles"],
+  question: {
+    text: "Do invoices have a due date?",
+    why: "Late payers are easier to chase with one.",
+    kind: "yes_no",
+    choices: [],
+  },
 };
 
 const input: Parameters<Interviewer>[0] = {
@@ -69,6 +74,8 @@ const input: Parameters<Interviewer>[0] = {
       answer: { type: "you_decide" },
     },
   ],
+  depth: "thorough",
+  covered: [],
 };
 
 describe("interviewPrompt", () => {
@@ -81,6 +88,48 @@ describe("interviewPrompt", () => {
     expect(prompt).toContain(
       "What they said they need when they started, in their own words:\nI need to send invoices and see who has paid"
     );
+  });
+});
+
+describe("interviewPrompt, asking like an expert", () => {
+  it("starts with the business, before the app", () => {
+    const prompt = interviewPrompt(input);
+
+    expect(prompt).toContain("You are in this stage now: The business.");
+    expect(prompt).toContain("Understand the business before the app.");
+    expect(prompt).toContain("- [ ] business.offer: what they sell, and to whom");
+  });
+
+  it("moves to the first stage with a point still open, and marks what is settled", () => {
+    const prompt = interviewPrompt({
+      ...input,
+      covered: [
+        "business.offer",
+        "business.flow",
+        "business.volume",
+        "business.pain",
+        "business.aim",
+      ],
+    });
+
+    expect(prompt).toContain("- [x] business.offer: what they sell, and to whom");
+    expect(prompt).toContain("You are in this stage now: The jobs.");
+  });
+
+  it("asks for a line on why each question is asked, and for questions that build on earlier answers", () => {
+    const prompt = interviewPrompt(input);
+
+    expect(prompt).toContain('"why": one short line');
+    expect(prompt).toContain("Make each question sharper than the last.");
+    expect(prompt).toContain("Notice gaps and contradictions");
+    expect(prompt).toContain("never add them to the plan silently");
+  });
+
+  it("follows the depth they chose and its question limit", () => {
+    expect(interviewPrompt({ ...input, depth: "quick" })).toContain(
+      "They chose a quick sketch: about five minutes and at most 10 questions."
+    );
+    expect(interviewPrompt(input)).toContain("(2 of at most 30)");
   });
 });
 
@@ -134,7 +183,7 @@ describe("createInterviewer", () => {
   });
 
   it("turns a choice question with too few choices into one answered in words", async () => {
-    const question = { text: "Who uses it?", kind: "pick_many", choices: ["Me"] };
+    const question = { text: "Who uses it?", why: "Why", kind: "pick_many", choices: ["Me"] };
     const interviewer = createInterviewer(
       config,
       fakeQuery([], { structured_output: { ...TURN, question } })
@@ -142,6 +191,7 @@ describe("createInterviewer", () => {
 
     expect((await interviewer(input)).turn.question).toEqual({
       text: "Who uses it?",
+      why: "Why",
       kind: "text",
       choices: [],
     });

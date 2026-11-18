@@ -2,6 +2,7 @@ import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
+  INTERVIEW_DEPTHS,
   ITEM_MAX,
   NEED_MAX,
   PLAN_SECTIONS,
@@ -15,6 +16,7 @@ import {
   questionKind,
   readBacks,
   type Answer,
+  type InterviewDepth,
   type PlanItem,
   type PlanSection,
   type Project,
@@ -24,8 +26,102 @@ import { recordUsage, type RunUsage } from "./builds.ts";
 import { ConflictError, NotFoundError } from "./errors.ts";
 import { findProject, statusWord, transition } from "./projects.ts";
 
-// After this many questions the interview ends whatever the model says, so it cannot run on.
-export const MAX_QUESTIONS = 30;
+// After this many questions the interview ends whatever the model says, so it cannot run on. The
+// person picks the depth: a quick sketch of about five minutes, or the thorough interview of about
+// twenty.
+export const QUESTION_LIMITS: Readonly<Record<InterviewDepth, number>> = {
+  quick: 10,
+  thorough: 30,
+};
+export const MAX_QUESTIONS = QUESTION_LIMITS.thorough;
+
+// The interview's stages, in order, each with the points that must be settled before it is done.
+// A plan section is ready when every point of every stage that fills it is settled, so readiness
+// comes from this checklist, not from the model's feeling. The model reports which points an answer
+// settled; the stage it is in is the first with a point still open.
+export const STAGES = [
+  {
+    stage: "business",
+    sections: ["business"],
+    points: {
+      offer: "what they sell, and to whom",
+      flow: "how one piece of work goes from first contact to being paid",
+      volume: "how much work there is in a week, and how many people take part",
+      pain: "what goes wrong or takes too long today",
+      aim: "what would save them the most time each week, and what they want to see at a glance on a Monday morning",
+    },
+  },
+  {
+    stage: "jobs",
+    sections: ["does", "screens"],
+    points: {
+      steps:
+        "each step of the work, in the order it happens, has a decision: in the app, later, or stays as it is",
+    },
+  },
+  {
+    stage: "rules",
+    sections: ["rules"],
+    points: {
+      money:
+        "how money works for this business, as far as the app touches it: prices, tax, invoice numbers, deposits and part-payments, late payers",
+      changes: "what happens when a piece of work changes or is canceled after it was agreed",
+      mistakes: "what must never happen, and what costs them money when it goes wrong",
+      exceptions:
+        "the awkward cases that break a simple version for this kind of business, each one asked",
+    },
+  },
+  {
+    stage: "people",
+    sections: ["who"],
+    points: {
+      roles: "everyone who would use it",
+      access: "what each of them may see and do",
+    },
+  },
+  {
+    stage: "information",
+    sections: ["keeps"],
+    points: {
+      records: "what is kept about each thing",
+      existing: "what they already have written down, and where it is",
+    },
+  },
+  {
+    stage: "day_one",
+    sections: ["does"],
+    points: {
+      first:
+        "what goes in the first version and what waits, chosen knowing roughly what each choice costs",
+    },
+  },
+] as const satisfies readonly {
+  readonly stage: string;
+  readonly sections: readonly PlanSection[];
+  readonly points: Readonly<Record<string, string>>;
+}[];
+export type Stage = (typeof STAGES)[number]["stage"];
+
+// Every checklist point as "<stage>.<point>", which is how the model names them.
+export const CHECKLIST: readonly {
+  readonly id: string;
+  readonly stage: Stage;
+  readonly text: string;
+}[] = STAGES.flatMap(({ stage, points }) =>
+  Object.entries(points).map(([point, text]) => ({ id: `${stage}.${point}`, stage, text }))
+);
+
+// The stage the interview is in: the first with a point not yet settled, or null once all are.
+export const currentStage = (covered: readonly string[]): Stage | null =>
+  CHECKLIST.find((point) => !covered.includes(point.id))?.stage ?? null;
+
+const sectionReady = (section: PlanSection, covered: readonly string[]): boolean =>
+  STAGES.some((stage) => stage.sections.some((each) => each === section)) &&
+  CHECKLIST.filter((point) =>
+    STAGES.some(
+      (stage) => stage.stage === point.stage && stage.sections.some((each) => each === section)
+    )
+  ).every((point) => covered.includes(point.id));
 const MAX_CHANGES = 20;
 const MAX_CHOICES = 6;
 
@@ -45,10 +141,12 @@ export const turnSchema = z.object({
     .array(z.object({ id: z.number().int(), text: z.string().trim().min(1).max(ITEM_MAX) }))
     .max(MAX_CHANGES),
   remove: z.array(z.number().int()).max(MAX_CHANGES),
-  ready: z.array(z.enum(planSection.enumValues)).max(PLAN_SECTIONS.length),
+  // Checklist points ("<stage>.<point>") the answers so far have settled.
+  covered: z.array(z.string()).max(CHECKLIST.length),
   question: z
     .object({
       text: z.string().trim().min(1).max(ITEM_MAX),
+      why: z.string().trim().min(1).max(ITEM_MAX),
       kind: z.enum(questionKind.enumValues),
       choices: z.array(z.string().trim().min(1).max(120)).max(MAX_CHOICES),
     })
@@ -66,6 +164,9 @@ export type Interviewer = (input: {
   readonly project: Pick<Project, "id" | "name" | "need" | "features">;
   readonly items: readonly PlanItem[];
   readonly trail: readonly AnsweredQuestion[];
+  readonly depth: InterviewDepth;
+  // Checklist points already settled.
+  readonly covered: readonly string[];
 }) => Promise<{ readonly turn: Turn; readonly usage: RunUsage | null }>;
 
 export type InterviewDeps = { readonly db: Db; readonly interviewer: Interviewer };
@@ -79,6 +180,12 @@ export type Interview = {
   // The question waiting for an answer, if any.
   readonly current: Question | null;
   readonly sections: Readonly<Record<PlanSection, SectionStatus>>;
+  readonly depth: InterviewDepth;
+  // The most questions this depth asks.
+  readonly limit: number;
+  readonly covered: readonly string[];
+  // The stage the next question belongs to; null once the checklist is settled.
+  readonly stage: Stage | null;
   readonly finished: boolean;
 };
 
@@ -113,21 +220,23 @@ export const getInterview = async (db: Db, id: number): Promise<Interview> => {
     .where(eq(interviewQuestions.projectId, id))
     .orderBy(asc(interviewQuestions.id));
   const [state] = await db.select().from(interviews).where(eq(interviews.projectId, id));
+  const covered = state?.covered ?? [];
+  const depth = state?.depth ?? "thorough";
   const sectionStatus = (section: PlanSection): SectionStatus => {
     if (!items.some((item) => item.section === section)) return "not_started";
-    return state?.ready.includes(section) ? "ready" : "sketched";
+    return sectionReady(section, covered) ? "ready" : "sketched";
   };
   return {
     items,
     questions: asked.filter((question) => question.answer !== null),
     current: asked.find((question) => question.answer === null) ?? null,
-    sections: {
-      who: sectionStatus("who"),
-      does: sectionStatus("does"),
-      screens: sectionStatus("screens"),
-      keeps: sectionStatus("keeps"),
-      replaces: sectionStatus("replaces"),
-    },
+    sections: Object.fromEntries(
+      PLAN_SECTIONS.map((section) => [section, sectionStatus(section)])
+    ) as Record<PlanSection, SectionStatus>,
+    depth,
+    limit: QUESTION_LIMITS[depth],
+    covered,
+    stage: currentStage(covered),
     finished: state?.finished ?? false,
   };
 };
@@ -181,9 +290,17 @@ const applyTurn = async (
     .select({ asked: count() })
     .from(interviewQuestions)
     .where(eq(interviewQuestions.projectId, projectId));
-  const next = asked < MAX_QUESTIONS ? turn.question : null;
+  const [current] = await tx
+    .select({ depth: interviews.depth, covered: interviews.covered })
+    .from(interviews)
+    .where(eq(interviews.projectId, projectId));
+  const next = asked < QUESTION_LIMITS[current?.depth ?? "thorough"] ? turn.question : null;
   if (next) await tx.insert(interviewQuestions).values({ ...next, projectId });
-  const state = { ready: turn.ready, finished: next === null };
+  // Points stay settled once they are; only names on the checklist are kept.
+  const covered = CHECKLIST.map((point) => point.id).filter(
+    (id) => current?.covered.includes(id) || turn.covered.includes(id)
+  );
+  const state = { covered, finished: next === null };
   await tx
     .insert(interviews)
     .values({ projectId, ...state })
@@ -194,19 +311,51 @@ const applyTurn = async (
 export const lockProject = (tx: Db, id: number) =>
   tx.select({ id: projects.id }).from(projects).where(eq(projects.id, id)).for("update");
 
+export const depthSchema = projectIdSchema.extend({ depth: z.enum(INTERVIEW_DEPTHS) });
+export const startInterviewSchema = projectIdSchema.extend({
+  depth: z.enum(INTERVIEW_DEPTHS).optional(),
+});
+
+// Sets how far the questions go. It can change at any time: a deeper interview that had stopped
+// at the shorter limit can carry on, and a shorter one stops once its limit is reached.
+export const setInterviewDepth = async (
+  db: Db,
+  input: { readonly id: number; readonly depth: InterviewDepth }
+): Promise<Interview> => {
+  await editableProject(db, input.id);
+  const [{ asked }] = await db
+    .select({ asked: count() })
+    .from(interviewQuestions)
+    .where(eq(interviewQuestions.projectId, input.id));
+  const [state] = await db.select().from(interviews).where(eq(interviews.projectId, input.id));
+  const finished = (state?.finished ?? false) && asked >= QUESTION_LIMITS[input.depth];
+  await db
+    .insert(interviews)
+    .values({ projectId: input.id, depth: input.depth, finished })
+    .onConflictDoUpdate({
+      target: interviews.projectId,
+      set: { depth: input.depth, finished },
+    });
+  return getInterview(db, input.id);
+};
+
 // Asks the first question, or the next one after a turn that failed. Does nothing while a question
-// is waiting or once the interview has finished.
+// is waiting or once the interview has finished. A depth given here is set first.
 export const startInterview = async (
   { db, interviewer }: InterviewDeps,
-  id: number
+  id: number,
+  depth?: InterviewDepth
 ): Promise<Interview> => {
   const project = await editableProject(db, id);
+  if (depth) await setInterviewDepth(db, { id, depth });
   const interview = await getInterview(db, id);
   if (interview.current || interview.finished) return interview;
   const { turn, usage } = await interviewer({
     project,
     items: interview.items,
     trail: trailOf(interview),
+    depth: interview.depth,
+    covered: interview.covered,
   });
   await recordUsage(db, usage);
   await db.transaction(async (transaction) => {
@@ -247,7 +396,11 @@ export const restartInterview = async (
       );
     }
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, input.id));
-    await tx.delete(interviews).where(eq(interviews.projectId, input.id));
+    // The depth they chose stays; what was settled goes with the answers.
+    await tx
+      .update(interviews)
+      .set({ covered: [], finished: false })
+      .where(eq(interviews.projectId, input.id));
     await tx.delete(readBacks).where(eq(readBacks.projectId, input.id));
     await tx.delete(planItems).where(eq(planItems.projectId, input.id));
   });
@@ -293,6 +446,8 @@ export const answerQuestion = async (
     project,
     items: interview.items,
     trail: [...trailOf(interview), { question, answer: input.answer }],
+    depth: interview.depth,
+    covered: interview.covered,
   });
   await recordUsage(db, usage);
   await db.transaction(async (transaction) => {
@@ -379,6 +534,8 @@ export const removePlanItem = (
   });
 
 const SECTION_TITLES: Readonly<Record<PlanSection, string>> = {
+  business: "The business, and what the app is for",
+  rules: "Rules: the cases a simple version would get wrong",
   who: "Who uses it",
   does: "What it does",
   screens: "Its screens",

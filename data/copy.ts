@@ -4,6 +4,17 @@
 // The marketing site. The one place its address is written.
 const MARKETING_SITE = "https://schmeide.com";
 
+// The interview's stages, as the person reads them (see server/src/services/interview.ts).
+const INTERVIEW_STAGES = {
+  business: "your business",
+  jobs: "the work, step by step",
+  rules: "the rules and awkward cases",
+  people: "who uses it",
+  information: "what it keeps",
+  day_one: "what comes first",
+} as const;
+type InterviewStage = keyof typeof INTERVIEW_STAGES;
+
 export const copy = {
   // Addresses outside this app.
   outbound: {
@@ -856,7 +867,17 @@ export const copy = {
       "Answer a few questions and Schmeide writes down what your app needs as you go. Most answers are a choice. You can always answer in your own words, or let Schmeide decide.",
     start: "Start the questions",
     starting: "Thinking of the first question…",
-    thinking: "Thinking of the next question…",
+    thinking: "Reading your answer and thinking of the next question. This takes a few seconds…",
+    depthLegend: "How deep should the questions go?",
+    depths: { thorough: "Thorough (recommended)", quick: "Quick sketch" },
+    depthHints: {
+      thorough:
+        "About 20 minutes. Covers your business, the rules, and who sees what, so less is guessed.",
+      quick: "About 5 minutes. Schmeide assumes the rest and tells you what it assumed.",
+    },
+    depthNow: { thorough: "Thorough questions", quick: "Quick sketch" },
+    switchDepth: { thorough: "Go thorough instead", quick: "Switch to a quick sketch" },
+    stageNow: (stage: InterviewStage) => `Now: ${INTERVIEW_STAGES[stage]}`,
     writeMyself: "Write it myself",
     useQuestions: "Answer questions instead",
     yes: "Yes",
@@ -877,8 +898,10 @@ export const copy = {
     resume: "Ask the next question",
     planTitle: (count: number) => `Your plan (${count})`,
     sections: {
+      business: "The business",
       who: "Who uses it",
       does: "What it does",
+      rules: "Rules",
       screens: "Its screens",
       keeps: "What it keeps",
       replaces: "What it replaces",
