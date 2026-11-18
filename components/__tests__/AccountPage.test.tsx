@@ -113,6 +113,20 @@ describe("the account page", () => {
     expect(methods.queryByRole("button", { name: "Connect Apple" })).toBeNull();
   });
 
+  it("lists an Auth0 sign-in the person has", async () => {
+    open(
+      anAccount({
+        methods: [
+          { id: "m1", kind: "password", since },
+          { id: "m2", kind: "auth0", since },
+        ],
+      })
+    );
+    const methods = await section(copy.accountPage.methods.title);
+    expect(methods.getByText(copy.accountPage.methods.kind.auth0)).toBeInTheDocument();
+    expect(methods.getByRole("button", { name: "Disconnect Auth0" })).toBeInTheDocument();
+  });
+
   it("sends the person to the provider to connect it, and back to this page", async () => {
     const { requests } = open(anAccount());
     const methods = await section(copy.accountPage.methods.title);

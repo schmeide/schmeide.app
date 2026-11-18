@@ -2,7 +2,7 @@
 export type Person = { readonly name: string; readonly email: string; readonly role?: "admin" };
 // `suspended`: its members see the suspended page in place of its pages (components/Routes.tsx).
 export type Business = { readonly id: number; readonly name: string; readonly suspended?: boolean };
-export type Provider = "google" | "microsoft" | "apple";
+export type Provider = "google" | "microsoft" | "apple" | "auth0";
 
 // The admin behind a session that views the app as `person`.
 export type Impersonator = { readonly name: string; readonly email: string };
