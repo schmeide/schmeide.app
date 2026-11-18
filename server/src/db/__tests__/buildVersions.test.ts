@@ -25,18 +25,23 @@ afterAll(async () => {
 
 const sha = (n: number) => n.toString(16).padStart(40, "0");
 
-// Migrations through 0031, so 0032's backfill runs against rows that predate the columns.
+// Migrations through 0031, so 0032's backfill runs against rows that predate the columns. Every
+// later migration goes too: the migrator skips one older than the last it applied.
 const migrationsBeforeVersions = () => {
-  prior = mkdtempSync(join(tmpdir(), "schmeide-versions-"));
-  cpSync(drizzle, prior, { recursive: true });
-  rmSync(join(prior, "0032_build_versions.sql"));
-  rmSync(join(prior, "meta", "0032_snapshot.json"));
-  const journal = JSON.parse(readFileSync(join(prior, "meta", "_journal.json"), "utf8")) as {
-    entries: { tag: string }[];
+  const dir = mkdtempSync(join(tmpdir(), "schmeide-versions-"));
+  prior = dir;
+  cpSync(drizzle, dir, { recursive: true });
+  const journal = JSON.parse(readFileSync(join(dir, "meta", "_journal.json"), "utf8")) as {
+    entries: { idx: number; tag: string }[];
   };
-  journal.entries = journal.entries.filter((entry) => entry.tag !== "0032_build_versions");
-  writeFileSync(join(prior, "meta", "_journal.json"), JSON.stringify(journal));
-  return prior;
+  const later = journal.entries.filter((entry) => entry.idx >= 32);
+  later.forEach((entry) => {
+    rmSync(join(dir, `${entry.tag}.sql`));
+    rmSync(join(dir, "meta", `${String(entry.idx).padStart(4, "0")}_snapshot.json`));
+  });
+  journal.entries = journal.entries.filter((entry) => entry.idx < 32);
+  writeFileSync(join(dir, "meta", "_journal.json"), JSON.stringify(journal));
+  return dir;
 };
 
 describe("build version backfill", () => {
