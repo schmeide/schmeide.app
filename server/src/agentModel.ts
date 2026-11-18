@@ -24,14 +24,41 @@ const KIND_DEFAULTS: Readonly<Partial<Record<RoutedKind, string>>> = {
   review: "sonnet",
 };
 
-// A model per run kind; a kind without one uses the fallback. Names go to the Claude Agent SDK as
-// they are, so each must be an alias or a deployment name that every tenant's resource serves.
+// A route per run kind; a kind without one uses the fallback. A route is `provider:model` or a bare
+// model name, which stays on Claude so setups from before providers keep working. The model goes to
+// its provider's runtime as it is, so it must be an alias or a deployment name that every tenant's
+// resource serves.
 export type ModelRouting = {
   readonly fallback: string;
   readonly byKind: Readonly<Partial<Record<RoutedKind, string>>>;
 };
 
-export type ModelChoice = { readonly model: string; readonly reason: string };
+export const PROVIDERS = ["claude", "openai"] as const;
+export type Provider = (typeof PROVIDERS)[number];
+
+// The providers a run can reach today. Only the Claude Agent SDK runs agents so far; openai joins
+// this list when its runtime does (#112, decided in schmeide/project#6).
+export const RUNTIMES: readonly Provider[] = ["claude"];
+
+export type Route = { readonly provider: Provider; readonly model: string };
+export type ModelChoice = Route & { readonly reason: string };
+
+const isProvider = (name: string): name is Provider => PROVIDERS.some((p) => p === name);
+
+// Throws why the value is not a route; routingFromEnv names the variable that holds it.
+export const parseRoute = (value: string): Route => {
+  const colon = value.indexOf(":");
+  if (colon < 0) return { provider: "claude", model: value };
+  const provider = value.slice(0, colon);
+  const model = value.slice(colon + 1).trim();
+  if (!isProvider(provider)) {
+    throw new Error(
+      `unknown provider ${provider}. Use ${PROVIDERS.map((p) => `${p}:<model>`).join(", ")} or a bare Claude model name.`
+    );
+  }
+  if (!model) throw new Error("names no model");
+  return { provider, model };
+};
 
 export const modelEnvVar = (kind: RoutedKind): string =>
   `${FALLBACK_MODEL_ENV}_${kind.toUpperCase()}`;
@@ -39,13 +66,39 @@ export const modelEnvVar = (kind: RoutedKind): string =>
 // An empty value counts as unset, as make exports one for a variable with no value.
 const set = (value: string | undefined): string | undefined => value?.trim() || undefined;
 
+// Fails at startup on a route no runtime can run, rather than on the first build that takes it.
+const checked = (
+  name: string,
+  value: string | undefined,
+  runtimes: readonly Provider[]
+): string | undefined => {
+  if (value === undefined) return undefined;
+  const fail = (why: string): never => {
+    throw new Error(`${name}="${value}": ${why}`);
+  };
+  const { provider } = (() => {
+    try {
+      return parseRoute(value);
+    } catch (error) {
+      return fail(error instanceof Error ? error.message : String(error));
+    }
+  })();
+  if (!runtimes.includes(provider)) {
+    fail(
+      `no runtime runs ${provider} models yet (#112). Use a Claude model, such as ${DEFAULT_MODEL}.`
+    );
+  }
+  return value;
+};
+
 export const routingFromEnv = (
-  env: Readonly<Record<string, string | undefined>>
+  env: Readonly<Record<string, string | undefined>>,
+  runtimes: readonly Provider[] = RUNTIMES
 ): ModelRouting => ({
-  fallback: set(env[FALLBACK_MODEL_ENV]) ?? DEFAULT_MODEL,
+  fallback: checked(FALLBACK_MODEL_ENV, set(env[FALLBACK_MODEL_ENV]), runtimes) ?? DEFAULT_MODEL,
   byKind: Object.fromEntries(
     ROUTED_KINDS.flatMap((kind) => {
-      const model = set(env[modelEnvVar(kind)]);
+      const model = checked(modelEnvVar(kind), set(env[modelEnvVar(kind)]), runtimes);
       return model ? [[kind, model]] : [];
     })
   ),
@@ -57,17 +110,21 @@ export const pickModel = (routing: ModelRouting, kind: RoutedKind): ModelChoice 
   const routed = routing.byKind[kind];
   const byDefault = KIND_DEFAULTS[kind];
   return routed
-    ? { model: routed, reason: `${modelEnvVar(kind)} routes ${kind} runs` }
+    ? { ...parseRoute(routed), reason: `${modelEnvVar(kind)} routes ${kind} runs` }
     : byDefault
       ? {
-          model: byDefault,
+          ...parseRoute(byDefault),
           reason: `${byDefault} by default for ${kind} runs, ${modelEnvVar(kind)} is not set`,
         }
       : {
-          model: routing.fallback,
+          ...parseRoute(routing.fallback),
           reason: `${FALLBACK_MODEL_ENV} fallback, ${modelEnvVar(kind)} is not set`,
         };
 };
 
+// Claude routes print as the bare model, as they did before providers.
+export const describeRoute = ({ provider, model }: Route): string =>
+  provider === "claude" ? model : `${provider}:${model}`;
+
 export const describeRouting = (routing: ModelRouting): string =>
-  ROUTED_KINDS.map((kind) => `${kind} ${pickModel(routing, kind).model}`).join(", ");
+  ROUTED_KINDS.map((kind) => `${kind} ${describeRoute(pickModel(routing, kind))}`).join(", ");
