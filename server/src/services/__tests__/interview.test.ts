@@ -570,7 +570,7 @@ describe("the depth", () => {
   it("can be changed: going deeper after a quick sketch lets the questions carry on", async () => {
     const project = await newProject();
     await askedAlready(project.id, QUESTION_LIMITS.quick);
-    const { deps } = scripted(turn({ question: WHO }));
+    const { deps } = scripted(turn({ question: WHO }), turn({ question: WHO }));
     await setInterviewDepth(db, { id: project.id, depth: "quick" });
     expect((await startInterview(deps, project.id)).finished).toBe(true);
 

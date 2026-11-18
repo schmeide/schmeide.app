@@ -99,6 +99,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "interview.get": { id },
   "interview.start": { id },
   "interview.restart": { id, need: "Take over" },
+  "interview.setDepth": { id, depth: "quick" },
   "interview.answer": { id, questionId: 1, answer: { type: "text", value: "Take over" } },
   "interview.addItem": { id, section: "does", text: "Take over" },
   "interview.updateItem": { id, itemId: 1, text: "Take over" },
