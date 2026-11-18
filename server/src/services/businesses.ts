@@ -131,8 +131,8 @@ export const setBusinessState = async (
     await assertTenantExists(db, id);
     throw new ConflictError(
       state === "suspended"
-        ? "This business is already suspended"
-        : "This business is not suspended"
+        ? "This business is already suspended, so there is nothing to change. Reload this page to see its current state, or choose “Restore this business” to open it again."
+        : "This business is not suspended, so there is nothing to restore. Reload this page to see its current state."
     );
   }
   audit({ targetTenantId: id, detail: reason });
@@ -173,7 +173,9 @@ export const removeMember = async (
       and(eq(memberships.tenantId, id), eq(memberships.role, "owner"))
     );
     if (owners <= 1)
-      throw new ConflictError("The last owner of a business cannot be removed from it");
+      throw new ConflictError(
+        "The last owner of a business cannot be removed, since nobody would be left to run it. Add another owner first, or choose “Suspend this business” instead."
+      );
   }
   await db
     .delete(memberships)

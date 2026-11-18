@@ -19,7 +19,8 @@ export const pickLookSchema = z.object({
   style: z.enum(STYLES.map((style) => style.id) as [string, ...string[]]),
 });
 
-export const LOOKS_OFF = "Picking a look is not turned on yet";
+export const LOOKS_OFF =
+  "Picking a look is not open yet. Your app keeps its current look; try again once it opens.";
 
 // The change that restyles a built app after the person picks a look. The builder's prompt says
 // to keep the look unless the request asks for a change, and this one does.

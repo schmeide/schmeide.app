@@ -7,7 +7,6 @@ import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 import { designBrief } from "../designBrief.ts";
 import { STYLES } from "../designStyles.ts";
 import { getDesign, pickLook, pickLookSchema, restyleRequest } from "../designs.ts";
-import { ConflictError } from "../errors.ts";
 import { createProject, transition, type Deps } from "../projects.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -152,7 +151,9 @@ describe("pickLook", () => {
     const { deps } = setup(false);
     const project = await aProject("live");
 
-    await expect(pickLook(deps, { id: project.id, style: "calm" })).rejects.toThrow(ConflictError);
+    await expect(pickLook(deps, { id: project.id, style: "calm" })).rejects.toThrow(
+      "Your app keeps its current look; try again once it opens."
+    );
   });
 
   it("takes only a style in the library", () => {

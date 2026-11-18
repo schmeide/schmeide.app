@@ -201,7 +201,10 @@ export const revokeAdmin = async (
   if (target.id === byId) throw new ForbiddenError("You cannot take away your own admin role");
   if (byId !== null && !admins.some(({ id }) => id === byId))
     throw new ForbiddenError("You are no longer an admin");
-  if (admins.length <= 1) throw new ConflictError("The last admin cannot lose the role");
+  if (admins.length <= 1)
+    throw new ConflictError(
+      "The last admin cannot lose the role, since nobody would be left to manage access. Choose “Make admin” for someone else first."
+    );
   await db.update(users).set({ role: null }).where(eq(users.id, target.id));
   await db.delete(sessions).where(eq(sessions.userId, target.id));
   await endImpersonationsBy(db, target.id);
@@ -351,7 +354,9 @@ const insertTenant = async (db: Db, name: string): Promise<number> => {
       .returning({ id: tenants.id });
     if (tenant) return tenant.id;
   }
-  throw new ConflictError("No free slug for that name. Try again.");
+  throw new ConflictError(
+    "Schmeide could not find a free web address for that name. Try again, or use a slightly different name."
+  );
 };
 
 const liveInvite = async (db: Db, token: string, now: Date) => {

@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
+import { copy } from "../../../data/copy.ts";
 import {
   adminActions,
   approvedEmails,
@@ -278,6 +279,8 @@ describe("removing a person from a business", () => {
       admin.cookie
     );
     expect(last.code).toBe("CONFLICT");
+    expect(last.message).toContain("Add another owner first");
+    expect(last.message).toContain(`“${copy.business.suspend}”`);
     expect(
       (
         await mutate(
@@ -427,15 +430,14 @@ describe("a suspended business", () => {
       expect.objectContaining({ id: owner.tenantId, state: "suspended" }),
     ]);
     // Suspending again is refused, not repeated.
-    expect(
-      (
-        await mutate(
-          "admin.businesses.suspend",
-          { id: owner.tenantId, reason: "again" },
-          admin.cookie
-        )
-      ).code
-    ).toBe("CONFLICT");
+    const again = await mutate(
+      "admin.businesses.suspend",
+      { id: owner.tenantId, reason: "again" },
+      admin.cookie
+    );
+    expect(again.code).toBe("CONFLICT");
+    expect(again.message).toContain("already suspended");
+    expect(again.message).toContain(`“${copy.business.restore}”`);
 
     const restored = await mutate(
       "admin.businesses.restore",
@@ -443,6 +445,12 @@ describe("a suspended business", () => {
       admin.cookie
     );
     expect(restored.status).toBe(200);
+    const restoredAgain = await mutate(
+      "admin.businesses.restore",
+      { id: owner.tenantId, reason: "again" },
+      admin.cookie
+    );
+    expect(restoredAgain.message).toContain("nothing to restore");
     expect((await callApi(app, "projects.list", undefined, owner.cookie)).status).toBe(200);
     const [tenant] = await db.select().from(tenants).where(eq(tenants.id, owner.tenantId));
     expect(tenant).toMatchObject({ state: "active", stateReason: "Ticket 9 resolved" });

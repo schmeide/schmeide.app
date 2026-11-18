@@ -3,6 +3,7 @@ import { and, eq, inArray, notInArray } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
+import { copy } from "../../../data/copy.ts";
 import {
   ADMIN_ROLE,
   adminActions,
@@ -312,7 +313,7 @@ describe("taking the role away", () => {
       withAudit(db, COMMAND_LINE, "admin.revoke", (tx, audit) =>
         revokeAdmin(tx, audit, { email: admin.email, reason: "x", byId: null })
       )
-    ).rejects.toThrow("The last admin");
+    ).rejects.toThrow(`Choose “${copy.admins.grantAction}” for someone else first`);
     expect((await userOf(admin.email)).role).toBe(ADMIN_ROLE);
   });
 
