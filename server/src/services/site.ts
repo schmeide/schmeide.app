@@ -39,7 +39,7 @@ export const siteSchema = z.object({
     .optional(),
 });
 
-const escapeHtml = (text: string): string =>
+export const escapeHtml = (text: string): string =>
   text.replace(
     /[&<>"']/g,
     (char) =>
