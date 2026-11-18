@@ -86,6 +86,7 @@ import {
   type DesignBrief,
   type Lead,
 } from "../services/designBrief.ts";
+import { chooseShapes, parseShapeList, shapesPrompt } from "../services/shapes.ts";
 import {
   REVIEW_JSON_SCHEMA,
   noBrowser,
@@ -307,12 +308,14 @@ export const buildPrompt = (
   spec: string,
   request: string,
   changes: readonly string[] = [],
-  design?: string
+  design?: string,
+  // The template's app shapes the workspace kept (services/shapes.ts).
+  shapes: readonly string[] = []
 ): string => {
   const rules = design ? `${STANDING_RULES}\n\n${design}` : STANDING_RULES;
   return kind === "initial"
     ? `Build the web app described by the spec below inside this repository, a Schmeide project template.
-Replace the sample notes feature entirely (table, migration, service, router, page, and tests) with the spec's features.
+${shapesPrompt(shapes) || "Replace the sample notes feature entirely (table, migration, service, router, page, and tests) with the spec's features."}
 
 ${rules}
 
@@ -964,6 +967,28 @@ export const createActivities = (
     await event(buildId, "deploy", `Live at ${url}`);
   };
 
+  // Keeps the template's app shapes the spec needs in `dir` and deletes the rest, shapes/ included
+  // (services/shapes.ts). A template with no shapes/ is used whole.
+  const keepShapes = async (project: Project, buildId: number, dir: string) => {
+    if (!(await stat(join(dir, "shapes")).catch(() => undefined))) return;
+    const options = { cwd: dir, buildId, env: projectEnv(project, config.dataDir) };
+    const listed = await run(config.makeBin, ["-s", "shape/list"], options);
+    if (listed.code !== 0) {
+      throw new Error(
+        `make shape/list failed (exit ${listed.code}): ${listed.output.slice(-2000)}`
+      );
+    }
+    const shapes = chooseShapes(project.spec ?? "", parseShapeList(listed.output));
+    await event(buildId, "step", `Keeping the app shapes: ${shapes.join(", ")}`);
+    const kept = await run(config.makeBin, ["shape/keep", `NAMES=${shapes.join(" ")}`], options);
+    if (kept.code !== 0) {
+      throw ApplicationFailure.nonRetryable(
+        `Could not keep the app shapes ${shapes.join(" ")} (make shape/keep exit ${kept.code}):\n${kept.output.slice(-2000)}`
+      );
+    }
+    await db.update(projects).set({ shapes }).where(eq(projects.id, project.id));
+  };
+
   // The template as one commit on `branch`, in `dir`, with no history of its own.
   const commitTemplate = async (project: Project, buildId: number, dir: string, branch: string) => {
     // From the data dir, where a template given as a relative path is found.
@@ -975,6 +1000,7 @@ export const createActivities = (
       buildId
     );
     await rm(join(dir, ".git"), { recursive: true, force: true });
+    await keepShapes(project, buildId, dir);
     await mustRun(project, "git", ["init", "-q", "-b", branch], dir);
     await mustRun(project, "git", ["add", "-A"], dir);
     await mustRun(project, "git", ["commit", "-q", "-m", "start from the schmeide template"], dir);
@@ -1909,7 +1935,8 @@ export const createActivities = (
           runKind === "change"
             ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
             : [],
-          brief && briefPrompt(brief, runKind)
+          brief && briefPrompt(brief, runKind),
+          project.shapes
         );
       // The design review's problems, or the failed checks' output, for a fix round.
       const fix =
