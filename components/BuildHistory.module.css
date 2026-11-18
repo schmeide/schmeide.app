@@ -1,0 +1,84 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.item {
+  display: grid;
+  gap: var(--space-s);
+  padding: var(--space-m) 0;
+  border-top: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+.request {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-m);
+  margin: 0;
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+
+.facts[data-status="failed"] strong {
+  color: var(--color-danger);
+}
+
+.facts[data-status="passed"] strong {
+  color: var(--color-success);
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-s) var(--space-m);
+  font-size: var(--text-small);
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--color-danger-bg);
+  border-radius: var(--radius-input);
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.toggle {
+  justify-self: start;
+}
+
+.log {
+  max-height: 20rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--space-s) var(--space-m);
+  background: var(--color-inset);
+  border-radius: var(--radius-input);
+}
+
+.events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}
+
+.events li {
+  padding: var(--space-xs) 0;
+}
+
+.kind {
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+}
+
+.events li[data-kind="error"] .kind {
+  color: var(--color-danger);
+}

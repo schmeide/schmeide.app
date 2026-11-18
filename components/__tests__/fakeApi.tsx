@@ -217,6 +217,8 @@ export const projectServer = (state: {
   latestBuildBy?: string | null;
   events?: BuildEvent[];
   summaries?: BuildSummary[];
+  // What builds.list answers: every build that started, newest first, in one page.
+  history?: readonly Build[];
   usage?: Usage;
   time?: TimeTotals;
   interview?: Interview;
@@ -240,6 +242,10 @@ export const projectServer = (state: {
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),
   "builds.summaries": () => state.summaries ?? [],
+  "builds.list": () => ({
+    builds: (state.history ?? []).map((build) => ({ ...build, costUsd: 0 })),
+    nextCursor: null,
+  }),
 });
 
 // The server's side of sign-in: `session.get` answers whoever `state.session` says, and the

@@ -1,0 +1,132 @@
+import { afterAll, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../app.ts";
+import { createDb } from "../db/client.ts";
+import { builds, usage, type NewUsage } from "../db/schema.ts";
+import type { AppContext } from "../router.ts";
+import { createProject } from "../services/projects.ts";
+import { aSignedInPerson, callApi, testAuth } from "./testAuth.ts";
+
+const db = createDb(process.env.DATABASE_URL ?? "");
+afterAll(() => db.$client.end());
+
+const deps: AppContext = {
+  db,
+  workflows: { start: vi.fn(), getHandle: vi.fn() as never },
+  taskQueue: "test",
+  interviewer: vi.fn(),
+  siteFetcher: vi.fn(),
+  websiteReader: vi.fn(),
+  files: {} as never,
+  reader: vi.fn(),
+  resources: {} as never,
+  auth: testAuth(db),
+  providers: [],
+};
+const app = buildApp(deps);
+afterAll(() => app.close());
+
+type Listed = {
+  readonly id: number;
+  readonly kind: string;
+  readonly request: string;
+  readonly status: string;
+  readonly error: string | null;
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly costUsd: number;
+};
+type Page = { readonly builds: readonly Listed[]; readonly nextCursor: number | null };
+
+const spend = (projectId: number, buildId: number, costUsd: number, runKind: NewUsage["runKind"]) =>
+  db.insert(usage).values({
+    projectId,
+    buildId,
+    runKind,
+    model: "claude-sonnet",
+    inputTokens: 1,
+    outputTokens: 1,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    costUsd,
+  });
+
+const aProjectWithBuilds = async () => {
+  const owner = await aSignedInPerson(app, deps, { name: "Hal" });
+  const project = await createProject(db, { name: "History", tenantId: owner.tenantId });
+  const rows = await db
+    .insert(builds)
+    .values([
+      {
+        projectId: project.id,
+        kind: "initial",
+        request: "spec",
+        status: "passed",
+        finishedAt: new Date(),
+      },
+      {
+        projectId: project.id,
+        kind: "change",
+        request: "Add a menu",
+        status: "failed",
+        error: "Tests failed",
+      },
+      { projectId: project.id, kind: "site", request: "title", status: "passed" },
+      { projectId: project.id, kind: "change", request: "Later", status: "queued" },
+    ])
+    .returning();
+  return { cookie: owner.cookie, project, rows };
+};
+
+describe("builds.list", () => {
+  it("lists a project's builds newest first, without waiting ones, with each one's cost", async () => {
+    const { cookie, project, rows } = await aProjectWithBuilds();
+    const [initial, change, site] = rows;
+    await spend(project.id, initial.id, 0.5, "initial");
+    await spend(project.id, initial.id, 0.25, "initial");
+    // Schmeide's own summaries are not the customer's cost.
+    await spend(project.id, initial.id, 9, "summary");
+    await spend(project.id, change.id, 0.1, "change");
+
+    const answer = await callApi(app, "builds.list", { id: project.id }, cookie);
+    const page = answer.data as Page;
+
+    expect(page.builds.map((build) => build.id)).toEqual([site.id, change.id, initial.id]);
+    expect(page.builds.map((build) => build.costUsd)).toEqual([0, 0.1, 0.75]);
+    expect(page.builds[1]).toMatchObject({
+      kind: "change",
+      request: "Add a menu",
+      status: "failed",
+      error: "Tests failed",
+      finishedAt: null,
+    });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("pages with the cursor it answers", async () => {
+    const { cookie, project, rows } = await aProjectWithBuilds();
+    const [initial, change, site] = rows;
+
+    const first = (await callApi(app, "builds.list", { id: project.id, limit: 2 }, cookie))
+      .data as Page;
+    expect(first.builds.map((build) => build.id)).toEqual([site.id, change.id]);
+    expect(first.nextCursor).toBe(change.id);
+
+    const second = (
+      await callApi(
+        app,
+        "builds.list",
+        { id: project.id, limit: 2, cursor: first.nextCursor },
+        cookie
+      )
+    ).data as Page;
+    expect(second.builds.map((build) => build.id)).toEqual([initial.id]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("answers NOT_FOUND for another business's project", async () => {
+    const { project } = await aProjectWithBuilds();
+    const stranger = await aSignedInPerson(app, deps, { name: "Eve" });
+    const answer = await callApi(app, "builds.list", { id: project.id }, stranger.cookie);
+    expect(answer.code).toBe("NOT_FOUND");
+  });
+});

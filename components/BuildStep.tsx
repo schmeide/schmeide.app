@@ -22,7 +22,7 @@ const BOTTOM_SLACK_PX = 4;
 
 // Pages the build's events forward with afterId, every POLL_MS while the build runs and once more
 // when it ends. Mount it with key={build.id} so a new build starts a fresh log.
-function useBuildEvents(build: Build): readonly BuildEvent[] {
+export function useBuildEvents(build: Pick<Build, "id" | "status">): readonly BuildEvent[] {
   const client = useTRPCClient();
   const [events, setEvents] = useState<readonly BuildEvent[]>([]);
   const afterId = useRef(0);
@@ -82,6 +82,8 @@ const REQUESTS: Readonly<Partial<Record<Build["kind"], string>>> = {
   promote: copy.project.release.promoteRequest,
   discard: copy.project.release.discardRequest,
 };
+export const requestText = (build: Pick<Build, "kind" | "request">): string =>
+  REQUESTS[build.kind] ?? build.request;
 
 type Props = {
   readonly build: Build;
@@ -129,7 +131,7 @@ export function BuildStep({ build, title, by = null }: Props) {
       {build.kind !== "initial" && (
         <p>
           <span className={stepStyles.muted}>{copy.project.changeRequestLabel}</span>{" "}
-          {REQUESTS[build.kind] ?? build.request}
+          {requestText(build)}
           {by && <span className={stepStyles.muted}> {copy.project.release.askedBy(by)}</span>}
         </p>
       )}

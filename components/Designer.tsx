@@ -2,6 +2,7 @@ import { copy } from "../data/copy";
 import type { Build, BuiltChange, Project, TimeTotals, Usage } from "../trpc";
 import { pathTo } from "../utils/routes";
 import { AppFrame } from "./AppFrame";
+import { BuildHistory } from "./BuildHistory";
 import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
 import { Link } from "./Link";
@@ -142,6 +143,13 @@ export function Designer({
             </div>
           )}
           <QueuedChanges project={project} queued={queued} />
+          {latestBuild && (
+            <BuildHistory
+              key={latestBuild.id}
+              projectId={project.id}
+              currentBuildId={latestBuild.id}
+            />
+          )}
         </div>
       </div>
 
