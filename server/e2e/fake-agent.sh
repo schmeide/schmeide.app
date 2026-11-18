@@ -2,6 +2,7 @@
 # Stands in for Claude in `make e2e/fake` (SCHMEIDE_AGENT_CMD): no model calls, no usage.
 # `spec` prints a fixed spec; `build` makes a small real change that keeps the template's checks green and adds a stylesheet;
 # `interview` prints one turn that adds a plan item and asks nothing further;
+# `readback` prints one read-back of the plan, with nothing left open;
 # `website mine|someone_else` prints one reading of a website.
 # `read` prints one reading of an uploaded picture, with one proposed plan item.
 # `summary` prints one line of a build's running summary.
@@ -31,6 +32,9 @@ case "${1:-}" in
   interview)
     printf '%s\n' '{"add":[{"section":"does","text":"Fake plan item for the end-to-end fixture","phase":"day_one"}],"update":[],"remove":[],"ready":["does"],"question":null}'
     ;;
+  readback)
+    printf '%s\n' '{"business":[{"text":"Fake business for the end-to-end fixture.","ask":"What does your business do?"}],"steps":[{"text":"You use the fake plan item.","ask":"How does a piece of work start?"}],"open":[]}'
+    ;;
   website)
     if [[ "${2:-}" == mine ]]; then
       printf '%s\n' '{"businessName":"Fake business for the end-to-end fixture","logo":null,"colors":[],"offers":["A fake offer for the end-to-end fixture"],"features":[{"section":"does","text":"Fake feature read from a website"}]}'
@@ -51,7 +55,7 @@ case "${1:-}" in
     echo "Fake summary for the end-to-end fixture."
     ;;
   *)
-    echo "usage: $0 spec|build|interview|website|read|summary|design|review (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview|readback|website|read|summary|design|review (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac

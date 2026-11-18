@@ -18,6 +18,7 @@ import type {
   PlanItem,
   Project,
   Question,
+  ReadBack,
   TimeTotals,
   Usage,
 } from "../../trpc";
@@ -185,6 +186,20 @@ export const anInterview = (overrides: Partial<Interview> = {}): Interview => ({
   ...overrides,
 });
 
+export const aReadBack = (overrides: Partial<ReadBack> = {}): ReadBack => ({
+  account: {
+    business: [{ text: "You run a cleaning company.", ask: "What kind of work do you do?" }],
+    steps: [
+      { text: "A client calls.", ask: "How does a job usually start?" },
+      { text: "You send the invoice from your phone.", ask: "How do you get paid?" },
+    ],
+  },
+  chosen: [],
+  open: [],
+  later: [],
+  ...overrides,
+});
+
 export const aQuestion = (overrides: Partial<Question> = {}): Question => ({
   id: 11,
   projectId: 7,
@@ -204,6 +219,7 @@ export const anItem = (overrides: Partial<PlanItem> = {}): PlanItem => ({
   text: "Create an invoice",
   source: "you",
   phase: "day_one",
+  open: false,
   createdAt: at,
   ...overrides,
 });
@@ -253,8 +269,10 @@ export const projectServer = (state: {
   usage?: Usage;
   time?: TimeTotals;
   interview?: Interview;
+  readBack?: ReadBack;
   design?: Design;
 }): Handlers => ({
+  "readBack.get": () => state.readBack ?? aReadBack(),
   "design.get": () => state.design ?? { enabled: false, current: null, styles: [] },
   "interview.get": () => state.interview ?? anInterview(),
   "projects.list": () => [state.project],

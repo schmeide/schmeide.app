@@ -55,6 +55,7 @@ const input: Parameters<Interviewer>[0] = {
       text: "Create an invoice",
       source: "schmeide",
       phase: "day_one",
+      open: false,
       createdAt: new Date(),
     },
   ],

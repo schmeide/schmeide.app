@@ -1,0 +1,43 @@
+/* The read-back: short lists, each line with its own way to correct it beside or under it. */
+.part h3 {
+  margin-bottom: var(--space-s);
+}
+
+.part ul,
+.part ol {
+  display: grid;
+  gap: var(--space-s);
+  margin: 0;
+  padding-left: var(--space-gutter);
+}
+
+/* The sentence first, its button after; the button drops below on a narrow screen. */
+.sentence {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sentence > span {
+  margin-right: var(--space-s);
+}
+
+.sentence form {
+  margin-top: var(--space-s);
+}
+
+.mark {
+  padding: var(--space-xs) var(--space-s);
+  font-size: var(--text-small);
+}
+
+.actions {
+  margin-top: var(--space-gutter);
+}
+
+/* Printed for a second opinion: the account, without the controls for changing it. */
+@media print {
+  .mark,
+  .actions {
+    display: none;
+  }
+}

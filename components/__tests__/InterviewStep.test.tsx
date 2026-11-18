@@ -235,7 +235,7 @@ describe("InterviewStep", () => {
     );
   });
 
-  it("writes the spec from the plan once the questions are done", async () => {
+  it("writes the spec from the plan once the questions are done and the read-back is confirmed", async () => {
     const { state, calls } = setup(
       anInterview({
         finished: true,
@@ -251,7 +251,8 @@ describe("InterviewStep", () => {
     );
     expect(await screen.findByText(copy.interview.finished)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: copy.project.writeSpec }));
+    await userEvent.click(screen.getByRole("button", { name: copy.readBack.open }));
+    await userEvent.click(await screen.findByRole("button", { name: copy.readBack.confirm }));
 
     expect(await screen.findByText(copy.project.specWriting)).toBeInTheDocument();
     expect(calls).toContainEqual({ path: "projects.generateSpec", input: { id: 7 } });
@@ -262,7 +263,7 @@ describe("InterviewStep", () => {
       anInterview({ current: WHO, items: [anItem({ section: "who", text: "Only the owner" })] })
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: copy.project.writeSpec }));
+    await userEvent.click(await screen.findByRole("button", { name: copy.readBack.open }));
 
     expect(screen.getByRole("alert")).toHaveTextContent(copy.interview.needPlan);
     expect(calls.map((call) => call.path)).not.toContain("projects.generateSpec");

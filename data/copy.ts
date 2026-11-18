@@ -867,8 +867,9 @@ export const copy = {
     unavailable:
       "The next question could not be prepared. Try again in a moment, or press “Write it myself” to type your requests.",
     retry: "Try again",
-    finished: "Those are all the questions. Read your plan, then press “Write the spec”.",
-    paused: "There is no question waiting. Ask for the next one, or write the spec from your plan.",
+    finished: "Those are all the questions. Read your plan, then press “Check what we understood”.",
+    paused:
+      "There is no question waiting. Ask for the next one, or check what we understood from your plan.",
     resume: "Ask the next question",
     planTitle: (count: number) => `Your plan (${count})`,
     sections: {
@@ -903,6 +904,45 @@ export const copy = {
     keepQuestions: "Keep these questions",
     discardWarning:
       "Answering more questions can change your plan. If it does, the spec below is thrown away and written again from the new plan.",
+  },
+  // Said back to the owner after the questions and before the spec, so mistakes are caught here.
+  readBack: {
+    open: "Check what we understood",
+    title: "Here’s what we understood",
+    intro:
+      "Read this through. If a sentence is wrong, press “That’s not right” beside it and answer one question. Your plan and this page change to match.",
+    writing: "Writing down what we understood…",
+    rewriting: "Changing your plan and writing this again…",
+    failed:
+      "What we understood could not be written down just now. Try again, or go on to the spec: it is written from your plan as it stands.",
+    retry: "Try again",
+    skip: "Go on to the spec",
+    businessTitle: "Your business",
+    stepsTitle: "How a piece of work goes",
+    notRight: "That’s not right",
+    send: "Send",
+    cancel: "Cancel",
+    needAnswer: "Write a few words, or press “Cancel”.",
+    chosenTitle: "What we decided for you",
+    chosenIntro:
+      "You left these to Schmeide, or nobody asked. Change any that is not how you work.",
+    change: "Change this",
+    changeLabel: "What it should say",
+    save: "Save",
+    openTitle: "Still open",
+    openIntro:
+      "The questions did not settle these. Answer one now, or leave it: the spec says what was assumed.",
+    answer: "Answer this",
+    openLabel: "How should this work?",
+    openLeft: (count: number) =>
+      count === 1
+        ? "1 point is still open. The spec will state it as an assumption."
+        : `${count} points are still open. The spec will state them as assumptions.`,
+    laterTitle: "Not in the first version",
+    laterIntro: "These wait for a later change, so the first version stays small.",
+    confirm: "Yes, that’s right. Write the spec.",
+    print: "Print it for a second opinion",
+    back: "Back to the questions",
   },
   status: {
     draft: {
