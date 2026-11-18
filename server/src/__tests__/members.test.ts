@@ -440,14 +440,12 @@ describe("a member", () => {
     expect((await call(owner, "business.removeMember", { userId })).code).toBe("NOT_FOUND");
   });
 
-  it("whose only business it was gets a new empty one, not this one back", async () => {
+  it("whose only business it was is left with none to set up, not this one back", async () => {
     const owner = await anOwner();
     const editor = await anEditorOf(owner);
     const { userId } = await memberOf(owner, editor.email);
     await call(owner, "business.removeMember", { userId });
-    const after = await businessIds(editor);
-    expect(after).toHaveLength(1);
-    expect(after).not.toContain(owner.tenantId);
+    expect(await businessIds(editor)).toEqual([]);
     expect((await business(owner)).members).toHaveLength(1);
   });
 

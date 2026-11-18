@@ -2,6 +2,8 @@
 // nothing in another business can be seen or changed from it.
 import { randomUUID } from "node:crypto";
 import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
+import { z } from "zod";
+import { countryCodes } from "../../../data/countries.ts";
 import type { Db } from "../db/client.ts";
 import {
   approvedEmails,
@@ -30,10 +32,10 @@ const membershipsOf = (db: Db, userId: string): Promise<Business[]> =>
     .where(eq(memberships.userId, userId))
     .orderBy(asc(memberships.createdAt), asc(tenants.id));
 
-// The person's businesses, oldest first. A person with none gets one on the spot: the business
-// their approval names, or a new one of their own. So a signed-in person always has a business,
-// except an admin, who works from the admin area and is given none. Nor is one made while an admin
-// views the app as the person: the person would find a business they did not make.
+// The person's businesses, oldest first. A person with none joins the business their approval
+// names on the spot, so someone invited never sees first-run setup. Anyone else has none until
+// they set one up (startBusiness). An admin works from the admin area and is joined to none; nor
+// is anyone while an admin views the app as them.
 export const businessesOf = async (db: Db, person: Person): Promise<readonly Business[]> => {
   const existing = await membershipsOf(db, person.id);
   if (existing.length > 0 || person.admin || person.impersonatedBy) return existing;
@@ -59,18 +61,58 @@ export const businessesOf = async (db: Db, person: Person): Promise<readonly Bus
             isNull(invites.usedAt)
           )
         );
-    } else {
-      const [tenant] = await tx
-        .insert(tenants)
-        .values({ slug: `b-${randomUUID()}`, name: `${person.name}’s business` })
-        .returning();
-      await tx
-        .insert(memberships)
-        .values({ userId: person.id, tenantId: tenant.id, role: "owner" });
     }
     return membershipsOf(tx, person.id);
   });
 };
+
+const oneLine = (max: number) =>
+  z
+    .string()
+    .trim()
+    .max(max)
+    .refine((text) => !/[\r\n]/.test(text));
+
+// First-run setup: the person's name, and their business's name (theirs when left empty),
+// country, and what it does.
+export const startBusinessSchema = z.object({
+  yourName: oneLine(100).pipe(z.string().min(1)),
+  name: oneLine(120).optional(),
+  country: z.string().refine((code) => countryCodes.includes(code)),
+  description: oneLine(200).optional(),
+});
+
+export const ALREADY_IN_A_BUSINESS =
+  "You already have a business, so there is nothing to set up. Reload the page to go to it.";
+
+// Makes a business with the person as its owner, and saves their name. Only for someone in no
+// business yet: a second submit of the form, or a second tab, is refused.
+export const startBusiness = (
+  db: Db,
+  userId: string,
+  input: Omit<z.output<typeof startBusinessSchema>, "country"> & {
+    readonly country: string | null;
+  }
+): Promise<Business> =>
+  db.transaction(async (transaction) => {
+    const tx = transaction as unknown as Db;
+    // Two submits at once must not make two businesses: the second waits here.
+    await tx.execute(sql`select 1 from ${users} where ${users.id} = ${userId} for update`);
+    if ((await membershipsOf(tx, userId)).length > 0)
+      throw new ConflictError(ALREADY_IN_A_BUSINESS);
+    await tx.update(users).set({ name: input.yourName }).where(eq(users.id, userId));
+    const [tenant] = await tx
+      .insert(tenants)
+      .values({
+        slug: `b-${randomUUID()}`,
+        name: input.name || `${input.yourName}’s business`,
+        country: input.country,
+        description: input.description || null,
+      })
+      .returning({ id: tenants.id, name: tenants.name });
+    await tx.insert(memberships).values({ userId, tenantId: tenant.id, role: "owner" });
+    return { ...tenant, suspended: false };
+  });
 
 // Adds the person to a business, as `role` when given: otherwise its owner when it has nobody yet,
 // an editor when it has. Someone already in it keeps their role.

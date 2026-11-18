@@ -71,6 +71,8 @@ import {
   roleIn,
   removeMember,
   setBusinessState,
+  startBusiness,
+  startBusinessSchema,
 } from "./services/businesses.ts";
 import { buildListSchema, listBuilds, listEvents } from "./services/builds.ts";
 import { listSummaries } from "./services/summaries.ts";
@@ -231,7 +233,8 @@ export const callerOf = async (
     businesses.find(({ id }) => id === asked) ??
     businesses.find(({ suspended }) => !suspended) ??
     businesses[0];
-  // Only an admin can have none (businessesOf). The uploads route answers both with a 403.
+  // Someone not yet through first-run setup, or an admin, has none (businessesOf). The uploads
+  // route answers both with a 403.
   if (!business) throw new TRPCError({ code: "FORBIDDEN", message: NOT_IN_A_BUSINESS });
   if (business.suspended) throw suspended();
   return { person, tenantId: business.id };
@@ -243,7 +246,7 @@ export const callerOf = async (
 // even when it is refused.
 export const recordWrite = async (
   ctx: Pick<AppContext, "db">,
-  { person, tenantId }: { readonly person: Person; readonly tenantId: number },
+  { person, tenantId }: { readonly person: Person; readonly tenantId: number | null },
   what: string
 ): Promise<void> => {
   const { impersonatedBy } = person;
@@ -258,6 +261,18 @@ const signedIn = procedure.use(async ({ ctx, type, path, next }) => {
   if (!caller) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
   if (type === "mutation") await recordWrite(ctx, caller, path);
   return next({ ctx: { ...ctx, ...caller } });
+});
+
+// For a signed-in person who may be in no business yet: first-run setup. Viewing as someone is
+// recorded like every write, then refused: the person would find a business they did not make.
+const newcomer = procedure.use(async ({ ctx, path, next }) => {
+  const person = await currentPerson(ctx, ctx.headers);
+  if (!person) throw new TRPCError({ code: "UNAUTHORIZED", message: SIGN_IN_FIRST });
+  if (person.impersonatedBy) {
+    await recordWrite(ctx, { person, tenantId: null }, path);
+    throw new TRPCError({ code: "FORBIDDEN", message: "Not while viewing as someone else" });
+  }
+  return next({ ctx: { ...ctx, person } });
 });
 
 // The only procedures that read across businesses, for people with the platform role. Anyone
@@ -532,6 +547,12 @@ export const appRouter = t.router({
       .use(refuseImpersonation)
       .input(inviteTokenSchema)
       .mutation(({ ctx, input }) => joinByInvite(ctx.db, ctx.person, input.token)),
+  }),
+  // First-run setup, for a person in no business yet; see services/businesses.ts.
+  setup: t.router({
+    createBusiness: newcomer
+      .input(startBusinessSchema)
+      .mutation(({ ctx, input }) => startBusiness(ctx.db, ctx.person.id, input)),
   }),
   business: t.router({
     get: signedIn.query(({ ctx }) => getOwnBusiness(ctx.db, ctx.tenantId, ctx.person.id)),

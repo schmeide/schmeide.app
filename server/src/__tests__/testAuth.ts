@@ -1,10 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
 import { inject } from "vitest";
 import type { buildApp } from "../app.ts";
 import type { Db } from "../db/client.ts";
+import { users } from "../db/schema.ts";
 import { appRouter } from "../router.ts";
 import { acceptInvite, approveEmail, grantAdmin } from "../services/access.ts";
 import { COMMAND_LINE } from "../services/audit.ts";
+import { startBusiness } from "../services/businesses.ts";
 import { createAuth, type Auth, type AuthConfig } from "../services/auth.ts";
 
 type App = ReturnType<typeof buildApp>;
@@ -81,8 +84,8 @@ export const signIn = async (app: App, email: string, password = PASSWORD) => {
   return { status: response.statusCode, cookie, body: response.json(), cookies: response.cookies };
 };
 
-// An approved person who has set a password through their link and signed in. `tenantId` is the
-// business they work in: their own unless the approval named one.
+// An approved person who has set a password through their link, signed in, and set up a business
+// of their own unless the approval named one. `tenantId` is the business they work in.
 export const aSignedInPerson = async (
   app: App,
   deps: { readonly auth: Auth; readonly db: Db },
@@ -91,6 +94,11 @@ export const aSignedInPerson = async (
   const { email, token } = await approveEmail(deps.db, anEmail(), { tenantId: joins });
   await acceptInvite(deps, { token, name, password: PASSWORD });
   const { cookie } = await signIn(app, email);
+  // As if they went through first-run setup, with the country left for later.
+  if (joins === undefined) {
+    const [user] = await deps.db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    await startBusiness(deps.db, user.id, { yourName: name, country: null });
+  }
   const session = await callApi(app, "session.get", undefined, cookie);
   const businesses: readonly { readonly id: number; readonly name: string }[] =
     session.data.businesses;

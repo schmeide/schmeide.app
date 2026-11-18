@@ -5,16 +5,19 @@ import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
 import { projects, tenants } from "../db/schema.ts";
 import { BUSINESS_HEADER, type AppContext } from "../router.ts";
-import { approveEmail } from "../services/access.ts";
+import { acceptInvite, approveEmail } from "../services/access.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 import { approveSpec, createProject, transition } from "../services/projects.ts";
 import { finishBuild } from "../services/builds.ts";
 import {
   adminPaths,
   aSignedInPerson,
+  anEmail,
   callApi,
   impersonationPaths,
+  PASSWORD,
   procedurePaths,
+  signIn,
   testAuth,
 } from "./testAuth.ts";
 
@@ -70,6 +73,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "account.export": undefined,
   "account.delete": { email: "nobody@example.com" },
   "invites.join": { token: "no-such-token" },
+  "setup.createBusiness": { yourName: "Taken over", country: "DE" },
   "business.get": undefined,
   "business.update": { name: "Taken over", country: null },
   "business.invite": { email: "taken-over@example.com" },
@@ -172,6 +176,7 @@ describe("every procedure", () => {
           !isOwnAccount(path) &&
           takesAnId(calls[path]) &&
           path !== "projects.create" &&
+          path !== "setup.createBusiness" &&
           !ownBusiness(path)
       );
       expect(scoped.length).toBeGreaterThan(15);
@@ -204,8 +209,100 @@ describe("every procedure", () => {
   });
 });
 
+// A person approved with no business named, who has set a password and signed in.
+const aNewcomer = async (name = "Ada Example") => {
+  const { email, token } = await approveEmail(db, anEmail());
+  await acceptInvite(deps, { token, name, password: PASSWORD });
+  const { cookie } = await signIn(app, email);
+  return { email, cookie };
+};
+const businessesFor = async (cookie: string) =>
+  (await callApi(app, "session.get", undefined, cookie)).data.businesses;
+
+describe("first-run setup", () => {
+  it("leaves a new person with no business until they set one up", async () => {
+    const ada = await aNewcomer();
+    expect(await businessesFor(ada.cookie)).toEqual([]);
+    expect((await callApi(app, "projects.list", undefined, ada.cookie)).code).toBe("FORBIDDEN");
+  });
+
+  it("makes the business with the person as its owner, and saves their name", async () => {
+    const ada = await aNewcomer("Ada");
+    const made = await callApi(
+      app,
+      "setup.createBusiness",
+      {
+        yourName: " Ada Lovelace ",
+        name: " Lovelace Engines ",
+        country: "GB",
+        description: " Analytical engines, made to order ",
+      },
+      ada.cookie
+    );
+    expect(made.status).toBe(200);
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, made.data.id));
+    expect(tenant).toMatchObject({
+      name: "Lovelace Engines",
+      country: "GB",
+      description: "Analytical engines, made to order",
+    });
+    expect(await businessesFor(ada.cookie)).toEqual([
+      { id: made.data.id, name: "Lovelace Engines", suspended: false },
+    ]);
+    const business = await callApi(app, "business.get", undefined, ada.cookie);
+    expect(business.data.role).toBe("owner");
+    expect(business.data.members).toEqual([
+      expect.objectContaining({ email: ada.email, name: "Ada Lovelace", role: "owner" }),
+    ]);
+  });
+
+  it("names the business after the person, with no description, when those are left empty", async () => {
+    const ada = await aNewcomer();
+    const made = await callApi(
+      app,
+      "setup.createBusiness",
+      { yourName: "Ada", name: "  ", country: "DE", description: "" },
+      ada.cookie
+    );
+    const [tenant] = await db.select().from(tenants).where(eq(tenants.id, made.data.id));
+    expect(tenant).toMatchObject({ name: "Ada’s business", country: "DE", description: null });
+  });
+
+  it("refuses a missing name, an unknown country, and a description over one line", async () => {
+    const ada = await aNewcomer();
+    for (const input of [
+      { yourName: " ", country: "DE" },
+      { yourName: "Ada", country: "ZZ" },
+      { yourName: "Ada" },
+      { yourName: "Ada", country: "DE", description: "x".repeat(201) },
+      { yourName: "Ada", country: "DE", description: "one\ntwo" },
+    ])
+      expect((await callApi(app, "setup.createBusiness", input, ada.cookie)).code).toBe(
+        "BAD_REQUEST"
+      );
+    expect(await businessesFor(ada.cookie)).toEqual([]);
+  });
+
+  it("makes one business, and refuses a second, for a person who already has one", async () => {
+    const ada = await aNewcomer();
+    const input = { yourName: "Ada", country: "DE" };
+    const answers = await Promise.all(
+      [1, 2].map(() => callApi(app, "setup.createBusiness", input, ada.cookie))
+    );
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 409]);
+    expect(answers.find((answer) => answer.status === 409)?.message).toContain("already");
+    expect(await businessesFor(ada.cookie)).toHaveLength(1);
+  });
+
+  it("is skipped by a person whose invitation names a business", async () => {
+    const demo = await findTenantBySlug(db, "demo");
+    const teammate = await aSignedInPerson(app, deps, { joins: demo });
+    expect(teammate.businesses.map(({ id }) => id)).toEqual([demo]);
+  });
+});
+
 describe("a business", () => {
-  it("is made for a new person, who then sees only what is in it", async () => {
+  it("is made for a new person in setup, who then sees only what is in it", async () => {
     const ada = await aSignedInPerson(app, deps, { name: "Ada Example" });
     const bob = await aSignedInPerson(app, deps, { name: "Bob Example" });
     expect(ada.businesses).toEqual([
@@ -219,15 +316,6 @@ describe("a business", () => {
     const bobs = await callApi(app, "projects.list", undefined, bob.cookie);
     expect(adas.data.map((project: { id: number }) => project.id)).toEqual([created.data.id]);
     expect(bobs.data).toEqual([]);
-  });
-
-  it("is made once when a new person's first requests arrive together", async () => {
-    const ada = await aSignedInPerson(app, deps);
-    const answers = await Promise.all(
-      Array.from({ length: 5 }, () => callApi(app, "session.get", undefined, ada.cookie))
-    );
-    expect(new Set(answers.map((answer) => answer.data.businesses[0].id)).size).toBe(1);
-    expect(answers.every((answer) => answer.data.businesses.length === 1)).toBe(true);
   });
 
   it("can be named by an approval, so a teammate joins it instead of getting their own", async () => {
