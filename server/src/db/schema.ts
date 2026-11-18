@@ -761,7 +761,17 @@ export const newBusinessSchema = z.object({
   reason: reasonSchema,
 });
 
-export const inviteTokenSchema = z.object({ token: z.string().min(1).max(200) });
+// A path on this site, the same rule as sitePath in utils/routes.ts. The set-password page sends
+// it with the token so the link keeps where `/go` was headed. It is not stored.
+const nextOnThisSite = z
+  .string()
+  .max(2000)
+  .refine((value) => /^\/(?![/\\])/.test(value));
+
+export const inviteTokenSchema = z.object({
+  token: z.string().min(1).max(200),
+  next: nextOnThisSite.optional(),
+});
 
 export const MIN_PASSWORD_LENGTH = 10;
 export const MAX_PASSWORD_LENGTH = 128;

@@ -3,6 +3,7 @@ import { useId, useRef, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useTRPC, type ProjectStatus } from "../trpc";
+import { clearCarried, IDEA_MAX, readCarried } from "../utils/carried";
 import { pathTo } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
@@ -18,7 +19,7 @@ export function StartPage() {
   const titleId = useId();
   const errorId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
-  const [need, setNeed] = useState("");
+  const [need, setNeed] = useState(() => readCarried() ?? "");
   const [missing, setMissing] = useState(false);
   const list = useQuery(trpc.projects.list.queryOptions());
   const { start, busy, error } = useStartApp();
@@ -32,6 +33,7 @@ export function StartPage() {
       field.current?.focus();
       return;
     }
+    clearCarried();
     const point = copy.start.points.find((entry) => entry.need === text);
     start({ need: text, ...(point ? { name: point.name } : {}) });
   };
@@ -48,7 +50,7 @@ export function StartPage() {
           ref={field}
           className={styles.need}
           rows={5}
-          maxLength={2000}
+          maxLength={IDEA_MAX}
           aria-labelledby={titleId}
           aria-invalid={missing}
           aria-describedby={missing ? errorId : undefined}

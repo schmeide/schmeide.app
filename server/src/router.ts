@@ -568,12 +568,16 @@ export const appRouter = t.router({
       .mutation(({ ctx, input }) => deleteAccount(ctx.db, ctx.person, input)),
   }),
   // One-time links that let an approved person set a password; see services/access.ts.
+  // `next` arrives with the token (a path on this site) and is not stored: the page reads it
+  // back from the address after the password is set, so `/go` can run again.
   invites: t.router({
     get: open.input(inviteTokenSchema).query(({ ctx, input }) => getInvite(ctx.db, input.token)),
     accept: open
       .use(refuseImpersonation)
       .input(acceptInviteSchema)
-      .mutation(({ ctx, input }) => acceptInvite(ctx, input)),
+      .mutation(({ ctx, input }) =>
+        acceptInvite(ctx, { token: input.token, name: input.name, password: input.password })
+      ),
     join: signedIn
       .use(refuseImpersonation)
       .input(inviteTokenSchema)

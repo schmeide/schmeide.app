@@ -11,7 +11,12 @@ import {
   removeAccess,
 } from "../services/access.ts";
 import { COMMAND_LINE, withAudit } from "../services/audit.ts";
-import { authConfigFromEnv, createAuth, publicUrlFromEnv } from "../services/auth.ts";
+import {
+  authConfigFromEnv,
+  createAuth,
+  enabledProviders,
+  publicUrlFromEnv,
+} from "../services/auth.ts";
 import { findTenantBySlug } from "../services/businesses.ts";
 import { DEV_LOGINS, DEV_PASSWORD, refuseUnlessLocal, seedDevLogins } from "../services/seed.ts";
 
@@ -27,7 +32,11 @@ const needEmail = (): string => {
 
 try {
   if (command === "approve") {
-    const { publicUrl } = authConfigFromEnv(process.env);
+    const authConfig = authConfigFromEnv(process.env);
+    const { publicUrl } = authConfig;
+    // Same choice as approvalEntryUrl in utils/routes.ts. A provider means the link is
+    // /go?intent=sign-in; until one is configured, the set-password link keeps next=/go.
+    const providersOn = enabledProviders(authConfig).length > 0;
     const tenantId = tenant ? await findTenantBySlug(db, tenant) : undefined;
     // Recorded in the audit log as done from the command line, as the admin area records its own.
     const approved = await withAudit(db, COMMAND_LINE, "access.approve", (tx, audit) =>
@@ -41,8 +50,16 @@ try {
         ? `They work in the "${tenant}" business.`
         : "They get a business of their own the first time they sign in."
     );
-    console.log(`To set a password, send them this link (one use, ${INVITE_DAYS} days):`);
-    console.log(`${publicUrl}/set-password?token=${approved.token}`);
+    console.log(
+      providersOn
+        ? "To sign in, send them this link:"
+        : `To set a password, send them this link (one use, ${INVITE_DAYS} days):`
+    );
+    console.log(
+      providersOn
+        ? `${publicUrl}/go?intent=sign-in`
+        : `${publicUrl}/set-password?token=${approved.token}&next=${encodeURIComponent("/go")}`
+    );
   } else if (command === "remove") {
     const { removed } = await withAudit(db, COMMAND_LINE, "access.remove", (tx, audit) =>
       removeAccess(tx, audit, needEmail())

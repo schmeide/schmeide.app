@@ -3,8 +3,9 @@ import { useId, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useTRPC } from "../trpc";
-import { pathTo } from "../utils/routes";
+import { approvalEntryUrl } from "../utils/routes";
 import { ErrorNote } from "./ErrorNote";
+import { useSession } from "./SessionProvider";
 
 import errorStyles from "./ErrorNote.module.css";
 import styles from "./AdminActionForm.module.css";
@@ -26,6 +27,7 @@ type Props = {
 // loaded again once it is done.
 export function AdminActionForm({ hint, fields = [], action, run }: Props) {
   const trpc = useTRPC();
+  const { providers } = useSession();
   const queryClient = useQueryClient();
   const id = useId();
   const [missingReason, setMissingReason] = useState(false);
@@ -47,8 +49,9 @@ export function AdminActionForm({ hint, fields = [], action, run }: Props) {
     if (values.reason !== "") mutation.mutate(values);
   };
 
-  const link =
-    mutation.data && `${window.location.origin}${pathTo("setPassword")}?token=${mutation.data}`;
+  const token = typeof mutation.data === "string" ? mutation.data : "";
+  const providersOn = providers.length > 0;
+  const link = token ? approvalEntryUrl(window.location.origin, token, providersOn) : null;
   return (
     <form onSubmit={onSubmit} noValidate className={styles.form}>
       <p className={styles.hint}>{hint}</p>
@@ -89,7 +92,9 @@ export function AdminActionForm({ hint, fields = [], action, run }: Props) {
         <output className={styles.result}>
           {link ? (
             <>
-              <span>{copy.adminActions.linkIntro}</span>
+              <span>
+                {providersOn ? copy.adminActions.signInLinkIntro : copy.adminActions.linkIntro}
+              </span>
               <code className={styles.link}>{link}</code>
             </>
           ) : (

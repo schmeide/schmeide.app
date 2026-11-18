@@ -56,6 +56,7 @@ export const copy = {
     adminUsage: "Tokens and cost",
     adminAudit: "Audit log",
     help: "Help",
+    go: "Continue",
     signIn: "Sign in",
     signUp: "Join Schmeide",
     setPassword: "Set your password",
@@ -97,6 +98,9 @@ export const copy = {
     done: "Done.",
     linkIntro:
       "Send them this link to set a password. It works once, for 7 days, and is not shown again.",
+    // Shown instead of linkIntro when a sign-in provider is configured (#147).
+    signInLinkIntro:
+      "Send them this link to sign in. A provider is on, so they do not need a password.",
   },
   // The search box and paging every admin list shares.
   adminSearch: {

@@ -47,6 +47,7 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   adminUsage: () => <AdminUsagePage />,
   adminAudit: () => <AdminAuditPage />,
   help: placeholder("help"),
+  go: () => null,
   signIn: () => <SignInPage />,
   signUp: () => <SignUpPage />,
   setPassword: () => <SetPasswordPage />,
