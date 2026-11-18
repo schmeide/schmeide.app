@@ -157,6 +157,9 @@ import {
   listProjects,
   promoteStaging,
   removeQueuedChange,
+  rollBackProduction,
+  rollBackSchema,
+  RollBackRefusedError,
   requestChange,
   setFeatures,
   setSite,
@@ -202,6 +205,11 @@ export type Context = AppContext & {
 // inferred from NODE_ENV, so a deployed image cannot leak file paths by accident.
 const t = initTRPC.context<Context>().create({
   transformer: superjson,
+  // A refused roll back names the copies of the information it can go back with instead.
+  errorFormatter: ({ shape, error }) =>
+    error.cause instanceof RollBackRefusedError
+      ? { ...shape, data: { ...shape.data, copies: error.cause.copies } }
+      : shape,
   isDev: process.env.SCHMEIDE_ENV === "development",
 });
 
@@ -681,6 +689,10 @@ export const appRouter = t.router({
     ),
     discard: building(projectIdSchema).mutation(({ ctx, input }) =>
       discardStaging(ctx, { id: input.id, byUserId: ctx.person.id })
+    ),
+    // Production runs an earlier version, with today's information or a copy's (#228).
+    rollBack: building(rollBackSchema).mutation(({ ctx, input }) =>
+      rollBackProduction(ctx, { ...input, byUserId: ctx.person.id })
     ),
     // After a failed or canceled build; CONFLICT while one runs.
     buildWaiting: building(projectIdSchema).mutation(({ ctx, input }) =>

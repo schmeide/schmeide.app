@@ -93,6 +93,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "projects.setSite": { id, title: "Taken over" },
   "projects.promote": { id },
   "projects.discard": { id },
+  "projects.rollBack": { id, version: 1 },
   "projects.buildWaiting": { id },
   "projects.stop": { id },
   "projects.delete": { id },

@@ -75,6 +75,7 @@ describe("with builds for admins only", () => {
       ["projects.setSite", { id: live.id, title: "Shop" }],
       ["projects.promote", { id: live.id }],
       ["projects.discard", { id: live.id }],
+      ["projects.rollBack", { id: live.id, version: 1 }],
       ["projects.stop", { id: live.id }],
     ] as const)
       expect(await callApi(app, procedure, input, owner.cookie)).toMatchObject({

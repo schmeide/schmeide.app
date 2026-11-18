@@ -25,6 +25,7 @@ import {
   buildDependencies,
   buildFiles,
   builds,
+  databaseCopies,
   files,
   projectDesigns,
   projectIcons,
@@ -47,6 +48,7 @@ import {
   BUILDER_PLUGIN,
   GIT_CONFIG,
   buildPrompt,
+  copiesToDrop,
   createActivities,
   gitConfigFile,
   isCommit,
@@ -121,8 +123,19 @@ const setup = (shapes?: {
       { flag: "a" }
     );
   }
-  // Docker, found first on the PATH the server gives a project's commands, only notes its call.
-  writeFileSync(join(dataDir, "bin", "docker"), `#!/bin/sh\necho "docker $* $(pwd)" >> ${calls}\n`);
+  // Docker, found first on the PATH the server gives a project's commands, notes its call. Its
+  // pg_dump prints a dump that names the call (and fails while fail-dump sits beside the data
+  // dir); its pg_restore keeps what it was given in `restored`.
+  writeFileSync(
+    join(dataDir, "bin", "docker"),
+    [
+      "#!/bin/sh",
+      `echo "docker $* $(pwd)" >> ${calls}`,
+      `case "$*" in *pg_dump*) test ! -e ${join(root, "fail-dump")} || exit 1; echo "dump $(wc -l < ${calls})";;`,
+      `*pg_restore*) cat > ${join(root, "restored")};; esac`,
+      "",
+    ].join("\n")
+  );
   chmodSync(join(dataDir, "bin", "docker"), 0o755);
   git(template, "init", "-q");
   git(template, "add", "-A");
@@ -139,7 +152,9 @@ const setup = (shapes?: {
   const ran = () =>
     existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n").filter(Boolean) : [];
   const failUp = () => writeFileSync(join(root, "fail-up"), "");
-  return { config, dataDir, ran, failUp };
+  const failDump = () => writeFileSync(join(root, "fail-dump"), "");
+  const restored = () => readFileSync(join(root, "restored"), "utf8");
+  return { config, dataDir, ran, failUp, failDump, restored };
 };
 
 const newBuild = async (kind: "initial" | "change" = "initial") => {
@@ -504,6 +519,58 @@ describe("build activities", () => {
         "The code keeps no secrets and calls no other service",
       ])
     );
+  });
+
+  it("checks migrations since the build's base and records the build as additive", async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild("change");
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const workspace = join(dataDir, "projects", project.slug);
+    const base = "b".repeat(40);
+    await db.update(builds).set({ baseCommit: base }).where(eq(builds.id, build.id));
+    writeFileSync(
+      join(workspace, "Makefile"),
+      `check: check/migrations\ncheck/migrations:\n\t@echo migrations since $(BASE) > migrations-checked\n`,
+      { flag: "a" }
+    );
+    // Committed and recorded as staging's, so the secrets check reads only what changes after.
+    // The workspace is not beside a gitconfig, so name the author: CI's git has no identity to fall back on.
+    git(
+      workspace,
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-qam",
+      "migrations check"
+    );
+    await db
+      .update(projects)
+      .set({ stagingCommit: git(workspace, "rev-parse", "HEAD").trim() })
+      .where(eq(projects.id, project.id));
+
+    expect(await env.run(activities.runChecks, build.id)).toEqual({ ok: true, output: "" });
+
+    expect(readFileSync(join(workspace, "migrations-checked"), "utf8")).toBe(
+      `migrations since ${base}\n`
+    );
+    expect((await getBuild(db, build.id)).additive).toBe(true);
+  });
+
+  it("records additive as unknown for an app whose template cannot check its migrations", async () => {
+    const { config } = setup();
+    const { build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    await db.update(builds).set({ additive: true }).where(eq(builds.id, build.id));
+
+    expect(await env.run(activities.runChecks, build.id)).toEqual({ ok: true, output: "" });
+
+    expect((await getBuild(db, build.id)).additive).toBeNull();
   });
 
   it("fails a build that passes its make targets but is not ready for a phone", async () => {
@@ -1048,6 +1115,11 @@ describe("the two copies", () => {
     const production = join(setUp.dataDir, "production", project.slug);
     const staging = `schmeide-${project.slug}_staging ${project.webPort + 10_000}`;
     const live = `schmeide-${project.slug} ${project.webPort}`;
+    // What copying production's database runs, in production's checkout.
+    const copying = [
+      `docker compose -p schmeide-${project.slug} up -d --wait db ${production}`,
+      `docker compose -p schmeide-${project.slug} exec -T db pg_dump -U postgres --format=custom app ${production}`,
+    ];
     // Commits a new file in the workspace, as a build that passed would have.
     const commitIn = (file: string) => {
       writeFileSync(join(workspace, file), `export const ${file.replace(/\W/g, "")} = 1;\n`);
@@ -1084,6 +1156,7 @@ describe("the two copies", () => {
       production,
       staging,
       live,
+      copying,
       commitIn,
       anotherBuild,
     };
@@ -1165,8 +1238,18 @@ describe("the two copies", () => {
   });
 
   it("promotes: production runs the promoted commit, without the builder", async () => {
-    const { project, build, activities, env, production, live, ran, commitIn, anotherBuild } =
-      await prepared();
+    const {
+      project,
+      build,
+      activities,
+      env,
+      production,
+      live,
+      copying,
+      ran,
+      commitIn,
+      anotherBuild,
+    } = await prepared();
     await env.run(activities.deploy, build.id);
     const ahead = commitIn("ahead.ts");
     const change = await anotherBuild({ status: "passed", commit: ahead });
@@ -1177,7 +1260,7 @@ describe("the two copies", () => {
 
     await env.run(activities.release, promote.id);
 
-    expect(ran().slice(before)).toEqual([`up ${live} ${ahead} ${production}`]);
+    expect(ran().slice(before)).toEqual([...copying, `up ${live} ${ahead} ${production}`]);
     expect(headOf(production)).toBe(ahead);
     expect(existsSync(join(production, "ahead.ts"))).toBe(true);
     // Its dependencies are installed afresh by `make up`.
@@ -1188,8 +1271,18 @@ describe("the two copies", () => {
   });
 
   it("returns production to the version it was running when the promoted one cannot start", async () => {
-    const { project, build, activities, env, production, live, ran, commitIn, anotherBuild } =
-      await prepared();
+    const {
+      project,
+      build,
+      activities,
+      env,
+      production,
+      live,
+      copying,
+      ran,
+      commitIn,
+      anotherBuild,
+    } = await prepared();
     await env.run(activities.deploy, build.id);
     const running = (await buildRow(build.id)).commit ?? "";
     const broken = commitIn("fail-up");
@@ -1200,7 +1293,7 @@ describe("the two copies", () => {
       /^Version could not start: make up failed[\s\S]*\. Your live app is back on the version it was running\.$/
     );
 
-    expect(ran().slice(before)).toEqual([`up ${live} ${running} ${production}`]);
+    expect(ran().slice(before)).toEqual([...copying, `up ${live} ${running} ${production}`]);
     expect(headOf(production)).toBe(running);
     expect((await projectRow(project.id)).productionCommit).toBe(running);
     expect(await messages(promote.id)).toEqual(
@@ -1213,7 +1306,7 @@ describe("the two copies", () => {
   });
 
   it("fails with both reasons when production cannot go back either, and tries once", async () => {
-    const { project, build, activities, env, ran, commitIn, anotherBuild, failUp } =
+    const { project, build, activities, env, ran, copying, commitIn, anotherBuild, failUp } =
       await prepared();
     await env.run(activities.deploy, build.id);
     const running = (await buildRow(build.id)).commit ?? "";
@@ -1224,7 +1317,7 @@ describe("the two copies", () => {
     await expect(env.run(activities.release, promote.id)).rejects.toThrow(
       /^Version could not start: make up failed[\s\S]*Your live app could not go back to the version it was running either: make up failed/
     );
-    expect(ran().slice(before)).toEqual([]);
+    expect(ran().slice(before)).toEqual(copying);
     expect((await projectRow(project.id)).productionCommit).toBe(running);
   });
 
@@ -1237,7 +1330,157 @@ describe("the two copies", () => {
     expect(await messages(promote.id)).not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^Putting your live app back/)])
     );
+    expect(await messages(promote.id)).toContain(
+      "Nothing is live yet, so there is no information to copy"
+    );
     expect((await projectRow(project.id)).productionCommit).toBeNull();
+  });
+
+  it("copies the live app's database before a promote moves production, and records the copy", async () => {
+    const { project, build, activities, env, dataDir, commitIn, anotherBuild } = await prepared();
+    await env.run(activities.deploy, build.id);
+    await db.update(builds).set({ version: 1 }).where(eq(builds.id, build.id));
+    const promote = await anotherBuild({ kind: "promote", commit: commitIn("ahead.ts") });
+
+    await env.run(activities.release, promote.id);
+
+    const copies = await db
+      .select()
+      .from(databaseCopies)
+      .where(eq(databaseCopies.projectId, project.id));
+    const path = join(dataDir, "backups", project.slug, `${promote.id}.dump`);
+    expect(copies).toEqual([
+      expect.objectContaining({
+        buildId: promote.id,
+        version: 1,
+        path,
+        bytes: statSync(path).size,
+      }),
+    ]);
+    expect(readFileSync(path, "utf8")).toMatch(/^dump +\d+\n$/);
+    const said = await messages(promote.id);
+    expect(said.indexOf("Copying your live app's information")).toBeLessThan(
+      said.findIndex((message) => message.startsWith("Checking out"))
+    );
+  });
+
+  it("fails a promote before production is touched when its database cannot be copied", async () => {
+    const {
+      project,
+      build,
+      activities,
+      env,
+      production,
+      ran,
+      copying,
+      commitIn,
+      anotherBuild,
+      failDump,
+    } = await prepared();
+    await env.run(activities.deploy, build.id);
+    const running = (await buildRow(build.id)).commit ?? "";
+    const promote = await anotherBuild({ kind: "promote", commit: commitIn("ahead.ts") });
+    const before = ran().length;
+    failDump();
+
+    await expect(env.run(activities.release, promote.id)).rejects.toThrow(
+      /^Your live app's information could not be copied, so nothing was changed/
+    );
+    expect(ran().slice(before)).toEqual(copying);
+    expect(headOf(production)).toBe(running);
+    expect((await projectRow(project.id)).productionCommit).toBe(running);
+    expect(
+      await db.select().from(databaseCopies).where(eq(databaseCopies.projectId, project.id))
+    ).toEqual([]);
+  });
+
+  // Version 1 was live, then version 2 was put live: production runs version 2.
+  const liveOnSecond = async () => {
+    const app = await prepared();
+    const { build, activities, env, commitIn, anotherBuild } = app;
+    await env.run(activities.deploy, build.id);
+    const first = (await buildRow(build.id)).commit ?? "";
+    const second = commitIn("second.ts");
+    await anotherBuild({ status: "passed", commit: second });
+    await env.run(activities.release, (await anotherBuild({ kind: "promote", commit: second })).id);
+    return { ...app, first, second };
+  };
+
+  it("rolls back keeping today's information: production runs the earlier version on today's database, after a copy", async () => {
+    const { project, activities, env, production, live, copying, ran, anotherBuild, first } =
+      await liveOnSecond();
+    const rollback = await anotherBuild({ kind: "rollback", commit: first });
+    const before = ran().length;
+
+    await env.run(activities.release, rollback.id);
+
+    expect(ran().slice(before)).toEqual([...copying, `up ${live} ${first} ${production}`]);
+    expect(headOf(production)).toBe(first);
+    expect(existsSync(join(production, "second.ts"))).toBe(false);
+    expect(await projectRow(project.id)).toMatchObject({ productionCommit: first, status: "live" });
+    expect(
+      await db.select().from(databaseCopies).where(eq(databaseCopies.buildId, rollback.id))
+    ).toHaveLength(1);
+  });
+
+  it("rolls back with the information from a copy: restores it after a fresh copy, then starts the earlier version", async () => {
+    const {
+      project,
+      activities,
+      env,
+      production,
+      live,
+      copying,
+      ran,
+      anotherBuild,
+      first,
+      restored,
+    } = await liveOnSecond();
+    const [then] = await db
+      .select()
+      .from(databaseCopies)
+      .where(eq(databaseCopies.projectId, project.id));
+    const rollback = await anotherBuild({ kind: "rollback", commit: first, fromCopyId: then.id });
+    const before = ran().length;
+
+    await env.run(activities.release, rollback.id);
+
+    const slug = `schmeide-${project.slug}`;
+    expect(ran().slice(before)).toEqual([
+      ...copying,
+      `down ${slug} ${production}`,
+      `docker compose -p ${slug} up -d --wait db ${production}`,
+      `docker compose -p ${slug} exec -T db dropdb -U postgres --force --if-exists app ${production}`,
+      `docker compose -p ${slug} exec -T db createdb -U postgres app ${production}`,
+      `docker compose -p ${slug} exec -T db pg_restore -U postgres --no-owner -d app ${production}`,
+      `up ${live} ${first} ${production}`,
+    ]);
+    expect(restored()).toBe(readFileSync(then.path, "utf8"));
+    const [fresh] = await db
+      .select()
+      .from(databaseCopies)
+      .where(eq(databaseCopies.buildId, rollback.id));
+    expect(readFileSync(fresh.path, "utf8")).not.toBe(restored());
+    expect((await projectRow(project.id)).productionCommit).toBe(first);
+  });
+
+  it("returns production to the live version when the earlier one cannot start", async () => {
+    const { project, activities, env, production, ran, anotherBuild, commitIn, second } =
+      await liveOnSecond();
+    const broken = commitIn("fail-up");
+    await anotherBuild({ status: "passed", commit: broken });
+    const rollback = await anotherBuild({ kind: "rollback", commit: broken });
+    const before = ran().length;
+
+    await expect(env.run(activities.release, rollback.id)).rejects.toThrow(
+      /^Version could not start: make up failed[\s\S]*\. Your live app is back on the version it was running\.$/
+    );
+
+    expect(ran().slice(before).at(-1)).toBe(
+      `up schmeide-${project.slug} ${project.webPort} ${second} ${production}`
+    );
+    expect(headOf(production)).toBe(second);
+    expect((await projectRow(project.id)).productionCommit).toBe(second);
   });
 
   it("discards: staging goes back to production's commit with a fresh database, and production is not touched", async () => {
@@ -1332,9 +1575,19 @@ describe("the two copies", () => {
     });
   });
 
-  it("removes both copies with their volumes, the checkout, and the workspace when the project is deleted", async () => {
-    const { project, build, activities, env, workspace, production, ran } = await prepared();
+  it("removes both copies with their volumes, the checkout, the workspace, and the database copies when the project is deleted", async () => {
+    const { project, build, activities, env, workspace, production, ran, dataDir } =
+      await prepared();
     await env.run(activities.deploy, build.id);
+    const backups = join(dataDir, "backups", project.slug);
+    mkdirSync(backups, { recursive: true });
+    writeFileSync(join(backups, `${build.id}.dump`), "dump");
+    await db.insert(databaseCopies).values({
+      projectId: project.id,
+      buildId: build.id,
+      path: join(backups, `${build.id}.dump`),
+      bytes: 4,
+    });
     const before = ran().length;
 
     await env.run(activities.removeProject, project.id);
@@ -1346,6 +1599,10 @@ describe("the two copies", () => {
     ]);
     expect(existsSync(production)).toBe(false);
     expect(existsSync(workspace)).toBe(false);
+    expect(existsSync(backups)).toBe(false);
+    expect(
+      await db.select().from(databaseCopies).where(eq(databaseCopies.projectId, project.id))
+    ).toEqual([]);
   });
 
   it("starts and stops both copies with neither the server's secrets nor the model's credentials", async () => {
@@ -1371,6 +1628,20 @@ describe("the two copies", () => {
         expect(given).not.toContain("secret");
         expect(given).not.toMatch(/^(ANTHROPIC|CLAUDE)_/m);
       }
+  });
+
+  it("keeps the last 10 copies and the newest copy of every version that was live", () => {
+    // Newest first: versions 9, 9, 8, ... and one old copy each of versions 2 and 1.
+    const copies = [
+      ...Array.from({ length: 12 }, (_, i) => ({ id: 100 - i, version: 9 })),
+      { id: 50, version: 2 },
+      { id: 49, version: 2 },
+      { id: 48, version: null },
+      { id: 47, version: 1 },
+    ];
+
+    expect(copiesToDrop(copies)).toEqual([90, 89, 49]);
+    expect(copiesToDrop(copies.slice(0, 10))).toEqual([]);
   });
 
   it("takes only a full commit id as one", () => {

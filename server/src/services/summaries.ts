@@ -23,6 +23,10 @@ export const RELEASE_SUMMARIES = {
       "The changes your customers did not see yet were thrown away. The version being worked on is back to what your customers see, with an empty database of its own.",
     failed: "Throwing away the changes your customers do not see yet did not finish.",
   },
+  rollback: {
+    passed: "Your customers now see an earlier version. The version being worked on is as it was.",
+    failed: "Putting an earlier version live did not finish.",
+  },
 } as const;
 
 export type Summaries = {
@@ -94,7 +98,7 @@ export const createSummaries = (
     ).reverse();
     if (!final && events.length === 0) return;
     const build = await getBuild(db, buildId);
-    if (build.kind === "promote" || build.kind === "discard") {
+    if (build.kind === "promote" || build.kind === "discard" || build.kind === "rollback") {
       // No builder ran, so there is nothing for the model to tell: one fixed account, at the end.
       if (final)
         await db.insert(buildSummaries).values({

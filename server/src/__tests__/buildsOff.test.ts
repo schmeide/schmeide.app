@@ -78,8 +78,10 @@ describe("with builds off", () => {
     const project = await createProject(db, { name: "Released", tenantId: owner.tenantId });
     await transition(db, project.id, ["draft"], { status: "live" });
 
-    for (const procedure of ["projects.promote", "projects.discard"])
-      expect(await callApi(app, procedure, { id: project.id }, owner.cookie)).toMatchObject({
+    for (const procedure of ["projects.promote", "projects.discard", "projects.rollBack"])
+      expect(
+        await callApi(app, procedure, { id: project.id, version: 1 }, owner.cookie)
+      ).toMatchObject({
         code: "CONFLICT",
         message: BUILDS_OFF,
       });

@@ -107,15 +107,15 @@ export async function specWorkflow(projectId: number): Promise<void> {
 }
 
 // projectId is unused but makes runs easy to find in the Temporal UI. A `site` build only applies
-// the page title and icon and redeploys; `promote` and `discard` only move one copy of the app to
-// a commit. kind is missing for runs started before it existed.
+// the page title and icon and redeploys; `promote`, `discard`, and `rollback` only move one copy
+// of the app to a commit. kind is missing for runs started before it existed.
 export async function buildWorkflow(
   _projectId: number,
   buildId: number,
   kind?: Build["kind"]
 ): Promise<void> {
   try {
-    if (kind === "promote" || kind === "discard") {
+    if (kind === "promote" || kind === "discard" || kind === "rollback") {
       await release(buildId);
     } else {
       await prepareWorkspace(buildId);

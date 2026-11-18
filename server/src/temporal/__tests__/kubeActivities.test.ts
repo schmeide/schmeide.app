@@ -20,7 +20,7 @@ import { buildDependencies, buildFiles, builds, files, projects, usage } from ".
 import type { Cluster, Job, Kube, LogLine, Pod } from "../../kube/client.ts";
 import { KubeError } from "../../kube/client.ts";
 import { createAcr, type Acr } from "../../services/acr.ts";
-import { appendEvent, listEvents } from "../../services/builds.ts";
+import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import type { Forgejo } from "../../services/forgejo.ts";
 import type { AppDatabases } from "../../services/appDatabases.ts";
 import { createProject, transition } from "../../services/projects.ts";
@@ -680,6 +680,8 @@ describe("kubernetes mode", () => {
 
     expect(ok).toEqual({ ok: true, output: "" });
     expect(failed).toEqual({ ok: false, output: "$ make test\nFAIL todos.test.ts\n" });
+    // The template here has no check/migrations, so whether the build only added is unknown.
+    expect((await getBuild(db, build.id)).additive).toBeNull();
     expect(notForPhones).toEqual({
       ok: false,
       output:

@@ -18,6 +18,7 @@ import {
   sql,
 } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
   agentRuns,
@@ -25,6 +26,7 @@ import {
   buildFiles,
   builds,
   buildSummaries,
+  databaseCopies,
   files,
   interviewQuestions,
   interviews,
@@ -36,6 +38,7 @@ import {
   usage,
   users,
   type Build,
+  type DatabaseCopy,
   type Project,
   type Today,
 } from "../db/schema.ts";
@@ -279,9 +282,47 @@ export const markReleased = async (
   await db.update(builds).set({ release }).where(onStagingOnly(projectId));
 };
 
-// How many changes staging has that production does not.
-const unreleasedCount = async (db: Db, projectId: number): Promise<number> =>
-  (await db.select({ count: count() }).from(builds).where(onStagingOnly(projectId)))[0].count;
+type NumberedVersion = Pick<Build, "version" | "commit" | "baseCommit" | "additive" | "kind">;
+
+const numberedVersions = (db: Db, projectId: number): Promise<readonly NumberedVersion[]> =>
+  db
+    .select({
+      version: builds.version,
+      commit: builds.commit,
+      baseCommit: builds.baseCommit,
+      additive: builds.additive,
+      kind: builds.kind,
+    })
+    .from(builds)
+    .where(and(eq(builds.projectId, projectId), isNotNull(builds.version)))
+    .orderBy(asc(builds.version));
+
+// The commits `commit` was built on, itself included, through each version's base commit (#226).
+const lineOf = (versions: readonly NumberedVersion[], commit: string | null): Set<string> => {
+  const line = new Set<string>();
+  const next = commit === null ? [] : [commit];
+  for (let at = next.pop(); at !== undefined; at = next.pop()) {
+    if (line.has(at)) continue;
+    line.add(at);
+    for (const version of versions)
+      if (version.commit === at && version.baseCommit) next.push(version.baseCommit);
+  }
+  return line;
+};
+
+// How many versions staging has that production does not: those on staging's line that are not
+// on production's. Live is production's commit, not the `release` flags, which a roll back leaves
+// as history. Staging on a commit with no number (an app from before versions) counts the flags.
+const unreleasedCount = async (db: Db, projectId: number): Promise<number> => {
+  const { stagingCommit, productionCommit } = await findProject(db, projectId);
+  const versions = await numberedVersions(db, projectId);
+  if (!versions.some(({ commit }) => commit === stagingCommit))
+    return (await db.select({ count: count() }).from(builds).where(onStagingOnly(projectId)))[0]
+      .count;
+  const live = lineOf(versions, productionCommit);
+  const ahead = [...lineOf(versions, stagingCommit)].filter((commit) => !live.has(commit));
+  return versions.filter(({ commit }) => commit !== null && ahead.includes(commit)).length;
+};
 
 // Changes built and not thrown away, oldest first.
 export const builtChanges = (
@@ -302,6 +343,25 @@ export const builtChanges = (
       )
     )
     .orderBy(asc(builds.id));
+
+// The version number of `commit` in the project, or null when it has none (an app live before
+// versions existed).
+export const versionOfCommit = async (
+  db: Db,
+  projectId: number,
+  commit: string | null
+): Promise<number | null> => {
+  if (commit === null) return null;
+  const [row] = await db
+    .select({ version: builds.version })
+    .from(builds)
+    .where(
+      and(eq(builds.projectId, projectId), eq(builds.commit, commit), isNotNull(builds.version))
+    )
+    .orderBy(asc(builds.version))
+    .limit(1);
+  return row?.version ?? null;
+};
 
 export const getProject = async (
   db: Db,
@@ -372,16 +432,7 @@ export const getProject = async (
   const [by] = latestBuild?.byUserId
     ? await db.select({ name: users.name }).from(users).where(eq(users.id, latestBuild.byUserId))
     : [];
-  const versionOf = async (commit: string | null): Promise<number | null> => {
-    if (commit === null) return null;
-    const [row] = await db
-      .select({ version: builds.version })
-      .from(builds)
-      .where(and(eq(builds.projectId, id), eq(builds.commit, commit), isNotNull(builds.version)))
-      .orderBy(asc(builds.version))
-      .limit(1);
-    return row?.version ?? null;
-  };
+  const versionOf = (commit: string | null) => versionOfCommit(db, id, commit);
   return {
     project,
     latestBuild: latestBuild ?? null,
@@ -505,7 +556,7 @@ const startBuild = async (
   from: readonly Status[],
   kind: Build["kind"],
   request: (project: Project) => string,
-  values: Pick<typeof builds.$inferInsert, "commit" | "byUserId"> = {}
+  values: Pick<typeof builds.$inferInsert, "commit" | "byUserId" | "fromCopyId"> = {}
 ): Promise<{ project: Project; build: Build }> => {
   // ponytail: builds of different projects run side by side on one worker; a task queue per tenant in production
   const project = await transition(tx, id, from, { status: "building" });
@@ -676,6 +727,143 @@ export const discardStaging = (
     return project.productionCommit;
   });
 
+// A copy of the live app's information a roll back may go back with (#227).
+export type CopyOffer = Pick<DatabaseCopy, "id" | "version" | "takenAt">;
+
+// A roll back that cannot keep today's information. `copies` are the ones it can go back with
+// instead, newest first, for the confirmation (#230) to offer.
+export class RollBackRefusedError extends ConflictError {
+  readonly copies: readonly CopyOffer[];
+  constructor(message: string, copies: readonly CopyOffer[]) {
+    super(message);
+    this.copies = copies;
+  }
+}
+
+export const rollBackSchema = z.object({
+  id: z.number().int().positive(),
+  version: z.number().int().positive(),
+  withInformationFrom: z.number().int().positive().optional(),
+});
+
+export const rollBackRequest = (version: number): string => `Put version ${version} live`;
+
+const MONTHS = new Intl.DateTimeFormat("en-US", { month: "long", timeZone: "UTC" });
+// "12 November, 14:02 UTC".
+// ponytail: UTC for everyone; the person's own time zone once the confirmation (#230) shows it.
+const when = (at: Date): string =>
+  `${at.getUTCDate()} ${MONTHS.format(at)}, ${at.toISOString().slice(11, 16)} UTC`;
+
+// Puts an earlier version, `version`, live on production (#228), without the builder; staging,
+// the version being worked on, stays where it is. By default the old code runs against today's
+// database, which is allowed only if every version whose migrations have run on it since, and
+// that `version` does not hold, only added to it (builds.additive, schmeide/template#25).
+// Otherwise the person goes back `withInformationFrom` a copy taken while that version or an
+// earlier one was live, and loses what was entered since.
+export const rollBackProduction = (
+  deps: Deps,
+  input: {
+    readonly id: number;
+    readonly version: number;
+    readonly withInformationFrom?: number;
+    readonly byUserId: string;
+  }
+): Promise<{ project: Project; build: Build }> =>
+  deps.db.transaction(async (raw) => {
+    assertBuildsOn(deps);
+    const tx = raw as unknown as Db;
+    const project = await lockProject(tx, input.id);
+    await assertActive(tx, project.tenantId);
+    if (project.status === "building" || (await hasRunningBuild(tx, project.id)))
+      throw new ConflictError(
+        "A change is being built. Try again once it has finished; this page updates by itself."
+      );
+    const versions = await numberedVersions(tx, project.id);
+    const target = versions.find(({ version }) => version === input.version);
+    if (!target?.commit)
+      throw new ConflictError(
+        `Version ${input.version} is not a version of this app that was built, so it cannot go live.`
+      );
+    if (!versions.some(({ commit }) => commit === project.productionCommit))
+      throw new ConflictError(
+        "Your app went live before Schmeide recorded versions, so there is no recorded version to go back from. Put the version being worked on live once, and from then on you can go back."
+      );
+    if (target.commit === project.productionCommit)
+      throw new ConflictError(`Version ${input.version} is already live.`);
+    const held = lineOf(versions, target.commit);
+    const copies = (
+      await tx
+        .select({
+          id: databaseCopies.id,
+          version: databaseCopies.version,
+          takenAt: databaseCopies.takenAt,
+        })
+        .from(databaseCopies)
+        .where(eq(databaseCopies.projectId, project.id))
+        .orderBy(desc(databaseCopies.takenAt), desc(databaseCopies.id))
+    ).filter(({ version }) =>
+      versions.some((known) => known.version === version && known.commit && held.has(known.commit))
+    );
+    if (input.withInformationFrom !== undefined) {
+      if (!copies.some(({ id }) => id === input.withInformationFrom))
+        throw new ConflictError(
+          `That copy of your information was not taken while version ${input.version} or an earlier one was live, so the app cannot go back with it.`
+        );
+    } else {
+      // Every commit production has run, or tried to: what is live, every promote and roll back,
+      // and what was promoted (the first build goes live without a promote).
+      const ran = await tx
+        .select({ commit: builds.commit })
+        .from(builds)
+        .where(
+          and(
+            eq(builds.projectId, project.id),
+            or(
+              eq(builds.release, "promoted"),
+              and(inArray(builds.kind, ["promote", "rollback"]), ne(builds.status, "queued"))
+            )
+          )
+        );
+      const migrated = new Set(
+        [project.productionCommit, ...ran.map(({ commit }) => commit)].flatMap((commit) => [
+          ...lineOf(versions, commit),
+        ])
+      );
+      // A site build only writes the page title and icon.
+      const changed = versions.find(
+        ({ commit, additive, kind }) =>
+          commit !== null &&
+          migrated.has(commit) &&
+          !held.has(commit) &&
+          additive !== true &&
+          kind !== "site"
+      );
+      if (changed) {
+        const may = changed.additive === null;
+        throw new RollBackRefusedError(
+          `Version ${changed.version} ${may ? "may have changed" : "changed"} how your app stores its information, so version ${input.version} ${may ? "may not" : "cannot"} read it. ` +
+            (copies.length > 0
+              ? `You can go back to version ${input.version} with the information from ${when(copies[0].takenAt)}.`
+              : "No copy of the information from then was kept."),
+          copies
+        );
+      }
+    }
+    return startBuild(
+      deps,
+      tx,
+      project.id,
+      ["live", "failed", "stopped"],
+      "rollback",
+      () => rollBackRequest(input.version),
+      {
+        commit: target.commit,
+        byUserId: input.byUserId,
+        fromCopyId: input.withInformationFrom ?? null,
+      }
+    );
+  });
+
 // Starts the project's oldest queued change, moving the project out of one of `from`.
 const startOldestQueued = async (
   deps: Deps,
@@ -834,6 +1022,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
     await tx.delete(interviews).where(eq(interviews.projectId, id));
     await tx.delete(readBacks).where(eq(readBacks.projectId, id));
+    await tx.delete(databaseCopies).where(eq(databaseCopies.projectId, id));
     await tx.delete(buildEvents).where(inArray(buildEvents.buildId, ids));
     await tx.delete(buildSummaries).where(inArray(buildSummaries.buildId, ids));
     await tx.delete(buildFiles).where(inArray(buildFiles.buildId, ids));
@@ -849,6 +1038,12 @@ export const claudeDir = (): string => process.env.CLAUDE_CONFIG_DIR ?? join(hom
 // character but a letter or digit a dash.
 export const transcriptsDir = (claude: string, cwd: string): string =>
   join(claude, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+
+// Where a project's database copies (#227) are kept. The slug is checked as copyOf checks it.
+export const backupsDir = (dataDir: string, slug: string): string => {
+  copyOf(dataDir, slug, "production");
+  return join(dataDir, "backups", slug);
+};
 
 // A build's raw log and its staged attachments in the data dir (temporal/activities.ts).
 export const buildFilesOf = (dataDir: string, buildId: number): readonly string[] => [
@@ -879,6 +1074,7 @@ export const removeProjectFiles = async (
     [
       ...ids.flatMap(({ id }) => buildFilesOf(dataDir, id)),
       transcriptsDir(claude, copyOf(dataDir, project.slug, "staging").dir),
+      backupsDir(dataDir, project.slug),
     ].map(removePath)
   );
 };

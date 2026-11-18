@@ -181,7 +181,7 @@ build (GitHub Pages) has no API and shows the "Coming soon" page instead, with n
 | Describing           | `draft`           | Requests being written; no spec yet                    |
 | Writing the spec     | `spec_generating` | The spec is being written                              |
 | Spec ready to review | `spec_ready`      | Approve it, or change the requests (discards the spec) |
-| Building             | `building`        | A build, a change build, a promote, or a discard runs  |
+| Building             | `building`        | A build, a change, a promote, discard, or roll back    |
 | Live                 | `live`            | The app is running at its links                        |
 | Build failed         | `failed`          | The last build failed; request a change                |
 | Canceled             | `failed`          | Last build is `canceled`. A first one has no app yet   |
@@ -267,7 +267,17 @@ Print an invoice as a clean page I can save as a PDF
    `git checkout --detach`, `git clean -ffdx`), runs `make up` there under production's name and port,
    which runs the app's migrations forward against production's database, and waits for it to answer.
    It records `productionCommit` and `previewUrl`, and marks every passed build staging held
-   `release = promoted`. Staging's database is never copied to production.
+   `release = promoted`. Staging's database is never copied to production. Before production moves,
+   its database is copied (`pg_dump --format=custom` through `docker compose exec db`) to
+   `~/.schmeide/backups/<slug>/<build id>.dump` and recorded in `database_copies` with the version
+   live then; a copy that fails fails the promote with production untouched. An app's first promote
+   has nothing to copy. The last 10 copies are kept, and the newest copy of every version that was
+   live. On the cluster nothing is copied yet.
+
+   **Checks** run `make check BASE=<builds.base_commit>`, so the template's `check/migrations`
+   (schmeide/template#25) refuses any migration since the build's base that takes away or changes
+   something. A build that passes with that target is recorded `additive = true`; one whose
+   template has no such target is `additive = null` (unknown).
 
 5. `projects.requestChange({ id, request })` on a `live`, `failed`, or `stopped` project runs the
    same workflow as a change build. On a `building` project it is queued instead (build status
@@ -293,6 +303,32 @@ Print an invoice as a clean page I can save as a PDF
    there is nothing to do, and (discard) when production's commit was never recorded; a suspended
    business can do neither. Each counts toward building time like any build. No model runs for
    either: its summary is one fixed sentence, written when it ends (`RELEASE_SUMMARIES`).
+
+   `projects.rollBack({ id, version, withInformationFrom? })` starts a `rollback` build: production
+   runs an earlier version's commit, without the builder, recorded with who asked. Staging is not
+   touched; "Put this version live" after it puts staging's version live again, and a roll back to the
+   version live before is the undo in general. Two ways to go back:
+
+   - **Keeping today's information** (the default): production's database is copied, then the old
+     code runs against it. No migration runs backwards. This is allowed only if every version whose
+     migrations have run on the live database since, and that the earlier version does not hold, only
+     added to it (`additive = true`; a `site` build changes no data). Otherwise it answers `CONFLICT`
+     naming the version, such as "Version 5 changed how your app stores its information, so version
+     3 cannot read it. You can go back to version 3 with the information from 12 November, 14:02
+     UTC.", and the error carries the copies taken while that version or an earlier one was live.
+   - **With the information from a copy** (`withInformationFrom: copyId`, one of those copies): a
+     fresh copy is taken, production stops, its database is emptied and the copy restored, then the
+     old code starts. Everything entered since that copy is lost.
+
+   If the earlier version cannot start, production goes back to the version that was live (and, after
+   a restore, to the information it had), and the build fails with both reasons. It also answers
+   `CONFLICT` while a build runs, when the version is already live or is not a passed version of the
+   app, when the live commit has no number (an app live before versions existed), and for a suspended
+   business. `release` on builds stays as history; what is live is `productionCommit`, and "how many
+   changes customers do not see yet" counts the versions on staging's line (`base_commit`) that are
+   not on production's. A roll back does not move staging to the version (decided in #228; #231 does
+   that, and #230 can offer it next).
+
 8. `projects.stop({ id })` cancels a running build (it ends `canceled`, with no error; the project is `failed`), or
    runs `make down` for both copies (status `stopped`, volumes kept).
 9. `projects.delete({ id })` removes both copies and their volumes, the workspace, the app's checkout, and every
@@ -507,6 +543,8 @@ decides, and the run kind is its only input.
   runs from.
 - `~/.schmeide/production/<slug>/`: production's own checkout of that repository, at the commit it runs. An
   app deployed before this existed runs from images built in the workspace until its first promote.
+- `~/.schmeide/backups/<slug>/<build id>.dump`: copies of production's database taken before a promote or a roll
+  back, removed with the project.
 - `~/.schmeide/files/<business id>/<project id>/<file id>`: uploaded files, removed with the file or the project.
 - `~/.schmeide/logs/build-<id>.log`: full command output and every raw agent message for a build.
   `e2e-fake-server.log` is the `make e2e/fake` server's output.
@@ -761,4 +799,5 @@ Each is marked in code with a `ponytail:` comment.
   ports below that are only reused once the projects above them are deleted.
 - When a promoted version cannot start, production goes back to the version it was running. `make up` may already
   have run the new version's migrations against production's database by then, so the old code is safe on it only if
-  those migrations were additions. The template does not enforce that until schmeide/template#25 lands.
+  those migrations were additions. Every build now checks that (schmeide/template#25), but an app made from an older
+  template has no such check until #206 brings it, and its versions count as unknown.
