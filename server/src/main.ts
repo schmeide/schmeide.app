@@ -1,5 +1,6 @@
 // The server: Fastify + tRPC API and the Temporal worker, one process or two by SCHMEIDE_ROLE
 // (role.ts). With cli/access.ts, the only place that reads the environment.
+import { photograph } from "./services/pictures.ts";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -200,7 +201,7 @@ const startWorker = async () => {
     workflowsPath: new URL("./temporal/workflows.ts", import.meta.url).pathname,
     activities: createActivities(
       deps,
-      { ...config, runner },
+      { ...config, runner, photograph },
       undefined,
       undefined,
       createSummaries(db, createSummarizer({ ...config, model: config.summaryModel }))

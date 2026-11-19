@@ -146,6 +146,7 @@ import { COPIES, copyOf, webPortOf, type Copy } from "../services/resources.ts";
 import { writePrivacy } from "../services/privacyNotice.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
+import { savePictures, type Photograph } from "../services/pictures.ts";
 
 export type { Query };
 
@@ -169,6 +170,9 @@ export type Config = {
   readonly fetch?: typeof fetch;
   // How the host checks ask npm about known security holes; tests stand in for the registry.
   readonly audit?: Audit;
+  // Takes the pictures of each version's home page at the end of deploy (services/pictures.ts);
+  // tests stand in for Chromium. Unset takes none.
+  readonly photograph?: Photograph;
   // SCHMEIDE_RUNNER=kubernetes: the code lives on Forgejo and the agent and the checks run as Jobs.
   // Unset is host mode: a local workspace, and the agent and make run on this machine.
   readonly runner?: KubeRunner;
@@ -1113,6 +1117,20 @@ export const createActivities = (
       "deploy",
       `Your live app's information is back to ${copy.takenAt.toISOString()}`
     );
+  };
+
+  // The version's pictures of staging at `url`, which answers. Soft: a failure is one step event
+  // and the build goes on. A cancel still cancels.
+  const takePictures = async (buildId: number, url: string) => {
+    const { photograph } = config;
+    if (!photograph) return;
+    try {
+      await savePictures(db, buildId, await withHeartbeat(() => photograph(url)));
+    } catch (cause) {
+      if (Context.current().cancellationSignal.aborted) throw cause;
+      const why = cause instanceof Error ? cause.message : String(cause);
+      await event(buildId, "step", `Could not take a picture of this version: ${why}`);
+    }
   };
 
   // Makes production run `commit` and answers its address. If it cannot start, production goes
@@ -2553,6 +2571,7 @@ export const createActivities = (
         .where(and(eq(builds.projectId, project.id), eq(builds.release, "promoted")))
         .limit(1);
       if (!live) await promote(project, commit, buildId);
+      await takePictures(buildId, url);
     },
 
     // A `promote` build makes production run its commit; a `discard` build returns staging to its

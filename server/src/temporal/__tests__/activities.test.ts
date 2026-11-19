@@ -32,6 +32,7 @@ import {
   projects,
   tenants,
   usage,
+  versionPictures,
   type FileRow,
 } from "../../db/schema.ts";
 import { getBuild, listEvents } from "../../services/builds.ts";
@@ -1214,6 +1215,60 @@ describe("the two copies", () => {
       productionCommit: first,
     });
     expect((await buildRow(next.id)).release).toBeNull();
+  });
+
+  describe("the version's pictures", () => {
+    const picturesOf = (buildId: number) =>
+      db
+        .select({ width: versionPictures.width, data: versionPictures.data })
+        .from(versionPictures)
+        .where(eq(versionPictures.buildId, buildId))
+        .orderBy(versionPictures.width);
+
+    it("takes a desktop and a phone picture of staging once it answers", async () => {
+      const { project, build, config, ran } = await prepared();
+      const seen: { url: string; ran: readonly string[] }[] = [];
+      const activities = createActivities(deps, {
+        ...config,
+        photograph: async (url) => {
+          seen.push({ url, ran: ran() });
+          return [
+            { width: "desktop", data: Buffer.from("wide") },
+            { width: "phone", data: Buffer.from("narrow") },
+          ];
+        },
+      });
+
+      await new MockActivityEnvironment().run(activities.deploy, build.id);
+
+      const stagingUrl = `http://localhost:${project.webPort + 10_000}`;
+      expect(seen).toHaveLength(1);
+      expect(seen[0].url).toBe(stagingUrl);
+      expect(seen[0].ran[0]).toMatch(/^up schmeide-.*_staging /);
+      expect(await picturesOf(build.id)).toEqual([
+        { width: "desktop", data: Buffer.from("wide").toString("base64") },
+        { width: "phone", data: Buffer.from("narrow").toString("base64") },
+      ]);
+    });
+
+    it("leaves the build passing when a picture fails, and says so once", async () => {
+      const { build, config } = await prepared();
+      const activities = createActivities(deps, {
+        ...config,
+        photograph: () => Promise.reject(new Error("Chromium crashed")),
+      });
+
+      await new MockActivityEnvironment().run(activities.deploy, build.id);
+
+      expect(await picturesOf(build.id)).toEqual([]);
+      expect((await projectRow(build.projectId)).status).toBe("live");
+      const said = (await listEvents(db, build.id, 0)).filter((event) =>
+        event.message.includes("Chromium crashed")
+      );
+      expect(said.map(({ kind, message }) => ({ kind, message }))).toEqual([
+        { kind: "step", message: "Could not take a picture of this version: Chromium crashed" },
+      ]);
+    });
   });
 
   it("gives an app that is live with one copy a staging copy on its next build", async () => {

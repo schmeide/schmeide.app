@@ -122,6 +122,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "builds.summaries": { buildId },
   "builds.editQueued": { buildId, request: "Take over" },
   "builds.removeQueued": { buildId },
+  "builds.picture": { buildId, width: "desktop" },
 });
 const takesAnId = (input: unknown) => typeof input === "object" && input !== null;
 // The caller's own account: about the person, never a project or build.

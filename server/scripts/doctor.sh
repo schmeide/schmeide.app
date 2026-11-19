@@ -64,6 +64,16 @@ else
   fi
 fi
 
+# Deploy takes a picture of each version in Playwright's headless Chromium (services/pictures.ts).
+# Without it builds still pass, with a step saying the picture failed.
+server_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+chromium="$(cd "$server_dir" && node -e 'import("playwright").then((p) => console.log(p.chromium.executablePath()))' 2>/dev/null)"
+if [[ -n "$chromium" && -e "$chromium" ]]; then
+  ok "Playwright's Chromium is installed (pictures of each version)"
+else
+  fail "Playwright's Chromium is not installed, so versions get no pictures" "make setup/chromium"
+fi
+
 template="${SCHMEIDE_TEMPLATE:-https://github.com/schmeide/template.git}"
 if git ls-remote --heads "$template" >/dev/null 2>&1; then
   ok "template reachable: $template"
