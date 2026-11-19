@@ -25,6 +25,10 @@ RUN npm ci --omit=dev -w server \
     && ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude /usr/local/bin/claude \
     && claude --version
 COPY server server
+# server/ imports shared files from these by relative path. Whole directories, so a new shared file
+# cannot break the image; serverImage.test.ts fails if server/ reaches into any other directory.
+COPY data data
+COPY utils utils
 
 RUN mkdir /data && chown node:node /data
 USER node
