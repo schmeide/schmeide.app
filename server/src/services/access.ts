@@ -4,6 +4,7 @@ import { and, asc, eq, exists, gt, isNotNull, isNull, or, sql } from "drizzle-or
 import type { Db } from "../db/client.ts";
 import {
   ADMIN_ROLE,
+  accessRequests,
   approvedEmails,
   emailSchema,
   invites,
@@ -280,6 +281,12 @@ export const approveAccess = async (
   readonly hasAccount: boolean;
 }> => {
   const approved = await approveEmail(db, rawEmail, { tenantId });
+  // A request from schmeide.com for this address is decided. No row is fine: the address was
+  // approved without one, and the link is still printed.
+  await db
+    .update(accessRequests)
+    .set({ state: "approved" })
+    .where(eq(accessRequests.email, approved.email));
   const userId = await userIdOf(db, approved.email);
   audit({
     targetUserId: userId,

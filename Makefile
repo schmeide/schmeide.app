@@ -214,6 +214,14 @@ access/admin: node_modules env-EMAIL ## Give an approved person who has signed i
 access/list: node_modules ## List approved emails, whether each has signed in, and who is an admin
 	$(JS_EXEC) run --silent access -w server -- list
 
+.PHONY: access/requests
+access/requests: node_modules ## List access requests that are waiting, newest first
+	$(JS_EXEC) run --silent access -w server -- requests
+
+.PHONY: access/decline
+access/decline: node_modules env-EMAIL ## Mark an access request declined and tell that person nothing (EMAIL=person@example.com)
+	$(JS_EXEC) run --silent access -w server -- decline "$(EMAIL)"
+
 .PHONY: doctor
 doctor: node_modules ## Check Docker, claude, git, node, the template, ports, and leftover app containers; print each fix
 	bash server/scripts/doctor.sh

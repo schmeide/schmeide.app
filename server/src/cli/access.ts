@@ -1,7 +1,8 @@
-// `make access/approve|list|remove|admin`: manages the prelaunch approved list and who has the
-// platform admin role. The admin area (/admin) does the same; this is how the first admin is made,
-// and how access is managed with no admin able to sign in. Every change is in the audit log.
-// `make db/seed` (`seed`) makes the two local logins.
+// `make access/approve|decline|list|remove|admin|requests`: the prelaunch approved list, who has
+// the platform admin role, and access requests from schmeide.com. The admin area (/admin) approves
+// and removes access too; this is how the first admin is made, and how access is managed with no
+// admin able to sign in. Every approval and removal is in the audit log. `make db/seed` (`seed`)
+// makes the two local logins.
 import { createDb } from "../db/client.ts";
 import {
   approveAccess,
@@ -10,6 +11,11 @@ import {
   listApproved,
   removeAccess,
 } from "../services/access.ts";
+import {
+  declineAccessRequest,
+  formatWaitingRequest,
+  listWaitingRequests,
+} from "../services/accessRequests.ts";
 import { COMMAND_LINE, withAudit } from "../services/audit.ts";
 import {
   authConfigFromEnv,
@@ -88,8 +94,16 @@ try {
       console.log(
         `${address}\t${hasAccount ? "has an account" : "has not signed in yet"}${admin ? "\tadmin" : ""}`
       );
+  } else if (command === "requests") {
+    const waiting = await listWaitingRequests(db);
+    if (waiting.length === 0) console.log("Nobody is waiting.");
+    for (const row of waiting) console.log(formatWaitingRequest(row));
+  } else if (command === "decline") {
+    const email = await declineAccessRequest(db, needEmail());
+    if (!email) throw new Error(`No access request from ${needEmail()}.`);
+    console.log(`${email} is declined. They were not told.`);
   } else {
-    throw new Error("Use one of: approve, list, remove, admin, seed");
+    throw new Error("Use one of: approve, decline, list, remove, admin, requests, seed");
   }
 } catch (error) {
   console.error(`Error: ${(error as Error).message}`);

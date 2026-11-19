@@ -28,6 +28,8 @@ make access/approve EMAIL=person@example.com   # approve, and print a set-passwo
 make access/list                               # who is approved, who has signed in, and who is an admin
 make access/remove EMAIL=person@example.com    # take them off the list and sign them out
 make access/admin EMAIL=person@example.com     # give an approved person who has signed in the admin role
+make access/requests                           # access requests that are waiting, newest first
+make access/decline EMAIL=person@example.com   # mark that request declined; they are not told
 ```
 
 - An approved person can sign in with any provider that is turned on, as long as the provider account uses that
@@ -46,6 +48,23 @@ make access/admin EMAIL=person@example.com     # give an approved person who has
   database is reachable, with `SCHMEIDE_PUBLIC_URL` set so the printed link has the right address.
 - `access/approve` and `access/remove` are recorded in the audit log as done by `command line`, through the same
   functions the admin area uses. The link's token is never in the log.
+
+## Requests from schmeide.com
+
+A person asks for access on [schmeide.com](https://schmeide.com). That page posts JSON to `POST /access-requests`.
+The body is `name`, `email`, `business`, `who` (`owner`, `investor`, or `other`), an optional `message`, and
+`website`, which a person leaves empty. A filled `website` is not stored, and the answer is still `{ "ok": true }`.
+The same answer is given when the address is new, already requested, already approved, or already has an account.
+A post from any other site is refused. This request does not read the session cookie, and the cookie is not sent.
+
+Each field has a size limit (100 for the name, 280 for the business, 1000 for the message). One network address may
+send 20 requests an hour, and one email 5. A second request for the same email updates the row. Someone already
+approved stays off the waiting list. Someone who was declined is waiting again.
+
+`access/requests` prints who is waiting, newest first. `access/approve` marks that request approved and still prints
+the link; it does not send email yet. Approving an address that never asked still prints the link and writes no
+request. `access/decline` marks the request declined, prints no link, and tells the person nothing. It does not take
+away access already given; `access/remove` does that.
 
 ## Admins
 

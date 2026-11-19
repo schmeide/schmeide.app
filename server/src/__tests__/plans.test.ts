@@ -1,15 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { PLANS } from "../../../utils/plans.ts";
 import { buildApp } from "../app.ts";
-import { registerPlans } from "../plans.ts";
 import type { AppContext } from "../router.ts";
 
 // The answer reads nothing from the context, so none is built.
-const app = () => {
-  const server = buildApp({} as AppContext, { allowOrigin: "https://schmeide.app" });
-  registerPlans(server);
-  return server;
-};
+const app = () => buildApp({} as AppContext, { allowOrigin: "https://schmeide.app" });
 
 describe("GET /plans", () => {
   it("answers the plans as plain JSON, with no session", async () => {
