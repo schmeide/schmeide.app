@@ -815,6 +815,40 @@ export const websiteReads = pgTable(
   ]
 );
 
+// Someone asking for access on schmeide.com. One row per address. `website` on the public
+// request is not stored: it is the field real people leave empty (services/accessRequests.ts).
+export const ACCESS_NAME_MAX = 100;
+export const ACCESS_BUSINESS_MAX = 280;
+export const ACCESS_MESSAGE_MAX = 1000;
+
+export const ACCESS_WHO = ["owner", "investor", "other"] as const;
+export const accessRequestWho = pgEnum("access_request_who", ACCESS_WHO);
+
+export const ACCESS_REQUEST_STATES = ["waiting", "approved", "declined"] as const;
+export const accessRequestState = pgEnum("access_request_state", ACCESS_REQUEST_STATES);
+
+export const accessRequests = pgTable("access_requests", {
+  email: text("email").primaryKey(),
+  name: varchar("name", { length: ACCESS_NAME_MAX }).notNull(),
+  business: varchar("business", { length: ACCESS_BUSINESS_MAX }).notNull(),
+  who: accessRequestWho("who").notNull(),
+  message: varchar("message", { length: ACCESS_MESSAGE_MAX }),
+  state: accessRequestState("state").notNull().default("waiting"),
+  arrivedAt: timestamp("arrived_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Recent public requests, so a restart does not clear the per-address and per-email limits.
+export const accessRequestHits = pgTable(
+  "access_request_hits",
+  {
+    id: serial("id").primaryKey(),
+    bucket: text("bucket").notNull(),
+    key: text("key").notNull(),
+    at: timestamp("at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("access_request_hits_bucket_key_at_idx").on(table.bucket, table.key, table.at)]
+);
+
 export const WEBSITE_OWNERS = ["mine", "someone_else"] as const;
 
 export const readWebsiteSchema = z.object({

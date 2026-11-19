@@ -1,6 +1,8 @@
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import { fromNodeHeaders } from "better-auth/node";
 import Fastify from "fastify";
+import { ACCESS_REQUEST_PATH, MARKETING_ORIGIN, registerAccessRequests } from "./accessRequests.ts";
+import { registerPlans } from "./plans.ts";
 import { appRouter, BUSINESS_HEADER, type AppContext, type Context } from "./router.ts";
 import { AUTH_PATH, AUTH_PATHS_WHILE_IMPERSONATING, currentPerson } from "./services/auth.ts";
 import type { FileScanner, NewUploadRefusal } from "./services/fileScan.ts";
@@ -26,8 +28,22 @@ export const buildApp = (
   app.addHook("onRequest", async (_request, reply) => {
     reply.header("cache-control", "no-store");
   });
+  // schmeide.com may post an access request, and only that. No session cookie on this route.
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.split("?")[0] !== ACCESS_REQUEST_PATH) return;
+    if (request.headers.origin !== MARKETING_ORIGIN) return;
+    reply.header("access-control-allow-origin", MARKETING_ORIGIN);
+    if (request.method !== "OPTIONS") return;
+    return reply
+      .header("access-control-allow-methods", "POST")
+      .header("access-control-allow-headers", "content-type")
+      .header("access-control-max-age", "600")
+      .status(204)
+      .send();
+  });
   if (allowOrigin) {
     app.addHook("onRequest", async (request, reply) => {
+      if (request.url.split("?")[0] === ACCESS_REQUEST_PATH) return;
       if (request.headers.origin !== allowOrigin) return;
       reply.header("access-control-allow-origin", allowOrigin);
       reply.header("access-control-allow-credentials", "true");
@@ -42,7 +58,9 @@ export const buildApp = (
     });
   }
   app.get("/healthz", async () => ({ ok: true }));
+  registerPlans(app);
   registerUploads(app, context, uploadLimits, { scanner, recordUploadRefusal });
+  registerAccessRequests(app, context.db);
   app.register(fastifyTRPCPlugin, {
     prefix: "/trpc",
     trpcOptions: {
