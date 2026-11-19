@@ -14,6 +14,7 @@ import {
   SIGN_UP_OPEN,
   type RouteName,
 } from "../routes";
+import { PLANS as PLAN_LIST } from "../plans";
 import { signedOut, type Session } from "../session";
 
 const person = { name: "Ada", email: "ada@example.com" };
@@ -73,7 +74,7 @@ describe("guard", () => {
   it("sends a signed-in person on from sign up, as from sign in", () => {
     expect(guard(route("signUp"), owner, at("/sign-up", "?plan=starter"))).toEqual({
       kind: "redirect",
-      to: "/",
+      to: "/?plan=starter",
     });
     expect(guard(route("signUp"), owner, at("/sign-up", "?next=%2Fbilling"))).toEqual({
       kind: "redirect",
@@ -161,9 +162,17 @@ describe("a plan chosen on schmeide.com", () => {
     expect(planFrom("", PLANS)).toBeNull();
   });
 
-  it("is unknown until the server exposes the plans (#119)", () => {
-    expect(planFrom("?plan=starter")).toBeNull();
-    expect(carryPlan("/", "?plan=starter")).toBe("/");
+  it("knows the plans the server answers at /plans by default", () => {
+    for (const { id } of PLAN_LIST) expect(planFrom(`?plan=${id}`)).toBe(id);
+    expect(planFrom("?plan=enterprise")).toBeNull();
+  });
+
+  it("resolves an id that was renamed to its replacement, so links already sent keep working", () => {
+    const renamed = new Map([["basic", "starter"]]);
+    expect(planFrom("?plan=basic", PLANS, renamed)).toBe("starter");
+    expect(planFrom("?plan=starter", PLANS, renamed)).toBe("starter");
+    expect(planFrom("?plan=basic", ["business"], renamed)).toBeNull();
+    expect(planFrom("?plan=constructor", PLANS, renamed)).toBeNull();
   });
 
   it("is carried onto the next address, keeping that address's own query", () => {
