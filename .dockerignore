@@ -1,8 +1,11 @@
-# The image needs only the manifests and server/. Everything else (the site, dist, .claude and its
-# worktrees, node_modules) stays out.
+# The image needs only the manifests, server/, and the shared directories server/ imports from (data/,
+# utils/; whole, so a new shared file there cannot break the image). Everything else (the site, dist,
+# .claude and its worktrees, node_modules, tests) stays out.
 *
 !package.json
 !package-lock.json
 !server
+!data
+!utils
 **/node_modules
 **/__tests__
