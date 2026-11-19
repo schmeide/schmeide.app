@@ -5,6 +5,7 @@ import { copy } from "../data/copy";
 import { POLL_MS, useTRPC } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { pathTo } from "../utils/routes";
+import { appName } from "../utils/appName";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { ProjectSetup } from "./ProjectSetup";
@@ -46,7 +47,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
   const inApp = Boolean(query.data?.hasBeenLive) || status === "live" || status === "stopped";
 
   // The tab is named after the project once it is known; until then it keeps the route's title.
-  const name = query.data?.project.name;
+  const name = query.data && appName(query.data.project);
   useEffect(() => {
     if (!name) return;
     document.title = copy.pageTitle(
@@ -88,7 +89,7 @@ export function ProjectPage({ id, view = "overview" }: Props) {
   return (
     <article className={inApp ? styles.wide : undefined}>
       {back}
-      <h1 className={styles.title}>{project.name}</h1>
+      <h1 className={styles.title}>{appName(project)}</h1>
       <p
         role="status"
         className={styles.status}

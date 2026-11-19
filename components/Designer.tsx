@@ -1,6 +1,7 @@
 import { copy } from "../data/copy";
 import type { Build, BuiltChange, Project, TimeTotals, Usage } from "../trpc";
 import { pathTo } from "../utils/routes";
+import { appName } from "../utils/appName";
 import { AppFrame } from "./AppFrame";
 import { BuildStep } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
@@ -89,7 +90,7 @@ export function Designer({
               {note && <p>{note}</p>}
               <Release project={project} unreleased={unreleased} />
               <AppFrame
-                name={project.name}
+                name={appName(project)}
                 stagingUrl={project.stagingUrl}
                 liveUrl={project.previewUrl}
                 // A new version is a passed build that changed staging: every kind but a promote,

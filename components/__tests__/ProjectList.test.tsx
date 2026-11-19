@@ -33,6 +33,18 @@ describe("ProjectList", () => {
     expect(screen.getByText(copy.status.spec_ready.label)).toBeInTheDocument();
   });
 
+  it("names an app by the name its owner gave it, once there is one", async () => {
+    renderWithApi(<ProjectList />, {
+      "projects.list": () => [aProject({ id: 2, name: "Recipes", pageTitle: "Grandma's Kitchen" })],
+    });
+
+    expect(await screen.findByRole("link", { name: "Grandma's Kitchen" })).toHaveAttribute(
+      "href",
+      "/projects/2"
+    );
+    expect(screen.queryByRole("link", { name: "Recipes" })).toBeNull();
+  });
+
   it("shows a canceled build apart from one that failed", async () => {
     renderWithApi(<ProjectList />, {
       "projects.list": () => [

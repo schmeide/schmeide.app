@@ -5,6 +5,7 @@ import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
 import { navigate } from "../utils/navigation";
 import { pathTo } from "../utils/routes";
+import { appName } from "../utils/appName";
 import { ErrorNote } from "./ErrorNote";
 
 import styles from "./Step.module.css";
@@ -31,7 +32,7 @@ export function DeleteProject({ project }: { readonly project: Project }) {
     <>
       {confirming ? (
         <div role="group" aria-labelledby="delete-confirm" className={styles.warning}>
-          <p id="delete-confirm">{copy.project.deleteConfirm(project.name)}</p>
+          <p id="delete-confirm">{copy.project.deleteConfirm(appName(project))}</p>
           <div className={styles.actions}>
             <button
               type="button"

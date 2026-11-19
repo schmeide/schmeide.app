@@ -4,6 +4,7 @@ import { useId, useRef, useState, type FormEvent } from "react";
 import { copy } from "../data/copy";
 import { useTRPC, type ProjectStatus } from "../trpc";
 import { pathTo } from "../utils/routes";
+import { appName } from "../utils/appName";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { StartWays } from "./StartWays";
@@ -110,7 +111,7 @@ export function StartPage() {
           <ul>
             {unfinished.map((project) => (
               <li key={project.id}>
-                <Link to={pathTo("project", { id: project.id })}>{project.name}</Link>
+                <Link to={pathTo("project", { id: project.id })}>{appName(project)}</Link>
                 <span className={styles.muted}>{copy.status[project.status].label}</span>
               </li>
             ))}
