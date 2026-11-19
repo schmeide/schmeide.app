@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
-import { builds, usage, type NewUsage } from "../db/schema.ts";
+import { builds, usage, versionPictures, type NewUsage } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { createProject } from "../services/projects.ts";
 import { aSignedInPerson, callApi, testAuth } from "./testAuth.ts";
@@ -127,6 +127,46 @@ describe("builds.list", () => {
     const { project } = await aProjectWithBuilds();
     const stranger = await aSignedInPerson(app, deps, { name: "Eve" });
     const answer = await callApi(app, "builds.list", { id: project.id }, stranger.cookie);
+    expect(answer.code).toBe("NOT_FOUND");
+  });
+});
+
+describe("builds.picture", () => {
+  it("answers a version's picture as a WebP data URL, and null for a width it has none of", async () => {
+    const { cookie, rows } = await aProjectWithBuilds();
+    const [initial] = rows;
+    await db
+      .insert(versionPictures)
+      .values({ buildId: initial.id, width: "desktop", data: "UklGRg==" });
+
+    const desktop = await callApi(
+      app,
+      "builds.picture",
+      { buildId: initial.id, width: "desktop" },
+      cookie
+    );
+    expect(desktop.data).toBe("data:image/webp;base64,UklGRg==");
+    const phone = await callApi(
+      app,
+      "builds.picture",
+      { buildId: initial.id, width: "phone" },
+      cookie
+    );
+    expect(phone.data).toBeNull();
+  });
+
+  it("refuses a build in another business", async () => {
+    const { rows } = await aProjectWithBuilds();
+    await db
+      .insert(versionPictures)
+      .values({ buildId: rows[0].id, width: "desktop", data: "UklGRg==" });
+    const stranger = await aSignedInPerson(app, deps, { name: "Eve" });
+    const answer = await callApi(
+      app,
+      "builds.picture",
+      { buildId: rows[0].id, width: "desktop" },
+      stranger.cookie
+    );
     expect(answer.code).toBe("NOT_FOUND");
   });
 });

@@ -10,6 +10,7 @@ import {
   answerQuestionSchema,
   auditQuerySchema,
   buildIdSchema,
+  pictureSchema,
   businessStateSchema,
   changeRequestSchema,
   deleteAccountSchema,
@@ -75,6 +76,7 @@ import {
   startBusinessSchema,
 } from "./services/businesses.ts";
 import { buildListSchema, listBuilds, listEvents } from "./services/builds.ts";
+import { getPicture } from "./services/pictures.ts";
 import { listSummaries } from "./services/summaries.ts";
 import {
   getBusiness,
@@ -777,6 +779,8 @@ export const appRouter = t.router({
     removeQueued: onBuild(buildIdSchema).mutation(({ ctx, input }) =>
       removeQueuedChange(ctx.db, input.buildId)
     ),
+    // The version's home page as a WebP data URL, or null; services/pictures.ts.
+    picture: onBuild(pictureSchema).query(({ ctx, input }) => getPicture(ctx.db, input)),
   }),
 });
 

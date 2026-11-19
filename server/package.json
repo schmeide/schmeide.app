@@ -25,6 +25,7 @@
     "drizzle-zod": "^0.8.3",
     "fastify": "^5.12.8",
     "pg": "^8.23.1",
+    "playwright": "^1.65.1",
     "superjson": "^2.2.6",
     "zod": "^4.6.7"
   },

@@ -66,7 +66,7 @@ endif
 ##@ Development Environment
 
 .PHONY: setup
-setup: setup/js ## Set up development environment
+setup: setup/js setup/chromium ## Set up development environment
 
 .PHONY: setup/js
 setup/js: ## Install Node.js via nvm and project dependencies
@@ -77,6 +77,10 @@ setup/js: ## Install Node.js via nvm and project dependencies
 	nvm install
 	$(JS_EXEC) $(JS_INSTALL)
 	touch node_modules/.installed
+
+.PHONY: setup/chromium
+setup/chromium: node_modules ## Install Playwright's Chromium, which takes a picture of each version on deploy
+	$(JS_EXEC) exec -w server -- playwright install chromium
 
 ##@ Build
 

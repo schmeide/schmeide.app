@@ -199,6 +199,25 @@ export const projectIcons = pgTable("project_icons", {
   data: text("data").notNull(),
 });
 
+// What a passed build's home page looked like once staging answered (#229), at a desktop and a
+// phone width. Kept out of builds for the same reason icons are kept out of projects.
+// ponytail: a row in Postgres; blob storage (#195) in production.
+export const pictureWidth = pgEnum("picture_width", ["desktop", "phone"]);
+export type PictureWidth = (typeof pictureWidth.enumValues)[number];
+
+export const versionPictures = pgTable(
+  "version_pictures",
+  {
+    buildId: integer("build_id")
+      .notNull()
+      .references(() => builds.id, { onDelete: "cascade" }),
+    width: pictureWidth("width").notNull(),
+    // Base64 of a WebP no wider than 640 px.
+    data: text("data").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildId, table.width] })]
+);
+
 export const buildEventKind = pgEnum("build_event_kind", [
   "step",
   "agent",
@@ -509,6 +528,9 @@ export const changeRequestSchema = createInsertSchema(builds, {
 const buildId = createSelectSchema(builds).shape.id;
 
 export const buildIdSchema = z.object({ buildId });
+
+// One of a build's pictures; see services/pictures.ts.
+export const pictureSchema = z.object({ buildId, width: z.enum(pictureWidth.enumValues) });
 
 export const editChangeSchema = changeRequestSchema
   .omit({ id: true, fileIds: true })
