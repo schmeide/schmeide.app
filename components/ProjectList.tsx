@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { copy } from "../data/copy";
 import { useTRPC } from "../trpc";
 import { pathTo } from "../utils/routes";
+import { appName } from "../utils/appName";
 import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { StartPage } from "./StartPage";
@@ -32,7 +33,7 @@ export function ProjectList() {
             return (
               <li key={project.id} className={styles.project}>
                 <Link to={pathTo("project", { id: project.id })} className={styles.name}>
-                  {project.name}
+                  {appName(project)}
                 </Link>
                 <span
                   className={styles.status}

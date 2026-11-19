@@ -1129,6 +1129,16 @@ describe("ProjectPage designer", () => {
     expect(screen.queryByRole("button", { name: copy.project.cancelBuild })).toBeNull();
   });
 
+  it("heads the page and names the tab with the name the owner gave the app", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({ project: aProject({ name: "Invoices", pageTitle: "Billing Desk" }) })
+    );
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Billing Desk" })).toBeVisible();
+    await waitFor(() => expect(document.title).toBe(copy.pageTitle("Billing Desk")));
+  });
+
   it("keeps a half-typed change while moving between views, and names the tab after the view", async () => {
     window.history.replaceState(null, "", "/projects/7/changes");
     renderWithApi(
