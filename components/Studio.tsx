@@ -25,7 +25,7 @@ export function Studio({
 }: {
   readonly isPublicSite: boolean;
   // The public site was built with an API address, so it waits for the answer instead of
-  // flashing the fallback first.
+  // flashing the fallback first, and shows the outage page if the API does not answer.
   readonly expectsApi?: boolean;
   readonly fallback: ReactNode;
   readonly maintenanceUntil?: Date | null;
@@ -41,7 +41,7 @@ export function Studio({
       </main>
     );
   if (status === "ready") return <Routes />;
-  if (isPublicSite && !(expectsApi && status === "loading")) return <main>{fallback}</main>;
+  if (isPublicSite && !expectsApi) return <main>{fallback}</main>;
   return (
     <main className={styles.page}>
       {status === "loading" ? (

@@ -36,9 +36,11 @@ describe("App", () => {
     ).toBeInTheDocument();
   });
 
-  it("falls back to the hero when the hosted API does not answer", async () => {
+  it("shows the outage page, not the hero, when the hosted API does not answer", async () => {
     renderWithApi(<App isPublicSite expectsApi />, unreachable, "server");
-    expect(await screen.findByText(copy.hero.tagline)).toBeInTheDocument();
+    expect(await screen.findByText(copy.errors.serverDownTitle)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: copy.errors.retry })).toBeInTheDocument();
+    expect(screen.queryByText(copy.hero.tagline)).toBeNull();
   });
 
   it("tells a developer how to start the server when it is down", async () => {
