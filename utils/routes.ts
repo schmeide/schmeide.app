@@ -1,4 +1,5 @@
 import { copy } from "../data/copy";
+import { PLANS, RENAMED_PLANS } from "./plans";
 import { isAdmin, type Session } from "./session";
 
 // Who may open a route: anyone, a signed-in person, a signed-in person with a business, or a
@@ -99,14 +100,18 @@ export const sitePath = (value: string | null): string | null =>
 export const nextPath = (search: string): string =>
   sitePath(new URLSearchParams(search).get("next")) ?? pathTo("apps");
 
-// The plan ids schmeide.com's pricing page may send with `?plan=<id>`. Empty until the server
-// exposes the plans (#119); until then every id is unknown and dropped.
-export const KNOWN_PLANS: readonly string[] = [];
+// The plan ids schmeide.com's pricing page may send with `?plan=<id>`: the ones `GET /plans` answers.
+export const KNOWN_PLANS: readonly string[] = PLANS.map((plan) => plan.id);
 
-// The plan a person chose on schmeide.com: only a known id, otherwise null without an error. It is
-// never put into the page.
-export const planFrom = (search: string, known: readonly string[] = KNOWN_PLANS): string | null => {
-  const plan = new URLSearchParams(search).get("plan");
+// The plan a person chose on schmeide.com: only a known id, or a renamed one resolved to its
+// replacement, otherwise null without an error. It is never put into the page.
+export const planFrom = (
+  search: string,
+  known: readonly string[] = KNOWN_PLANS,
+  renamed: ReadonlyMap<string, string> = RENAMED_PLANS
+): string | null => {
+  const asked = new URLSearchParams(search).get("plan");
+  const plan = asked && (renamed.get(asked) ?? asked);
   return plan && known.includes(plan) ? plan : null;
 };
 
