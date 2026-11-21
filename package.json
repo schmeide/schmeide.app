@@ -24,7 +24,7 @@
     "fix": "concurrently -m1 npm:fix:*"
   },
   "dependencies": {
-    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-query": "^5.108.0",
     "@trpc/client": "^11.28.5",
     "@trpc/tanstack-react-query": "^11.28.5",
     "react": "^19.3.1",
