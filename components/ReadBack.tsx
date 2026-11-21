@@ -130,27 +130,29 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
       const target = { part, index };
       const sentenceId = `readback-${part}-${index}`;
       return (
-        <li key={`${part}-${index}`} className={styles.sentence}>
-          <span id={sentenceId}>{sentence.text}</span>
-          {sameTarget(correcting, target) ? (
-            <AnswerForm
-              label={sentence.ask}
-              submit={copy.readBack.send}
-              busy={busy}
-              onSend={(answer) => correct.mutate({ id, target, answer })}
-              onCancel={() => setCorrecting(null)}
-            />
-          ) : (
-            <button
-              type="button"
-              className={styles.mark}
-              aria-describedby={sentenceId}
-              disabled={busy}
-              onClick={() => setCorrecting(target)}
-            >
-              {copy.readBack.notRight}
-            </button>
-          )}
+        <li key={`${part}-${index}`}>
+          <div className={styles.row}>
+            <span id={sentenceId}>{sentence.text}</span>
+            {sameTarget(correcting, target) ? (
+              <AnswerForm
+                label={sentence.ask}
+                submit={copy.readBack.send}
+                busy={busy}
+                onSend={(answer) => correct.mutate({ id, target, answer })}
+                onCancel={() => setCorrecting(null)}
+              />
+            ) : (
+              <button
+                type="button"
+                className={styles.mark}
+                aria-describedby={sentenceId}
+                disabled={busy}
+                onClick={() => setCorrecting(target)}
+              >
+                {copy.readBack.notRight}
+              </button>
+            )}
+          </div>
         </li>
       );
     });
@@ -168,8 +170,8 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
         <p className={stepStyles.muted}>{intro}</p>
         <ul>
           {items.map((item) => (
-            <li key={item.id} className={styles.sentence}>
-              {row(item)}
+            <li key={item.id}>
+              <div className={styles.row}>{row(item)}</div>
             </li>
           ))}
         </ul>

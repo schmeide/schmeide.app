@@ -1,33 +1,70 @@
-/* The read-back: short lists, each line with its own way to correct it beside or under it. */
+/* The read-back: short lists, each line with its own way to correct it on a shared trailing edge. */
+.part {
+  container-type: inline-size;
+}
+
 .part h3 {
   margin-bottom: var(--space-s);
 }
 
+/* Lines are kept apart by space alone; a line that wraps stays tighter than the gap between lines. */
 .part ul,
 .part ol {
   display: grid;
-  gap: var(--space-s);
+  gap: var(--space-m);
   margin: 0;
-  padding-left: var(--space-gutter);
+  padding-inline-start: var(--space-gutter);
 }
 
-/* The sentence first, its button after; the button drops below on a narrow screen. */
-.sentence {
-  min-width: 0;
+/* The line, then its control in a column of its own, so every control sits on one edge and none
+   rides along with the last word of a wrapped line. The list marker stays on the li. */
+.row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  column-gap: var(--space-m);
   overflow-wrap: anywhere;
 }
 
-.sentence > span {
-  margin-right: var(--space-s);
-}
-
-.sentence form {
+/* An open form takes the whole row, under the line it answers. */
+.row form {
+  grid-column: 1 / -1;
   margin-top: var(--space-s);
 }
 
+/* A quiet text control: the one bordered, filled button on this step is "Write the spec". It sits on
+   the first line's baseline and keeps the full hit target; the negative block margin lets that
+   target overlap the space around the line instead of stretching it. */
 .mark {
-  padding: var(--space-xs) var(--space-s);
+  min-height: var(--hit-target);
+  margin-block: calc(-1 * var(--space-s));
+  padding: 0 var(--space-s);
+  border-color: transparent;
+  color: var(--color-muted);
   font-size: var(--text-small);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .mark:not(:disabled):hover {
+    color: var(--color-fg);
+  }
+}
+
+/* Too narrow for two columns: the control goes under its line, its text on the line's start edge. */
+@container (max-width: 32rem) {
+  .row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mark {
+    justify-self: start;
+    margin-inline-start: calc(-1 * var(--space-s));
+  }
 }
 
 .actions {
