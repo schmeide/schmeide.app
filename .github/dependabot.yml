@@ -16,3 +16,8 @@ updates:
       prefix: "chore(deps/npm): "
     labels:
       - dependabot
+    groups:
+      # @trpc/client peers on an exact @trpc/server version; bump them together.
+      trpc:
+        patterns:
+          - "@trpc/*"
