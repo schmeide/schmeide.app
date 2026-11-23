@@ -1217,6 +1217,28 @@ describe("the two copies", () => {
     expect((await buildRow(next.id)).release).toBeNull();
   });
 
+  it("puts only the first build live while it is still running, so the next stays on staging", async () => {
+    const { project, build, activities, env, workspace, production, ran, anotherBuild } =
+      await prepared();
+    // As in buildWorkflow: deploy runs before finishBuild marks the build passed.
+    await db.update(builds).set({ status: "running" }).where(eq(builds.id, build.id));
+    writeFileSync(join(workspace, "first.ts"), "export const first = 1;\n");
+    await env.run(activities.deploy, build.id);
+    await db.update(builds).set({ status: "passed" }).where(eq(builds.id, build.id));
+    const first = (await buildRow(build.id)).commit;
+    expect((await buildRow(build.id)).release).toBe("promoted");
+
+    writeFileSync(join(workspace, "second.ts"), "export const second = 2;\n");
+    const next = await anotherBuild();
+    const before = ran().length;
+    await env.run(activities.deploy, next.id);
+
+    expect(ran().slice(before)).toHaveLength(1);
+    expect(headOf(production)).toBe(first);
+    expect((await projectRow(project.id)).productionCommit).toBe(first);
+    expect(await messages(next.id)).not.toContain(`Live at http://localhost:${project.webPort}`);
+  });
+
   describe("the version's pictures", () => {
     const picturesOf = (buildId: number) =>
       db

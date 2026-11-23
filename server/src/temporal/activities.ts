@@ -2570,7 +2570,11 @@ export const createActivities = (
         .from(builds)
         .where(and(eq(builds.projectId, project.id), eq(builds.release, "promoted")))
         .limit(1);
-      if (!live) await promote(project, commit, buildId);
+      if (!live) {
+        await promote(project, commit, buildId);
+        // promote marks only passed builds, and this one is still running.
+        await db.update(builds).set({ release: "promoted" }).where(eq(builds.id, buildId));
+      }
       await takePictures(buildId, url);
     },
 
