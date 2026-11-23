@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { check, resolveConfig } from "prettier";
 import { describe, expect, it } from "vitest";
 import {
   NOT_PROVIDED,
@@ -20,6 +21,25 @@ const INDEX = `<!doctype html>
   </body>
 </html>
 `;
+
+// frontend/index.html as the template has it, formatted by its prettier.
+const TEMPLATE_INDEX = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notes</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`;
+
+// What the app's own \`make check\` asks of a file. The template's .prettierrc is this repo's.
+const prettierPasses = async (html: string): Promise<boolean> =>
+  check(html, { ...(await resolveConfig(import.meta.filename)), parser: "html" });
 
 const facts = {
   business: "Bäckerei Ode",
@@ -60,6 +80,13 @@ describe("privacyPage", () => {
     expect(page.split(NOT_PROVIDED).length - 1).toBe(3);
   });
 
+  it("is left as written by the app's prettier", async () => {
+    const tables = ["notes", "a_table_with_a_name_long_enough_to_wrap_".repeat(3)];
+    expect(await prettierPasses(privacyPage({ ...facts, business: "B".repeat(150), tables }))).toBe(
+      true
+    );
+  });
+
   it("shows what the business provided, escaped", () => {
     const page = privacyPage({
       ...facts,
@@ -84,6 +111,29 @@ describe("withFooter", () => {
     expect(once).toContain(`href="/${PRIVACY_FILE}"`);
     expect(once).toContain(
       `href="https://schmeide.app/report?app=https%3A%2F%2Fnotes-abc123.apps.example"`
+    );
+  });
+
+  it("leaves the template's index.html as prettier wants it, so the app's checks still pass", async () => {
+    expect(await prettierPasses(TEMPLATE_INDEX)).toBe(true);
+    const long = reportUrl(`https://${"a".repeat(80)}.apps.example`);
+    for (const links of [
+      { privacy: true, report: long },
+      { privacy: false, report: reportUrl(null) },
+    ]) {
+      expect(await prettierPasses(withFooter(TEMPLATE_INDEX, links))).toBe(true);
+    }
+  });
+
+  it("replaces a footer written the old way, on one line, with no second footer", () => {
+    const old = TEMPLATE_INDEX.replace(
+      "  </body>",
+      `      <!-- schmeide:footer --><footer style="text-align:center"><a href="https://schmeide.app/report">Report this app</a></footer><!-- /schmeide:footer -->\n  </body>`
+    );
+    const html = withFooter(old, { privacy: true, report: reportUrl(facts.appUrl) });
+    expect(html.split("<footer").length - 1).toBe(1);
+    expect(html).toBe(
+      withFooter(TEMPLATE_INDEX, { privacy: true, report: reportUrl(facts.appUrl) })
     );
   });
 
