@@ -1,4 +1,4 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
@@ -15,6 +15,14 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const { session } = useSession();
+  // How each feature will be checked, written with the spec (#357); none while it is written.
+  const checks = useQuery(
+    trpc.projects.checks.queryOptions(
+      { id: project.id },
+      { enabled: project.status === "spec_ready" && project.spec !== null }
+    )
+  );
+  const features = checks.data ?? [];
   const approve = useMutation(
     trpc.projects.approveSpec.mutationOptions({ onSettled: () => refresh() })
   );
@@ -26,7 +34,8 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
       {project.status === "spec_ready" && project.spec && (
         <>
           <p className={styles.muted}>{copy.project.specIntro}</p>
-          <Spec source={project.spec} />
+          {features.length > 0 && <p className={styles.muted}>{copy.project.specChecks.intro}</p>}
+          <Spec source={project.spec} checks={features} />
           {project.need && (
             <details>
               <summary>{copy.project.showNeed}</summary>

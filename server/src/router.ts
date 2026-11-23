@@ -76,6 +76,7 @@ import {
   startBusinessSchema,
 } from "./services/businesses.ts";
 import { buildListSchema, listBuilds, listEvents } from "./services/builds.ts";
+import { buildResults, plannedChecks, stagingResults } from "./services/featureChecks.ts";
 import { getPicture } from "./services/pictures.ts";
 import { listSummaries } from "./services/summaries.ts";
 import {
@@ -679,6 +680,13 @@ export const appRouter = t.router({
       generateSpec(ctx, input.id)
     ),
     approveSpec: building(projectIdSchema).mutation(({ ctx, input }) => approveSpec(ctx, input.id)),
+    // How we will know each feature of the spec works (#357): its acceptance checks, written with
+    // the spec; services/featureChecks.ts.
+    checks: onProject(projectIdSchema).query(({ ctx, input }) => plannedChecks(ctx.db, input.id)),
+    // Which features work in the version being worked on, and the checks behind them.
+    acceptance: onProject(projectIdSchema).query(({ ctx, input }) =>
+      stagingResults(ctx.db, input.id)
+    ),
     requestChange: building(changeRequestSchema).mutation(({ ctx, input }) =>
       requestChange(ctx, input)
     ),
@@ -778,6 +786,10 @@ export const appRouter = t.router({
     }),
     removeQueued: onBuild(buildIdSchema).mutation(({ ctx, input }) =>
       removeQueuedChange(ctx.db, input.buildId)
+    ),
+    // Which features work in the build's version, and the checks behind them (#357).
+    acceptance: onBuild(buildIdSchema).query(({ ctx, input }) =>
+      buildResults(ctx.db, input.buildId)
     ),
     // The version's home page as a WebP data URL, or null; services/pictures.ts.
     picture: onBuild(pictureSchema).query(({ ctx, input }) => getPicture(ctx.db, input)),

@@ -11,15 +11,24 @@ type Props = {
   readonly project: Project;
   // Changes on the version being worked on that customers do not see yet.
   readonly unreleased: number;
+  // The features not working yet in the version being worked on (#357), which putting it live
+  // names first.
+  readonly notWorking?: readonly string[];
 };
 
 // Says how the version being worked on differs from the live app, and puts it live or throws its
 // changes away. Neither while a change is built; throwing away asks first.
-export function Release({ project, unreleased }: Props) {
+export function Release({ project, unreleased, notWorking = [] }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const [confirming, setConfirming] = useState(false);
-  const promote = useMutation(trpc.projects.promote.mutationOptions({ onSettled: refresh }));
+  const [confirmingLive, setConfirmingLive] = useState(false);
+  const promote = useMutation(
+    trpc.projects.promote.mutationOptions({
+      onSuccess: () => setConfirmingLive(false),
+      onSettled: refresh,
+    })
+  );
   const discard = useMutation(
     trpc.projects.discard.mutationOptions({
       onSuccess: () => setConfirming(false),
@@ -46,13 +55,19 @@ export function Release({ project, unreleased }: Props) {
         <>
           <p className={stepStyles.muted}>{copy.project.release.promoteHint}</p>
           <div className={stepStyles.actions}>
-            <button
-              type="button"
-              onClick={() => promote.mutate({ id: project.id })}
-              disabled={pending}
-            >
-              {promote.isPending ? copy.project.release.promoting : copy.project.release.promote}
-            </button>
+            {!confirmingLive && (
+              <button
+                type="button"
+                onClick={() =>
+                  notWorking.length > 0
+                    ? setConfirmingLive(true)
+                    : promote.mutate({ id: project.id })
+                }
+                disabled={pending}
+              >
+                {promote.isPending ? copy.project.release.promoting : copy.project.release.promote}
+              </button>
+            )}
             {canDiscard && !confirming && (
               <button
                 type="button"
@@ -65,6 +80,30 @@ export function Release({ project, unreleased }: Props) {
             )}
           </div>
         </>
+      )}
+      {canPromote && confirmingLive && (
+        <div role="group" aria-labelledby="live-confirm" className={stepStyles.warning}>
+          <p id="live-confirm">{copy.project.release.notWorking(notWorking)}</p>
+          <div className={stepStyles.actions}>
+            <button
+              type="button"
+              onClick={() => promote.mutate({ id: project.id })}
+              disabled={pending}
+            >
+              {promote.isPending
+                ? copy.project.release.promoting
+                : copy.project.release.notWorkingYes}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmingLive(false)}
+              disabled={pending}
+              autoFocus
+            >
+              {copy.project.release.notWorkingNo}
+            </button>
+          </div>
+        </div>
       )}
       {idle && unreleased > 0 && project.productionCommit === null && (
         <p className={stepStyles.muted}>{copy.project.release.noDiscardYet}</p>

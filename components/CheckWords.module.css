@@ -1,0 +1,23 @@
+.words {
+  display: grid;
+  gap: var(--space-s);
+  margin: 0;
+}
+
+.words dt {
+  font-size: var(--text-label);
+  font-weight: 700;
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.words dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.steps {
+  margin: 0;
+  padding-inline-start: 1.25em;
+}

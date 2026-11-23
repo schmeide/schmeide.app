@@ -166,6 +166,7 @@ import {
   plannedBy,
   resultsOf,
   specHash,
+  SPEC_BUILD,
   testerPrompt,
   writerPrompt,
   type AcceptancePlan,
@@ -337,6 +338,10 @@ export const AGENT_ALLOWED_TOOLS = [
 
 // The design reviewer reads; it changes nothing and runs nothing.
 const REVIEWER_TOOLS = ["Read", "Glob", "Grep"];
+
+// The writer of the acceptance checks answers once, with no tool. strictMcpConfig: no tool server
+// from this machine's or the login's own settings.
+const writerOptions = (): Options => ({ tools: [], maxTurns: 3, strictMcpConfig: true });
 
 // How many features are tested at once, each by its own tester in its own browser.
 const TESTERS_AT_ONCE = 3;
@@ -1923,13 +1928,20 @@ export const createActivities = (
     (await db.select().from(projectDesigns).where(eq(projectDesigns.projectId, projectId)))[0]
       ?.brief;
 
+  // Said in the build's log, or the worker's when there is no build.
+  const note = async (buildId: number | null, text: string) => {
+    if (buildId === null) Context.current().log.warn(text);
+    else await log(buildId, text);
+  };
+
   // One answer from the design team, held to `schema`: the lead (no tools, sees only the spec) or
   // the reviewer (read-only tools in the workspace). The writer of the acceptance checks answers
-  // the same way. Undefined when there is no answer that can be
-  // used; a failure of any kind but a cancel is logged, never thrown, so it cannot fail the build.
+  // the same way, also with the spec before there is a build (`buildId` null). Undefined when there
+  // is no answer that can be used; a failure of any kind but a cancel is logged, never thrown, so
+  // it cannot fail the build.
   const designRun = async (
     project: Project,
-    buildId: number,
+    buildId: number | null,
     ask: {
       readonly kind: "design" | "review" | "acceptance";
       readonly prompt: string;
@@ -1940,7 +1952,9 @@ export const createActivities = (
   ): Promise<unknown> => {
     try {
       if (config.agentCmd) {
-        return parseJson(await runAgentCmd(project, ask.kind, ask.prompt, ask.cwd, buildId));
+        return parseJson(
+          await runAgentCmd(project, ask.kind, ask.prompt, ask.cwd, buildId ?? undefined)
+        );
       }
       return await withHeartbeat(async (signal) => {
         const abortController = new AbortController();
@@ -1964,7 +1978,7 @@ export const createActivities = (
           if (message.type !== "result") continue;
           await recordUsage(db, runUsage(message, project.id, buildId, ask.kind));
           if (message.subtype !== "success" || message.is_error) {
-            await log(buildId, `The ${ask.kind} run failed: ${message.subtype}`);
+            await note(buildId, `The ${ask.kind} run failed: ${message.subtype}`);
             return undefined;
           }
           return message.structured_output ?? parseJson(message.result);
@@ -1973,7 +1987,7 @@ export const createActivities = (
       });
     } catch (error) {
       if (Context.current().cancellationSignal.aborted) throw error;
-      await log(buildId, `The ${ask.kind} run failed: ${String(error)}`);
+      await note(buildId, `The ${ask.kind} run failed: ${String(error)}`);
       return undefined;
     }
   };
@@ -1999,6 +2013,35 @@ export const createActivities = (
     if (!config.acceptance) return undefined;
     const plan = (await acceptanceOf(projectId))?.plan;
     return plan && liveChecks(plan).length > 0 ? plan : undefined;
+  };
+
+  // The first checks of an app, from its spec and, for an app from before there were checks, the
+  // changes built since. Written with the spec (`buildId` null, #357), or by a build when there
+  // are none for its spec. Undefined when the answer cannot be used.
+  const writeChecks = async (
+    project: Project,
+    spec: string,
+    changes: readonly string[],
+    buildId: number | null
+  ): Promise<AcceptancePlan | undefined> => {
+    const written = parseWritten(
+      await designRun(project, buildId, {
+        kind: "acceptance",
+        prompt: writerPrompt(spec, changes),
+        cwd: config.dataDir,
+        schema: WRITTEN_JSON_SCHEMA,
+        options: writerOptions(),
+      })
+    );
+    return written && planFrom(written, buildId ?? SPEC_BUILD);
+  };
+
+  const saveChecks = async (projectId: number, spec: string, plan: AcceptancePlan) => {
+    const values = { specHash: specHash(spec), plan };
+    await db
+      .insert(projectAcceptance)
+      .values({ projectId, ...values })
+      .onConflictDoUpdate({ target: projectAcceptance.projectId, set: values });
   };
 
   const headOf = async (project: Project): Promise<string> =>
@@ -2204,6 +2247,13 @@ export const createActivities = (
               }
               throw new Error("Claude ended without a result");
             });
+        // The checks the spec will be held to, written now so the owner reads them under each
+        // feature before approving (#357). Soft: a spec whose checks cannot be written is ready
+        // without them, and its first build writes them.
+        if (config.acceptance) {
+          const plan = await writeChecks(project, spec, [], null);
+          if (plan) await saveChecks(projectId, spec, plan);
+        }
         await transition(db, projectId, ["spec_generating"], {
           status: "spec_ready",
           spec,
@@ -2343,11 +2393,7 @@ export const createActivities = (
       const spec = project.spec ?? "";
       const kept = await acceptanceOf(project.id);
       const save = async (plan: AcceptancePlan) => {
-        const values = { specHash: specHash(spec), plan };
-        await db
-          .insert(projectAcceptance)
-          .values({ projectId: project.id, ...values })
-          .onConflictDoUpdate({ target: projectAcceptance.projectId, set: values });
+        await saveChecks(project.id, spec, plan);
         await event(buildId, "step", `Acceptance: ${countOf(plan)} to follow in the running app`);
       };
       const keeping = (plan: AcceptancePlan) =>
@@ -2358,27 +2404,26 @@ export const createActivities = (
           "step",
           "Acceptance: the checks could not be written, so this build goes on without new ones"
         );
-      const ask = (prompt: string, schema: Readonly<Record<string, unknown>>) =>
-        designRun(project, buildId, {
-          kind: "acceptance",
-          prompt,
-          cwd: config.dataDir,
-          schema,
-          // strictMcpConfig: no tool server from this machine's or the login's own settings.
-          options: { tools: [], maxTurns: 3, strictMcpConfig: true },
-        });
       // A change to an app that has checks adds its own, once: a retried build keeps them.
       if (build.kind === "change" && kept) {
         if (plannedBy(kept.plan, buildId)) return keeping(kept.plan);
         await event(buildId, "step", "Writing down how this change will be checked");
         const changed = parseChanged(
-          await ask(changePrompt(kept.plan, build.request), CHANGED_JSON_SCHEMA)
+          await designRun(project, buildId, {
+            kind: "acceptance",
+            prompt: changePrompt(kept.plan, build.request),
+            cwd: config.dataDir,
+            schema: CHANGED_JSON_SCHEMA,
+            options: writerOptions(),
+          })
         );
         if (!changed) return unusable();
         if (changed.features.length === 0 && changed.retire.length === 0)
           return event(buildId, "step", "Acceptance: this change needs no new checks");
         return save(planAfter(kept.plan, changed, buildId));
       }
+      // The checks are usually written with the spec (generateSpec); a first build writes them
+      // only when they were not, or were written from another spec.
       if (build.kind === "initial" && kept?.specHash === specHash(spec)) return keeping(kept.plan);
       await event(buildId, "step", "Writing down how each feature will be checked");
       // An app from before there were checks: the spec, the changes built since, and this one.
@@ -2389,9 +2434,9 @@ export const createActivities = (
               build.request,
             ]
           : [];
-      const written = parseWritten(await ask(writerPrompt(spec, changes), WRITTEN_JSON_SCHEMA));
-      if (!written) return unusable();
-      return save(planFrom(written, buildId));
+      const plan = await writeChecks(project, spec, changes, buildId);
+      if (!plan) return unusable();
+      return save(plan);
     },
 
     // The design review (#159), after the checks pass: a reviewer compares every screen with the

@@ -47,6 +47,7 @@ import {
   liveChecks,
   planFrom,
   specHash,
+  SPEC_BUILD,
 } from "../../services/acceptance.ts";
 import type { AppBrowser } from "../../services/appBrowser.ts";
 import { briefPrompt, designBrief } from "../../services/designBrief.ts";
@@ -2220,6 +2221,96 @@ describe("the acceptance checks", () => {
     expect(calls[0].prompt).toContain("BEGIN SPEC");
     expect(calls[0].prompt).toMatch(/BEGIN CHANGES [^\n]*\n1\. add due dates\nEND CHANGES/);
     expect(liveChecks((await acceptanceOf(project.id)).plan)).toHaveLength(1);
+  });
+
+  // The spec and its checks come from one generateSpec: the spec from fakeQuery, the checks
+  // (asked for with a JSON schema) from leadQuery.
+  const writingWithSpec = (answer: unknown = WRITTEN, fail = false) => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const query = ((params: { prompt: string; options: Options }) =>
+      params.options.outputFormat
+        ? leadQuery(calls, answer, fail)(params)
+        : fakeQuery([])(params)) as unknown as Query;
+    const activities = createActivities(deps, { ...config, acceptance: true }, query);
+    return { activities, calls, env: new MockActivityEnvironment() };
+  };
+  const specGenerating = async () => {
+    const project = await createProject(db, {
+      name: `a ${randomUUID()}`,
+      tenantId: DEMO_TENANT_ID,
+    });
+    await transition(db, project.id, ["draft"], { status: "spec_generating" });
+    return project;
+  };
+
+  it("writes the checks with the spec, so the owner reads them before approving", async () => {
+    const { activities, calls, env } = writingWithSpec();
+    const project = await specGenerating();
+
+    await env.run(activities.generateSpec, project.id);
+
+    const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(after.status).toBe("spec_ready");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toContain("BEGIN SPEC");
+    expect(calls[0].prompt).toContain("## Features\n- notes");
+    const kept = await acceptanceOf(project.id);
+    expect(kept.specHash).toBe(specHash("## Features\n- notes"));
+    expect(liveChecks(kept.plan).map(({ id, build: by }) => [id, by])).toEqual([
+      ["F1.1", SPEC_BUILD],
+    ]);
+    expect(await db.select().from(usage).where(eq(usage.projectId, project.id))).toContainEqual(
+      expect.objectContaining({ runKind: "acceptance", buildId: null })
+    );
+  });
+
+  it("builds from the checks written with the spec, without writing them again", async () => {
+    const { activities, calls, env } = writingWithSpec();
+    const project = await specGenerating();
+    await env.run(activities.generateSpec, project.id);
+    await transition(db, project.id, ["spec_ready"], { status: "building" });
+    const [build] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "initial", request: "spec" })
+      .returning();
+
+    await env.run(activities.planAcceptance, build.id);
+
+    expect(calls).toHaveLength(1);
+    expect(await messages(build.id)).toEqual([
+      "Acceptance: keeping the 1 feature, 1 check written before",
+    ]);
+  });
+
+  it.each([
+    ["answers in the wrong form", "they all work", false],
+    ["fails", WRITTEN, true],
+    ["cannot be reached", new Error("network down"), false],
+  ])(
+    "still has the spec ready, without checks, when the writer %s",
+    async (_what, answer, fail) => {
+      const { activities, env } = writingWithSpec(answer, fail);
+      const project = await specGenerating();
+
+      await env.run(activities.generateSpec, project.id);
+
+      const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+      expect(after).toMatchObject({ status: "spec_ready", spec: "## Features\n- notes" });
+      expect(await acceptanceOf(project.id)).toBeUndefined();
+    }
+  );
+
+  it("writes no checks with the spec while they are off", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    const project = await specGenerating();
+
+    await new MockActivityEnvironment().run(activities.generateSpec, project.id);
+
+    expect(calls).toHaveLength(1);
+    expect(await acceptanceOf(project.id)).toBeUndefined();
   });
 
   it("gives the builder the checks", async () => {

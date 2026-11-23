@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { inferRouterOutputs } from "@trpc/server";
 import { useId, useState } from "react";
 
@@ -8,6 +8,7 @@ import { useTRPC } from "../trpc";
 import { formatCost, formatDuration } from "../utils/usage";
 import { requestText, useBuildEvents } from "./BuildStep";
 import { ErrorNote } from "./ErrorNote";
+import { FeatureResults } from "./FeatureResults";
 
 import stepStyles from "./Step.module.css";
 import styles from "./BuildHistory.module.css";
@@ -32,9 +33,27 @@ function PastLog({ build }: { readonly build: PastBuild }) {
   );
 }
 
+// Which features worked in a past build's version (#357), fetched only once it is opened.
+function PastFeatures({ build }: { readonly build: PastBuild }) {
+  const trpc = useTRPC();
+  const features = useQuery(trpc.builds.acceptance.queryOptions({ buildId: build.id }));
+  if (features.error) return <ErrorNote error={features.error} />;
+  if (!features.data) return <p className={stepStyles.muted}>{copy.loading}</p>;
+  return features.data.length === 0 ? (
+    <p className={stepStyles.muted}>{copy.project.features.noneInHistory}</p>
+  ) : (
+    <FeatureResults features={features.data} headingLevel={3} />
+  );
+}
+
+// The builds a tester may have followed checks in: those that built a version of the app.
+const TESTED_KINDS: readonly PastBuild["kind"][] = ["initial", "change"];
+
 function PastBuildItem({ build }: { readonly build: PastBuild }) {
   const [open, setOpen] = useState(false);
+  const [featuresOpen, setFeaturesOpen] = useState(false);
   const id = useId();
+  const tested = build.status === "passed" && TESTED_KINDS.includes(build.kind);
   return (
     <li className={styles.item}>
       <p id={`${id}-request`} className={styles.request}>
@@ -72,6 +91,23 @@ function PastBuildItem({ build }: { readonly build: PastBuild }) {
       <div id={`${id}-log`} hidden={!open} className={styles.log} tabIndex={0}>
         {open && <PastLog build={build} />}
       </div>
+      {tested && (
+        <>
+          <button
+            type="button"
+            className={styles.toggle}
+            aria-expanded={featuresOpen}
+            aria-controls={`${id}-features`}
+            aria-describedby={`${id}-request`}
+            onClick={() => setFeaturesOpen((shown) => !shown)}
+          >
+            {copy.project.features.showInHistory}
+          </button>
+          <div id={`${id}-features`} hidden={!featuresOpen}>
+            {featuresOpen && <PastFeatures build={build} />}
+          </div>
+        </>
+      )}
     </li>
   );
 }

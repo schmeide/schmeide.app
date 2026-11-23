@@ -15,6 +15,9 @@ const INTERVIEW_STAGES = {
 } as const;
 type InterviewStage = keyof typeof INTERVIEW_STAGES;
 
+const andList = (items: readonly string[]) =>
+  new Intl.ListFormat("en", { type: "conjunction" }).format(items);
+
 export const copy = {
   // Addresses outside this app.
   outbound: {
@@ -719,6 +722,11 @@ export const copy = {
       promote: "Put this version live",
       promoteHint:
         "Your live app then runs this version. The information your customers entered is kept, and updated to fit the new version.",
+      // Before putting a version live that has a feature not working yet (#357).
+      notWorking: (names: readonly string[]) =>
+        `${andList(names.map((name) => `“${name}”`))} ${names.length === 1 ? "does" : "do"} not work yet in this version. Your customers would see ${names.length === 1 ? "it as it is" : "them as they are"}. Put this version live anyway?`,
+      notWorkingYes: "Put it live anyway",
+      notWorkingNo: "Not yet",
       promoting: "Starting…",
       discard: "Throw these changes away",
       discardConfirm: (count: number) =>
@@ -779,6 +787,55 @@ export const copy = {
     specIntro: "This is what Schmeide will build. Read it through before approving it.",
     approve: "Approve and build",
     approving: "Starting the build…",
+    // The acceptance checks under each feature of the spec (#357).
+    specChecks: {
+      intro:
+        "Under each feature is how we will know it works. Once your app is built, a tester opens it on a phone and follows these steps, and a feature counts as working only when they end as written.",
+      title: "How we will know it works",
+      // When the features cannot be matched to the spec's list, they are listed after it.
+      listTitle: "How we will know each feature works",
+    },
+    // One acceptance check in plain words.
+    check: {
+      given: "Starting from",
+      steps: "Steps",
+      expect: "What should happen",
+    },
+    // Which features work in a version, from the checks a tester followed in it (#357).
+    features: {
+      title: "What works in this version",
+      intro:
+        "A tester used this version on a phone, as a person would, and followed the checks under each feature.",
+      summary: (working: number, total: number) =>
+        total === 1
+          ? working === 1
+            ? "Its 1 feature works."
+            : "Its 1 feature does not work yet."
+          : `${working} of ${total} features work.`,
+      state: { works: "Works", broken: "Not working yet", unchecked: "Not checked" },
+      verdict: { works: "Worked.", broken: "Did not work.", could_not_check: "Could not check." },
+      unknownCheck: "A check this version no longer has.",
+      saw: "What the tester saw:",
+      showSteps: "Show the steps",
+      showChecks: (count: number) => (count === 1 ? "Show its check" : `Show its ${count} checks`),
+      askForFix: "Ask for a fix",
+      askForFixHint: "Puts what the tester saw into a change request, for you to read and send.",
+      // The change request "Ask for a fix" writes, for the owner to read before sending.
+      fixRequest: (
+        name: string,
+        checks: readonly { readonly expect: string | null; readonly saw: string }[]
+      ) =>
+        [
+          `Fix “${name}”. It does not work yet.`,
+          ...checks.map(({ expect, saw }) =>
+            expect
+              ? `- What should happen: ${expect} What the tester saw: ${saw}`
+              : `- What the tester saw: ${saw}`
+          ),
+        ].join("\n"),
+      showInHistory: "Show which features work",
+      noneInHistory: "No tester followed checks in this version.",
+    },
     buildsOff:
       "Building apps is not open yet. Your spec is saved, and you can approve it here once building opens.",
     changeFeatures: "Change the requests",
