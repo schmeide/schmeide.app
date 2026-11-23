@@ -73,7 +73,13 @@ const waitForBuild = async (projectId: number, buildId: number, afterId = 0) => 
       afterId = event.id;
     }
     if (project.status === "failed") return afterId;
-    if (project.status === "live" && queued.length === 0 && latestBuild?.id === buildId)
+    // "live" is set once staging answers; a first build still puts the app live after that.
+    if (
+      project.status === "live" &&
+      queued.length === 0 &&
+      latestBuild?.id === buildId &&
+      latestBuild.status !== "running"
+    )
       return afterId;
     await sleep(3000);
   }
@@ -261,6 +267,8 @@ const signIn = async () => {
     .getSetCookie()
     .map((value) => value.split(";")[0])
     .join("; ");
+  // A new account is in no business until it starts one (#281).
+  await api.setup.createBusiness.mutate({ yourName: "E2E run", country: "NZ" });
 };
 
 // Takes the run's account, and the business made for it, away again.
