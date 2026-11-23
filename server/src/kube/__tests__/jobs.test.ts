@@ -144,7 +144,7 @@ describe("runJob", () => {
       'make check ${SCHMEIDE_MIGRATIONS_BASE:+BASE="$SCHMEIDE_MIGRATIONS_BASE"}'
     );
     // The phone check runs after make build, on what it built (#219), then the secrets and
-    // outside-calls check (#271), then the packages check (#270).
+    // outside-calls check (#271), then the packages check (#270), then the journeys check (#358).
     expect(CHECK_TARGETS.map(({ target }) => target)).toEqual([
       "check",
       "test",
@@ -152,6 +152,7 @@ describe("runJob", () => {
       "phones",
       "files",
       "packages",
+      "journeys",
     ]);
   });
 

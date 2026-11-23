@@ -80,6 +80,9 @@ const fakeBrowser = (fail = false): AppBrowser & { readonly asked: unknown[][] }
     swipe: note("swipe"),
     upload: note("upload"),
     resize: note("resize"),
+    start: note("start"),
+    see: note("see"),
+    steps: () => [],
     opened: () => asked.filter(([name]) => name === "open").length,
     close: async () => undefined,
   };
@@ -98,9 +101,20 @@ describe("the tester's tools", () => {
     expect(options.tools).toEqual([]);
     expect(options.strictMcpConfig).toBe(true);
     expect(options.allowedTools).toEqual(
-      ["open", "read", "look", "click", "type", "choose", "press", "swipe", "upload", "resize"].map(
-        (name) => `mcp__app__${name}`
-      )
+      [
+        "open",
+        "read",
+        "look",
+        "click",
+        "type",
+        "choose",
+        "press",
+        "swipe",
+        "upload",
+        "start",
+        "see",
+        "resize",
+      ].map((name) => `mcp__app__${name}`)
     );
     expect(Object.keys(options.mcpServers ?? {})).toEqual(["app"]);
   });
@@ -113,6 +127,9 @@ describe("the tester's tools", () => {
     await call(browser, "type", { name: "Email", text: "a@example.com" });
     await call(browser, "swipe", { direction: "left", on: { name: "Photos" } });
     await call(browser, "upload", { count: 3 });
+    await call(browser, "start", { check: "F1.2" });
+    await call(browser, "see", { role: "img", name: "Photo 2 of 3" });
+    await call(browser, "see", { name: "Next photo", gone: true });
 
     expect(browser.asked).toEqual([
       ["open", "/"],
@@ -120,6 +137,9 @@ describe("the tester's tools", () => {
       ["type", { name: "Email" }, "a@example.com"],
       ["swipe", "left", { name: "Photos" }],
       ["upload", 3, undefined],
+      ["start", "F1.2"],
+      ["see", { role: "img", name: "Photo 2 of 3" }, undefined],
+      ["see", { name: "Next photo" }, true],
     ]);
   });
 
@@ -203,6 +223,30 @@ describe.skipIf(!installed)("openChromium", () => {
     expect(uploaded).toContain("red.png, blue.png");
     expect((await browser.look()).subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8]));
     expect(browser.opened()).toBe(1);
+  }, 60_000);
+
+  it("records what worked, in order, and what the tester saw", async () => {
+    browser = await openChromium(origin);
+
+    await browser.open("/");
+    await browser.start("F1.1");
+    await browser.click({ role: "button", name: "Next photo" });
+    await expect(browser.click({ role: "button", name: "Previous photo" })).rejects.toThrow();
+    await browser.type({ name: "Name" }, "Biscuit");
+    await browser.upload(2);
+    await browser.see({ role: "img", name: "Photo 2 of 3" });
+    await browser.see({ role: "button", name: "Previous photo" }, true);
+    await expect(browser.see({ role: "img", name: "Photo 3 of 3" })).rejects.toThrow();
+
+    expect(browser.steps()).toEqual([
+      { do: "open", path: "/" },
+      { do: "start", check: "F1.1" },
+      { do: "click", target: { role: "button", name: "Next photo" } },
+      { do: "type", target: { name: "Name" }, text: "Biscuit" },
+      { do: "upload", count: 2, nth: 1 },
+      { do: "see", target: { role: "img", name: "Photo 2 of 3" }, gone: false },
+      { do: "see", target: { role: "button", name: "Previous photo" }, gone: true },
+    ]);
   }, 60_000);
 
   it("shows a carousel that does not move for what it is", async () => {

@@ -601,7 +601,18 @@ describe("kubernetes mode", () => {
     const phones = `checks-${build.id}-2`;
     const files = `checks-${build.id}-3`;
     const packages = `checks-${build.id}-4`;
+    const journeys = `checks-${build.id}-5`;
     const { config, kube, forgejo } = setup({
+      [journeys]: {
+        lines: [
+          "::schmeide:: passed packages",
+          "::schmeide:: start journeys",
+          "journeys/ holds the journeys Schmeide's tester wrote, and a build may not change them. Undo these changes and commit:",
+          "- journeys/F1.1.spec.ts was added. Delete it.",
+          "::schmeide:: failed journeys 1",
+        ],
+        exit: 0,
+      },
       [passing]: {
         lines: [
           "::schmeide:: start check",
@@ -677,6 +688,7 @@ describe("kubernetes mode", () => {
     const notForPhones = await env.run(activities.runChecks, build.id, 2);
     const unsafe = await env.run(activities.runChecks, build.id, 3);
     const vulnerable = await env.run(activities.runChecks, build.id, 4);
+    const rewritten = await env.run(activities.runChecks, build.id, 5);
 
     expect(ok).toEqual({ ok: true, output: "" });
     expect(failed).toEqual({ ok: false, output: "$ make test\nFAIL todos.test.ts\n" });
@@ -697,8 +709,13 @@ describe("kubernetes mode", () => {
       output:
         "Schmeide's check of the app's packages found:\n- backend: lodash has a known critical security hole; update lodash to 4.17.21.\n",
     });
-    expect(readOnly).toEqual([true, true, true, true, true]);
-    expect(kube.deleted).toEqual([passing, failing, phones, files, packages]);
+    expect(rewritten).toEqual({
+      ok: false,
+      output:
+        "journeys/ holds the journeys Schmeide's tester wrote, and a build may not change them. Undo these changes and commit:\n- journeys/F1.1.spec.ts was added. Delete it.\n",
+    });
+    expect(readOnly).toEqual([true, true, true, true, true, true]);
+    expect(kube.deleted).toEqual([passing, failing, phones, files, packages, journeys]);
     // Only the passing round records what the build ships, read from staging's lock files.
     expect(
       await db.select().from(buildDependencies).where(eq(buildDependencies.buildId, build.id))
@@ -716,6 +733,8 @@ describe("kubernetes mode", () => {
         "The code has a secret or calls another service (1 problem)",
         "Checking the app's packages for security holes and licenses",
         "The app's packages have a security hole or a license it cannot ship (1 problem)",
+        "Checking that the journeys are as the tester left them",
+        "The build changed the journeys (1 file)",
       ])
     );
   });
