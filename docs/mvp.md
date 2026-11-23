@@ -489,9 +489,13 @@ What the server does with a file:
 
 `SCHMEIDE_RUNNER=kubernetes` (default `host`) makes the worker keep each project in a Forgejo repository and run the
 agent and the checks as Jobs in `schmeide-builds` (`docs/stage2.md`, slice 1 step 2). Only the worker reads these; it
-checks at startup that it can use Forgejo, the Kubernetes API, Azure and the provisioner database, and refuses to
-start with what to fix. It deploys as [Production](#production) says. Files attached to a change are refused until
-slice 2.
+checks at startup that it can use Forgejo, the Kubernetes API, Azure and the provisioner database, and that it can
+start Chromium, and refuses to start with what to fix. It deploys as [Production](#production) says. Files attached
+to a change are refused until slice 2.
+
+The server image carries Playwright's headless Chromium and its system libraries (`PLAYWRIGHT_BROWSERS_PATH`,
+`/opt/playwright`), at the version the lockfile pins: the worker takes each version's pictures with it. That is
+about 0.9 GB of the image.
 
 - `SCHMEIDE_BUILD_IMAGE` (required): the server's own image, which build pods run.
 - `SCHMEIDE_FORGEJO_TOKEN` (required): an API token of the `schmeide-platform` Forgejo user.

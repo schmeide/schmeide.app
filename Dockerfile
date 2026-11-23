@@ -24,6 +24,13 @@ RUN npm ci --omit=dev -w server \
     && rm -rf node_modules/@anthropic-ai/claude-agent-sdk-linux-*-musl \
     && ln -s /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude /usr/local/bin/claude \
     && claude --version
+# Playwright's headless Chromium and the system libraries it needs, at the version the lockfile
+# pins: the worker takes a picture of each version and follows the acceptance checks in it. Outside
+# any home directory, so the node user finds it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN npm exec -w server -- playwright install --with-deps --only-shell chromium \
+    && rm -rf /var/lib/apt/lists/* \
+    && node -e 'import("playwright").then((p) => p.chromium.launch()).then((b) => b.close())'
 COPY server server
 # server/ imports shared files from these by relative path. Whole directories, so a new shared file
 # cannot break the image; serverImage.test.ts fails if server/ reaches into any other directory.

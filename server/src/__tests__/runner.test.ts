@@ -67,6 +67,8 @@ describe("runnerFromEnv", () => {
 });
 
 describe("checkRunner", () => {
+  // Stands in for Chromium starting, so the tests need none.
+  const launches = async () => undefined;
   const tokenFile = () => {
     const file = join(mkdtempSync(join(tmpdir(), "schmeide-sa-")), "token");
     writeFileSync(file, "token");
@@ -110,7 +112,8 @@ describe("checkRunner", () => {
           { canI: async () => true, secretExists: async () => true },
           { whoami: async () => "schmeide-platform" }
         ),
-        tokenFile()
+        tokenFile(),
+        launches
       )
     ).toEqual([]);
   });
@@ -128,7 +131,8 @@ describe("checkRunner", () => {
           },
         }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(problems).toEqual([
@@ -155,7 +159,8 @@ describe("checkRunner", () => {
           }),
         }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(problems).toEqual([
@@ -181,7 +186,8 @@ describe("checkRunner", () => {
           },
         }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(problems).toEqual([expect.stringMatching(/SCHMEIDE_PROVISIONER_URL/)]);
@@ -190,10 +196,29 @@ describe("checkRunner", () => {
   it("says how to mount the service account token when there is none", async () => {
     const problems = await checkRunner(
       runner({}, { whoami: async () => "schmeide-platform" }),
-      "/nowhere/token"
+      "/nowhere/token",
+      launches
     );
 
     expect(problems).toEqual([expect.stringMatching(/automountServiceAccountToken: true/)]);
+  });
+
+  it("says the image has no Chromium when it cannot start", async () => {
+    const problems = await checkRunner(
+      runner(
+        { canI: async () => true, secretExists: async () => true },
+        { whoami: async () => "schmeide-platform" }
+      ),
+      tokenFile(),
+      () =>
+        Promise.reject(new Error("Executable doesn't exist at /opt/chrome\nRun playwright install"))
+    );
+
+    expect(problems).toEqual([
+      expect.stringMatching(
+        /^Cannot start Chromium \(Error: Executable doesn't exist at \/opt\/chrome\), so versions get no pictures/
+      ),
+    ]);
   });
 
   it("asks for every right the worker uses", async () => {
@@ -209,7 +234,8 @@ describe("checkRunner", () => {
         },
         { whoami: async () => "schmeide-platform" }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(asked).toEqual(
@@ -228,7 +254,8 @@ describe("checkRunner", () => {
         },
         { whoami: async () => "schmeide-platform" }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(problems).toEqual([
@@ -246,7 +273,8 @@ describe("checkRunner", () => {
         },
         { whoami: async () => "schmeide-platform" }
       ),
-      tokenFile()
+      tokenFile(),
+      launches
     );
 
     expect(problems).toEqual([expect.stringMatching(/NODE_EXTRA_CA_CERTS=/)]);
