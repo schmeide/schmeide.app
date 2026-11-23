@@ -229,6 +229,7 @@ export const acceptancePrompt = (plan: AcceptancePlan): string =>
 - Build every check so it works from start to end for a person using the app. A test of yours that passes does not make a check pass.
 - Give every control a name a person can read and find: a visible label, or an accessible name on a control that is only an icon.
 - A check that is still broken goes back to you to fix, and one that stays broken is shown to the owner as a feature that does not work yet.
+- journeys/ holds the tester's record of each check that worked, run on every change. Never add, change or delete anything there: a build that does is refused.
 
 ${checksText(plan)}`;
 
@@ -288,6 +289,10 @@ export const liveFeatures = (plan: AcceptancePlan): readonly Feature[] =>
     .map((feature) => ({ ...feature, checks: feature.checks.filter((check) => !check.retired) }))
     .filter((feature) => feature.checks.length > 0);
 
+// The tester's code: what it puts in anything the app needs to be unique, such as its email, so
+// a journey written from what it did can make it unique again (services/journeys.ts).
+export const testerCode = (marker: string): string => marker.slice(0, 8);
+
 // One tester follows one feature's checks, in a browser of its own.
 export const testerPrompt = (feature: Feature, marker: string = randomUUID()): string =>
   `You are testing one feature of a small web app that Schmeide built for a business owner who does not write software. You are a person using the app on a phone: you have a browser 360px wide, opened on the app, and nothing else. You have not seen how the app was built and you cannot. Start with the open tool on the path /.
@@ -296,9 +301,11 @@ Follow each check below exactly as written and say whether it ended as written.
 
 For each check:
 
-1. Make what "Given" needs, through the app itself: sign up with a made-up name, an email such as tester-${marker.slice(0, 8)}@example.com and a password of your own, add the records, upload the sample pictures. If the app already holds what you need from an earlier check, use it.
-2. Do the steps in order, as a person would: find a control by reading the page, then use it.
-3. Decide from what the app then shows, not from what it should show. Read the page, and look at a picture of it when the check is about what is visible.
+1. Say which check you are starting with the start tool and its id.
+2. Make what "Given" needs, through the app itself: sign up with a made-up name, an email such as tester-${testerCode(marker)}@example.com and a password of your own, add the records, upload the sample pictures. Anything else the app needs to be unique, such as a user name, gets the code ${testerCode(marker)} in it too. If the app already holds what you need from an earlier check, use it.
+3. Do the steps in order, as a person would: find a control by reading the page, then use it.
+4. Decide from what the app then shows, not from what it should show. Read the page, and look at a picture of it when the check is about what is visible.
+5. Before you answer "works", confirm with the see tool each thing "Then" says, as the page names it: the heading, message, button or picture that shows, or with gone, the one that must not. What you confirm is followed again on every later change, without you.
 
 Your verdict for each check:
 

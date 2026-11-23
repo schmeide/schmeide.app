@@ -85,6 +85,8 @@ export const CHECK_TARGETS = [
   { target: "files", command: "node /app/server/src/sandbox/files.ts" },
   // Schmeide's check of the app's packages for security holes and licenses, as on the host.
   { target: "packages", command: "node /app/server/src/sandbox/packages.ts" },
+  // Schmeide's check that the build left journeys/ as the tester wrote it, as on the host.
+  { target: "journeys", command: "node /app/server/src/sandbox/journeys.ts" },
 ] as const;
 export type CheckTarget = (typeof CHECK_TARGETS)[number]["target"];
 
@@ -98,7 +100,7 @@ export const parseChecksMarker = (
   | { readonly step: MarkerStep; readonly target: CheckTarget; readonly code?: number }
   | undefined => {
   const match =
-    /^::schmeide:: (start|passed|failed) (check|test|build|phones|files|packages)(?: (\d+))?$/.exec(
+    /^::schmeide:: (start|passed|failed) (check|test|build|phones|files|packages|journeys)(?: (\d+))?$/.exec(
       line
     );
   if (!match) return undefined;

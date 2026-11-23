@@ -48,7 +48,8 @@ import {
   planFrom,
   specHash,
 } from "../../services/acceptance.ts";
-import type { AppBrowser } from "../../services/appBrowser.ts";
+import type { AppBrowser, Step } from "../../services/appBrowser.ts";
+import { JOURNEY_PASSED, checkHash } from "../../services/journeys.ts";
 import { briefPrompt, designBrief } from "../../services/designBrief.ts";
 import { reviewFeedbackPrompt, type ScreenCapture } from "../../services/designReview.ts";
 import { DEFAULT_STYLE } from "../../services/designStyles.ts";
@@ -2497,6 +2498,304 @@ describe("the tester", () => {
 
     expect(calls[0].prompt).toBe("F1.1 is broken");
     expect(await messages(build.id)).toContain("Agent is fixing features that do not work");
+  });
+});
+
+describe("the journeys", () => {
+  const PLAN = planFrom(
+    {
+      features: [
+        {
+          name: "Photo carousel",
+          checks: [
+            {
+              given: "A profile with three photos.",
+              steps: ["Open the profile.", "Tap Next photo."],
+              expect: "The second photo shows.",
+            },
+            {
+              given: "A profile with one photo.",
+              steps: ["Open the profile."],
+              expect: "No Next photo button shows.",
+            },
+          ],
+        },
+        {
+          name: "Messages",
+          checks: [
+            { given: "Two horses.", steps: ["Send Hello."], expect: "Hello is in the thread." },
+          ],
+        },
+      ],
+    },
+    1
+  );
+  const STAGING = "http://localhost:18200";
+
+  // What the tester does for a check: `see` what it saw (nothing for none), `breaks` to type a
+  // word that fails the journey when it is run, and its verdict.
+  type Doing = {
+    readonly see?: string;
+    readonly breaks?: boolean;
+    readonly verdict?: "works" | "broken";
+  };
+
+  // A workspace whose `make journeys` passes every journey but those holding BREAKS, and notes
+  // which it ran; a project with checks up on staging; and testers that sign up with their code,
+  // then do for each check what `doing` says.
+  const journeying = async () => {
+    const { config, dataDir } = setup();
+    const { project, build } = await newBuild();
+    const runs = join(dataDir, "..", "journey-runs");
+    const wgit = (...args: string[]) =>
+      execFileSync("git", args, {
+        cwd: join(dataDir, "projects", project.slug),
+        env: { ...process.env, GIT_CONFIG_GLOBAL: gitConfigFile(dataDir) },
+      }).toString();
+    const activities = (doing: Readonly<Record<string, Doing>>, calls: string[]) =>
+      createActivities(
+        deps,
+        {
+          ...config,
+          acceptance: true,
+          openBrowser: async () => {
+            const steps: Step[] = [];
+            let opened = 0;
+            return {
+              open: async (path: string) => {
+                opened++;
+                steps.push({ do: "open", path });
+                return "";
+              },
+              start: async (check: string) => {
+                steps.push({ do: "start", check });
+                return "";
+              },
+              type: async (target: { name: string }, text: string) => {
+                steps.push({ do: "type", target, text });
+                return "";
+              },
+              see: async (target: { name: string }) => {
+                steps.push({ do: "see", target, gone: false });
+                return "";
+              },
+              steps: () => steps,
+              opened: () => opened,
+              close: async () => undefined,
+            } as Partial<AppBrowser> as AppBrowser;
+          },
+        },
+        testerQuery(doing, calls)
+      );
+    // The tester's browser is the one its run was given: this plays the tester through the tools
+    // of that run's own tool server, as the SDK would.
+    const testerQuery = (doing: Readonly<Record<string, Doing>>, calls: string[]): Query =>
+      ((params: { prompt: string; options: Options }) => {
+        calls.push(params.prompt);
+        return (async function* (): AsyncGenerator<SDKMessage> {
+          const server = Object.values(params.options.mcpServers ?? {})[0] as unknown as {
+            instance: { _registeredTools: Record<string, { handler: (a: unknown) => unknown }> };
+          };
+          const use = (name: string, args: unknown) =>
+            server.instance._registeredTools[name].handler(args);
+          const code = /tester-([0-9a-f]{8})@/.exec(params.prompt)?.[1] ?? "";
+          await use("open", { path: "/" });
+          const ids = [...params.prompt.matchAll(/^- (F\d+\.\d+)$/gm)].map(([, id]) => id);
+          for (const id of ids) {
+            const what = doing[id] ?? {};
+            await use("start", { check: id });
+            await use("type", { name: "Email", text: `tester-${code}@example.com` });
+            if (what.breaks) await use("type", { name: "Note", text: "BREAKS" });
+            if (what.see) await use("see", { name: what.see });
+          }
+          yield* leadQuery([], {
+            results: ids.map((id) => ({
+              id,
+              verdict: doing[id]?.verdict ?? "works",
+              saw: "It ended as written.",
+            })),
+          })(params) as AsyncGenerator<SDKMessage>;
+        })();
+      }) as unknown as Query;
+    await new MockActivityEnvironment().run(activities({}, []).prepareWorkspace, build.id);
+    const workspace = join(dataDir, "projects", project.slug);
+    writeFileSync(
+      join(workspace, "Makefile"),
+      [
+        readFileSync(join(workspace, "Makefile"), "utf8"),
+        ".PHONY: journeys",
+        `journeys:\n\t@echo "$(BASE_URL) $(JOURNEYS)" >> ${runs}\n\t@node -e 'const fs = require("fs"); fs.writeFileSync(process.env.JOURNEYS_REPORT, JSON.stringify({ suites: process.argv[1].split(" ").filter(Boolean).map((file) => ({ file, specs: [{ ok: !fs.readFileSync("journeys/" + file, "utf8").includes("BREAKS") }] })) }))' "$(JOURNEYS)"`,
+        "",
+      ].join("\n")
+    );
+    wgit("add", "-A");
+    wgit("commit", "-q", "-m", "journeys target");
+    const head = wgit("rev-parse", "HEAD").trim();
+    await db
+      .update(projects)
+      .set({ stagingUrl: STAGING, stagingCommit: head })
+      .where(eq(projects.id, project.id));
+    await db.update(builds).set({ commit: head }).where(eq(builds.id, build.id));
+    await db
+      .insert(projectAcceptance)
+      .values({ projectId: project.id, specHash: specHash(""), plan: PLAN });
+    const check = (
+      doing: Readonly<Record<string, Doing>> = {},
+      { round = 0, last = false, calls = [] as string[] } = {}
+    ) =>
+      new MockActivityEnvironment().run(activities(doing, calls).checkAcceptance, {
+        buildId: build.id,
+        round,
+        last,
+      });
+    const journeys = () =>
+      existsSync(join(workspace, "journeys"))
+        ? readdirSync(join(workspace, "journeys")).sort()
+        : [];
+    const journey = (id: string) =>
+      readFileSync(join(workspace, "journeys", `${id}.spec.ts`), "utf8");
+    const ran = () => (existsSync(runs) ? readFileSync(runs, "utf8").trim().split("\n") : []);
+    const kept = async () =>
+      (
+        await db
+          .select()
+          .from(buildAcceptance)
+          .where(eq(buildAcceptance.buildId, build.id))
+          .orderBy(asc(buildAcceptance.checkId))
+      ).map(({ checkId, verdict, saw }) => [checkId, verdict, saw]);
+    return { project, build, workspace, check, journeys, journey, ran, kept, head, wgit, dataDir };
+  };
+
+  const SAW = { "F1.1": { see: "Photo 2 of 3" }, "F2.1": { see: "Hello" } } as const;
+
+  it("keeps a journey of each check the tester saw work, from what it did, and commits it", async () => {
+    const { project, build, check, journeys, journey, ran, head, wgit } = await journeying();
+
+    expect(await check(SAW)).toEqual({ ok: true, output: "" });
+
+    // F1.2 worked, but the tester confirmed nothing it saw, so it has no journey.
+    expect(journeys()).toEqual(["F1.1.spec.ts", "F2.1.spec.ts"]);
+    expect(journey("F1.1")).toContain(`// check F1.1 ${checkHash(liveChecks(PLAN)[0])}`);
+    expect(journey("F1.1")).toContain(".fill(`tester-${run}@example.com`);");
+    expect(journey("F1.1")).toContain(".toBeVisible();");
+    expect(ran()).toEqual([`${STAGING} F1.1.spec.ts F2.1.spec.ts`]);
+    expect(wgit("status", "--porcelain").trim()).toBe("");
+    const commit = wgit("rev-parse", "HEAD").trim();
+    expect(commit).not.toBe(head);
+    expect(wgit("show", "--name-only", "--format=%s", "HEAD").trim().split("\n")).toEqual([
+      "keep the journeys of the checks that work",
+      "",
+      "journeys/F1.1.spec.ts",
+      "journeys/F2.1.spec.ts",
+    ]);
+    expect((await getBuild(db, build.id)).commit).toBe(commit);
+    const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(after.stagingCommit).toBe(commit);
+    expect(await messages(build.id)).toContain(
+      "Acceptance: kept 2 journeys of what the tester saw work, to run on every change"
+    );
+  });
+
+  it("runs the journeys first, and the tester follows only the checks without one that passes", async () => {
+    const { build, check, ran, kept } = await journeying();
+    await check(SAW);
+    const calls: string[] = [];
+
+    expect(await check(SAW, { calls })).toEqual({ ok: true, output: "" });
+
+    expect(ran()[1]).toBe(`${STAGING} F1.1.spec.ts F2.1.spec.ts`);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("- F1.2");
+    expect(calls[0]).not.toContain("- F1.1");
+    expect(await kept()).toEqual([
+      ["F1.1", "works", JOURNEY_PASSED],
+      ["F1.2", "works", "It ended as written."],
+      ["F2.1", "works", JOURNEY_PASSED],
+    ]);
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Acceptance: running the 2 journeys kept from earlier versions",
+        "F1.1 works: Photo carousel (its journey passed)",
+        "Acceptance: 2 of 2 journeys passed",
+        "Acceptance: a tester is following the 1 feature, 1 check in the running app",
+      ])
+    );
+  });
+
+  it("has the tester follow a check whose journey fails, and rewrites the journey from what it did", async () => {
+    const { check, journey, ran } = await journeying();
+    await check({ ...SAW, "F2.1": { see: "Hello", breaks: true } });
+    // The new journey failed when run on its own, so it was not kept.
+    expect(ran()[0]).toBe(`${STAGING} F1.1.spec.ts F2.1.spec.ts`);
+    await check(SAW);
+    const calls: string[] = [];
+
+    await check(SAW, { calls });
+
+    expect(calls.some((prompt) => prompt.includes("- F2.1"))).toBe(false);
+    expect(journey("F2.1")).not.toContain("BREAKS");
+  });
+
+  it("keeps a new journey only once it passes on its own", async () => {
+    const { build, check, journeys } = await journeying();
+
+    await check({ ...SAW, "F2.1": { see: "Hello", breaks: true } });
+
+    expect(journeys()).toEqual(["F1.1.spec.ts"]);
+    expect(await messages(build.id)).toContain(
+      "Acceptance: 1 new journey did not pass on its own (F2.1), so the tester follows that check again next time"
+    );
+  });
+
+  it("keeps an old journey of a check the tester found broken, and removes those of retired checks", async () => {
+    const { project, check, journeys } = await journeying();
+    await check(SAW);
+    const retired = {
+      features: PLAN.features.map((feature) => ({
+        ...feature,
+        checks: feature.checks.map((one) => ({ ...one, retired: one.id === "F2.1" })),
+      })),
+    };
+    await db
+      .update(projectAcceptance)
+      .set({ plan: retired })
+      .where(eq(projectAcceptance.projectId, project.id));
+
+    await check({ "F1.2": { verdict: "broken" } }, { last: true });
+
+    expect(journeys()).toEqual(["F1.1.spec.ts"]);
+  });
+
+  it("writes nothing while a broken check goes back to the builder", async () => {
+    const { check, journeys, ran } = await journeying();
+
+    const result = await check({ ...SAW, "F1.2": { verdict: "broken" } });
+
+    expect(result.ok).toBe(false);
+    expect(journeys()).toEqual([]);
+    expect(ran()).toEqual([]);
+  });
+
+  it("refuses a build that changed a journey", async () => {
+    const { build, workspace, check, wgit, dataDir } = await journeying();
+    await check(SAW);
+    const commit = wgit("rev-parse", "HEAD").trim();
+    writeFileSync(join(workspace, "journeys", "F1.1.spec.ts"), "test.skip();\n");
+    const { config } = setup();
+    const activities = createActivities(deps, { ...config, dataDir });
+
+    const result = await new MockActivityEnvironment().run(activities.runChecks, build.id);
+
+    expect(result).toEqual({
+      ok: false,
+      output: `journeys/ holds the journeys Schmeide's tester wrote, and a build may not change them. Undo these changes and commit:\n- journeys/F1.1.spec.ts was changed. Put it back with \`git checkout ${commit} -- journeys/F1.1.spec.ts\`.`,
+    });
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Checking that the journeys are as the tester left them",
+        "The build changed the journeys (1 file)",
+      ])
+    );
   });
 });
 

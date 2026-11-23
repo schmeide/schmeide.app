@@ -37,6 +37,20 @@ export const SAMPLE_COLORS = [
   ["purple", [147, 51, 234]],
 ] as const;
 
+// What the tester did that worked, in order, so the server can write it down as a journey
+// (services/journeys.ts). `start` marks where a check begins; `see` is what it saw, or saw gone.
+export type Step =
+  | { readonly do: "start"; readonly check: string }
+  | { readonly do: "open"; readonly path: string }
+  | { readonly do: "click"; readonly target: Target }
+  | { readonly do: "type"; readonly target: Target; readonly text: string }
+  | { readonly do: "choose"; readonly target: Target; readonly option: string }
+  | { readonly do: "press"; readonly key: string }
+  | { readonly do: "swipe"; readonly direction: Direction; readonly target?: Target }
+  | { readonly do: "upload"; readonly count: number; readonly nth: number }
+  | { readonly do: "resize"; readonly width: number }
+  | { readonly do: "see"; readonly target: Target; readonly gone: boolean };
+
 export type AppBrowser = {
   // Goes to a path of the app and answers what the page reads.
   open(path: string): Promise<string>;
@@ -53,6 +67,12 @@ export type AppBrowser = {
   // Puts the first `count` sample pictures into the page's `nth` file control.
   upload(count: number, nth?: number): Promise<string>;
   resize(width: number): Promise<string>;
+  // Marks the start of a check, by its id.
+  start(check: string): Promise<string>;
+  // Waits for the thing named to show, or with `gone` to be gone, and fails when it does not.
+  see(target: Target, gone?: boolean): Promise<string>;
+  // Everything done so far that worked, in order.
+  steps(): readonly Step[];
   // How many times a page of the app was opened: a verdict given without opening the app can be
   // told from one that was earned.
   opened(): number;
@@ -117,7 +137,15 @@ export const within = (origin: string, path: string): string => {
 export const cut = (text: string, max = MAX_READING): string =>
   text.length > max ? `${text.slice(0, max)}\n(The page goes on. Swipe up to read further.)` : text;
 
-const WHEEL: Readonly<Record<Direction, readonly [number, number]>> = {
+// The screen at a width the tester may choose.
+export const viewportOf = (width: number) => ({
+  width,
+  height: width < 700 ? PHONE.height : 800,
+});
+// How long a swipe is given to settle.
+export const SWIPE_SETTLE_MS = 600;
+
+export const WHEEL: Readonly<Record<Direction, readonly [number, number]>> = {
   // A finger moving left brings the next thing in from the right.
   left: [300, 0],
   right: [-300, 0],
@@ -190,36 +218,46 @@ export const openChromium: OpenBrowser = async (origin) => {
   };
 
   let opened = 0;
+  const steps: Step[] = [];
+  // A step is kept only once it worked.
+  const did = (step: Step) => steps.push(step);
   return {
     opened: () => opened,
+    steps: () => [...steps],
     async open(path) {
       opened++;
       const response = await page.goto(within(home, path), { waitUntil: "load" });
+      did({ do: "open", path });
       return then(`Opened ${path} (the app answered ${response?.status() ?? "nothing"}).`);
     },
     read,
     look: () => page.screenshot({ type: "jpeg", quality: 60 }),
     async click(target) {
       await find(target).click();
+      did({ do: "click", target });
       return then("Clicked.");
     },
     async type(target, text) {
       await find(target).fill(text);
+      did({ do: "type", target, text });
       return then("Typed.");
     },
     async choose(target, option) {
       await find(target).selectOption({ label: option });
+      did({ do: "choose", target, option });
       return then("Chosen.");
     },
     async press(key) {
       await page.keyboard.press(key);
+      did({ do: "press", key });
       return then(`Pressed ${key}.`);
     },
     async swipe(direction, target) {
       if (target) await find(target).hover();
       else await page.mouse.move(PHONE.width / 2, PHONE.height / 2);
       await page.mouse.wheel(...WHEEL[direction]);
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(SWIPE_SETTLE_MS);
+      did({ do: "swipe", direction, ...(target && { target }) });
       return then(`Swiped ${direction}.`);
     },
     async upload(count, nth = 1) {
@@ -227,6 +265,7 @@ export const openChromium: OpenBrowser = async (origin) => {
         .locator('input[type="file"]')
         .nth(nth - 1)
         .setInputFiles(samplePictures(count));
+      did({ do: "upload", count, nth });
       return then(
         `Chose ${count} ${count === 1 ? "picture" : "pictures"}: ${SAMPLE_COLORS.slice(0, count)
           .map(([color]) => color)
@@ -234,8 +273,18 @@ export const openChromium: OpenBrowser = async (origin) => {
       );
     },
     async resize(width) {
-      await page.setViewportSize({ width, height: width < 700 ? PHONE.height : 800 });
+      await page.setViewportSize(viewportOf(width));
+      did({ do: "resize", width });
       return then(`The screen is now ${width}px wide.`);
+    },
+    async start(check) {
+      did({ do: "start", check });
+      return `Starting ${check}.`;
+    },
+    async see(target, gone = false) {
+      await find(target).waitFor({ state: gone ? "hidden" : "visible" });
+      did({ do: "see", target, gone });
+      return gone ? "It is not on the page." : "It is on the page.";
     },
     close: () => browser.close(),
   };
@@ -348,6 +397,21 @@ export const testerTools = (browser: AppBrowser) => {
           .describe("Which file control, from 1, when the page has several."),
       },
       ({ count, nth }) => text(() => browser.upload(count, nth))
+    ),
+    tool(
+      "start",
+      "Say which check you are starting, by its id, before you make what it needs.",
+      { check: z.string().min(1).max(16).describe("The check's id, such as F1.2.") },
+      ({ check }) => text(() => browser.start(check))
+    ),
+    tool(
+      "see",
+      'Confirm that something is on the page now, found by what it is and what it says, or with gone that it is not. Use it for each thing "Then" says before you answer works.',
+      {
+        ...targetShape,
+        gone: z.boolean().optional().describe("True to confirm it is not on the page."),
+      },
+      ({ gone, ...target }) => text(() => browser.see(target, gone))
     ),
     tool(
       "resize",

@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
   appendFile,
@@ -166,13 +166,30 @@ import {
   plannedBy,
   resultsOf,
   specHash,
+  testerCode,
   testerPrompt,
   writerPrompt,
   type AcceptancePlan,
   type Feature,
   type Result,
 } from "../services/acceptance.ts";
-import { testerOptions, type OpenBrowser } from "../services/appBrowser.ts";
+import { testerOptions, type OpenBrowser, type Step } from "../services/appBrowser.ts";
+import {
+  CHECKING_JOURNEYS,
+  JOURNEYS_DIR,
+  JOURNEYS_TARGET,
+  JOURNEYS_UNCHANGED,
+  checkHash,
+  JOURNEY_PASSED,
+  headerOf,
+  idOfJourney,
+  journeyFile,
+  journeyOf,
+  journeyProblems,
+  journeysChanged,
+  journeysReport,
+  passedIn,
+} from "../services/journeys.ts";
 
 export type { Query };
 
@@ -300,6 +317,7 @@ const SANDBOX_CHECKS = {
   ],
   files: [CHECKING_SAFETY, SAFE_TO_SHIP, notSafeToShip],
   packages: [CHECKING_PACKAGES, PACKAGES_OK, packagesNotOk],
+  journeys: [CHECKING_JOURNEYS, JOURNEYS_UNCHANGED, journeysChanged],
 } as const;
 const MAX_EVENT = 300;
 
@@ -1997,6 +2015,156 @@ export const createActivities = (
     return plan && liveChecks(plan).length > 0 ? plan : undefined;
   };
 
+  // The journeys in the app's workspace (#358): each check id with the hash of the check its
+  // journey was written from. Undefined where journeys are not kept: in an app whose template
+  // cannot run them, and on the cluster, where the worker runs no app code. ponytail: the cluster
+  // needs a journeys Job in a pod with Chromium, like the checks Job, to run and write them.
+  const journeysOf = async (project: Project): Promise<ReadonlyMap<string, string> | undefined> => {
+    if (config.runner) return undefined;
+    const workspace = workspaceOf(project);
+    const makefile = await readFile(join(workspace, "Makefile"), "utf8").catch(() => "");
+    if (!JOURNEYS_TARGET.test(makefile)) return undefined;
+    const found = new Map<string, string>();
+    for (const file of await readdir(join(workspace, JOURNEYS_DIR)).catch(() => [])) {
+      const id = idOfJourney(file);
+      if (!id) continue;
+      const header = headerOf(
+        await readFile(join(workspace, JOURNEYS_DIR, file), "utf8").catch(() => "")
+      );
+      found.set(id, header?.id === id ? header.hash : "");
+    }
+    return found;
+  };
+
+  // Runs these journeys against staging with the app's own `make journeys` and answers the files
+  // that passed. A run that cannot report passed none.
+  const runJourneys = async (
+    project: Project,
+    buildId: number,
+    url: string,
+    files: readonly string[]
+  ): Promise<ReadonlySet<string>> => {
+    if (files.length === 0) return new Set();
+    await mkdir(join(config.dataDir, "journeys"), { recursive: true });
+    const report = join(config.dataDir, "journeys", `${buildId}-${randomUUID()}.json`);
+    const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    try {
+      await run(config.makeBin, ["journeys", `BASE_URL=${url}`, `JOURNEYS=${files.join(" ")}`], {
+        cwd: workspaceOf(project),
+        // The app's environment, and where this machine keeps Playwright's Chromium.
+        env: {
+          ...appEnv(project, config.dataDir),
+          JOURNEYS_REPORT: report,
+          ...(browsers && { PLAYWRIGHT_BROWSERS_PATH: browsers }),
+        },
+        buildId,
+      });
+      try {
+        return passedIn(JSON.parse(await readFile(report, "utf8")));
+      } catch {
+        return new Set();
+      }
+    } finally {
+      await rm(report, { force: true });
+    }
+  };
+
+  // The checks whose journey, written from the check as it is now, passes on staging: they work
+  // without the tester following them again.
+  const passingJourneys = async (
+    project: Project,
+    buildId: number,
+    url: string,
+    plan: AcceptancePlan,
+    journeys: ReadonlyMap<string, string>
+  ): Promise<readonly Result[]> => {
+    const current = liveChecks(plan).filter((check) => journeys.get(check.id) === checkHash(check));
+    if (current.length === 0) return [];
+    await event(
+      buildId,
+      "check",
+      `Acceptance: running the ${current.length} ${current.length === 1 ? "journey" : "journeys"} kept from earlier versions`
+    );
+    const passed = await runJourneys(
+      project,
+      buildId,
+      url,
+      current.map(({ id }) => journeyFile(id))
+    );
+    const results = current
+      .filter(({ id }) => passed.has(journeyFile(id)))
+      .map(({ id, feature }) => ({ id, feature, verdict: "works" as const, saw: JOURNEY_PASSED }));
+    for (const { id, feature } of results)
+      await event(buildId, "check", `${id} works: ${feature} (its journey passed)`);
+    await event(
+      buildId,
+      "check",
+      `Acceptance: ${results.length} of ${current.length} journeys passed`
+    );
+    return results;
+  };
+
+  // Keeps in the app the journey of every check the tester saw work, from what it did, in place
+  // of the one it had; removes the journeys of retired checks; and commits them. A new journey is
+  // kept only once it passes on its own. Staging's commit moves to that commit: the app is the
+  // same, and the version holds its journeys.
+  const keepJourneys = async (
+    project: Project,
+    buildId: number,
+    url: string,
+    plan: AcceptancePlan,
+    journeys: ReadonlyMap<string, string>,
+    followed: readonly { feature: Feature; steps: readonly Step[]; marker: string }[],
+    results: readonly Result[]
+  ) => {
+    const workspace = workspaceOf(project);
+    const dir = join(workspace, JOURNEYS_DIR);
+    const live = liveChecks(plan);
+    const works = new Set(results.filter(({ verdict }) => verdict === "works").map(({ id }) => id));
+    const removed = [...journeys.keys()].filter((id) => !live.some((check) => check.id === id));
+    const written: string[] = [];
+    await mkdir(dir, { recursive: true });
+    // In the plan's order, each check the tester followed and saw work.
+    for (const check of live) {
+      const by = followed.find(({ feature }) => feature.checks.some(({ id }) => id === check.id));
+      if (!by || !works.has(check.id)) continue;
+      const text = journeyOf(check, by.steps, by.marker);
+      if (text) {
+        await writeFile(join(dir, journeyFile(check.id)), text);
+        written.push(check.id);
+      } else if (journeys.has(check.id)) removed.push(check.id);
+    }
+    const passed = await runJourneys(project, buildId, url, written.map(journeyFile));
+    const failed = written.filter((id) => !passed.has(journeyFile(id)));
+    for (const id of [...removed, ...failed]) await rm(join(dir, journeyFile(id)), { force: true });
+    const kept = written.length - failed.length;
+    if (kept > 0)
+      await event(
+        buildId,
+        "check",
+        `Acceptance: kept ${kept} ${kept === 1 ? "journey" : "journeys"} of what the tester saw work, to run on every change`
+      );
+    if (failed.length > 0)
+      await event(
+        buildId,
+        "check",
+        `Acceptance: ${failed.length} new ${failed.length === 1 ? "journey" : "journeys"} did not pass on ${failed.length === 1 ? "its" : "their"} own (${failed.join(", ")}), so the tester follows ${failed.length === 1 ? "that check" : "those checks"} again next time`
+      );
+    await mustRun(project, "git", ["add", "-A", "--", JOURNEYS_DIR], workspace);
+    const env = projectEnv(project, config.dataDir);
+    if ((await run("git", ["diff", "--cached", "--quiet"], { cwd: workspace, env })).code === 0)
+      return;
+    await mustRun(
+      project,
+      "git",
+      ["commit", "-q", "-m", "keep the journeys of the checks that work"],
+      workspace
+    );
+    const commit = assertCommit(await headOf(project));
+    await db.update(projects).set({ stagingCommit: commit }).where(eq(projects.id, project.id));
+    await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
+  };
+
   const headOf = async (project: Project): Promise<string> =>
     (
       await run("git", ["rev-parse", "HEAD"], {
@@ -2665,6 +2833,17 @@ export const createActivities = (
         return { ok: false, output: packagesReport(packages) };
       }
       await event(buildId, "check", PACKAGES_OK);
+      // Only the tester writes journeys/ (#358), so a build that changed it goes back to the builder.
+      await event(buildId, "check", CHECKING_JOURNEYS);
+      const journeys = await journeyProblems(
+        workspaceOf(project),
+        project.stagingCommit ?? undefined
+      );
+      if (journeys.length > 0) {
+        await event(buildId, "check", journeysChanged(journeys.length));
+        return { ok: false, output: journeysReport(journeys) };
+      }
+      await event(buildId, "check", JOURNEYS_UNCHANGED);
       await recordDependencies(db, buildId, await appDependencies(workspaceOf(project)));
       await recordAdditive(buildId, additive);
       return { ok: true, output: "" };
@@ -2745,12 +2924,27 @@ export const createActivities = (
         );
         return passed;
       }
-      const features = liveFeatures(plan);
-      await event(
-        buildId,
-        "check",
-        `Acceptance: a tester is following the ${countOf(plan)} in the running app`
-      );
+      // The journeys kept from earlier versions run first (#358); a check whose journey passes is
+      // not followed by hand.
+      const journeys = await journeysOf(project);
+      const byJourney = journeys
+        ? await passingJourneys(project, buildId, stagingUrl, plan, journeys)
+        : [];
+      const kept = new Set(byJourney.map(({ id }) => id));
+      const features = liveFeatures(plan)
+        .map((feature) => ({
+          ...feature,
+          checks: feature.checks.filter((check) => !kept.has(check.id)),
+        }))
+        .filter((feature) => feature.checks.length > 0);
+      if (features.length > 0)
+        await event(
+          buildId,
+          "check",
+          `Acceptance: a tester is following the ${countOf({ features })} in the running app`
+        );
+      // What each feature's tester did, for the journeys of the checks it saw work.
+      const followed: { feature: Feature; steps: readonly Step[]; marker: string }[] = [];
       const test = async (feature: Feature): Promise<readonly Result[]> => {
         const results = await (async () => {
           const browser = await openBrowser(stagingUrl).catch(async (cause: unknown) => {
@@ -2759,21 +2953,21 @@ export const createActivities = (
             return undefined;
           });
           if (!browser) return resultsOf(feature, undefined, 0);
+          const marker = randomUUID();
           try {
-            return resultsOf(
-              feature,
-              await designRun(project, buildId, {
-                kind: "acceptance",
-                prompt: testerPrompt(feature),
-                cwd: config.dataDir,
-                schema: TESTED_JSON_SCHEMA,
-                options: {
-                  ...testerOptions(browser),
-                  maxTurns: testerTurns(feature.checks.length),
-                },
-              }),
-              browser.opened()
-            );
+            const answer = await designRun(project, buildId, {
+              kind: "acceptance",
+              prompt: testerPrompt(feature, marker),
+              cwd: config.dataDir,
+              schema: TESTED_JSON_SCHEMA,
+              options: {
+                ...testerOptions(browser),
+                maxTurns: testerTurns(feature.checks.length),
+              },
+            });
+            if (journeys)
+              followed.push({ feature, steps: browser.steps(), marker: testerCode(marker) });
+            return resultsOf(feature, answer, browser.opened());
           } finally {
             await browser.close().catch(() => undefined);
           }
@@ -2789,16 +2983,19 @@ export const createActivities = (
       };
       // A few features at a time, each with a tester and a browser of its own.
       const waiting = [...features];
-      const results = (
-        await Promise.all(
-          Array.from({ length: Math.min(TESTERS_AT_ONCE, waiting.length) }, async () => {
-            const done: Result[] = [];
-            for (let next = waiting.shift(); next; next = waiting.shift())
-              done.push(...(await test(next)));
-            return done;
-          })
-        )
-      ).flat();
+      const results = [
+        ...byJourney,
+        ...(
+          await Promise.all(
+            Array.from({ length: Math.min(TESTERS_AT_ONCE, waiting.length) }, async () => {
+              const done: Result[] = [];
+              for (let next = waiting.shift(); next; next = waiting.shift())
+                done.push(...(await test(next)));
+              return done;
+            })
+          )
+        ).flat(),
+      ];
       await db.transaction(async (tx) => {
         await tx.delete(buildAcceptance).where(eq(buildAcceptance.buildId, buildId));
         await tx.insert(buildAcceptance).values(
@@ -2813,6 +3010,9 @@ export const createActivities = (
         );
       });
       const broken = results.filter(({ verdict }) => verdict === "broken");
+      // Once nothing goes back to the builder, the journeys of what works are kept in the app.
+      if (journeys && (broken.length === 0 || input.last))
+        await keepJourneys(project, buildId, stagingUrl, plan, journeys, followed, results);
       const unchecked = results.filter(({ verdict }) => verdict === "could_not_check").length;
       const also = unchecked > 0 ? `, and ${unchecked} could not be checked` : "";
       const of = `${broken.length} of ${results.length} checks`;
