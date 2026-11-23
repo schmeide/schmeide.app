@@ -1,0 +1,79 @@
+{
+  "name": "Contact book",
+  "request": "a contact book: add a contact with a name, a phone number and an email\nsee every contact in one list, sorted by name\nsearch the contacts by name\nchange or delete a contact",
+  "checks": {
+    "features": [
+      {
+        "name": "Add a contact",
+        "checks": [
+          {
+            "given": "The app is open and the contact book is empty.",
+            "steps": [
+              "Add a contact named \"Anna Berg\" with the phone number 0401 234 567 and the email anna@example.com.",
+              "Save it."
+            ],
+            "expect": "\"Anna Berg\" shows in the list of contacts, and opening her shows 0401 234 567 and anna@example.com."
+          },
+          {
+            "given": "The app is open.",
+            "steps": [
+              "Start a new contact.",
+              "Fill in only the phone number 0401 234 567.",
+              "Save it."
+            ],
+            "expect": "The contact is not saved, and the form says a name is needed."
+          }
+        ]
+      },
+      {
+        "name": "Every contact in a list, sorted by name",
+        "checks": [
+          {
+            "given": "The contact book is empty.",
+            "steps": [
+              "Add a contact named \"Zoe Quinn\".",
+              "Add a contact named \"Anna Berg\".",
+              "Go back to the list."
+            ],
+            "expect": "Both show in the list, \"Anna Berg\" above \"Zoe Quinn\"."
+          }
+        ]
+      },
+      {
+        "name": "Search contacts by name",
+        "checks": [
+          {
+            "given": "The contact book holds \"Anna Berg\" and \"Zoe Quinn\".",
+            "steps": ["Search for \"ann\"."],
+            "expect": "\"Anna Berg\" shows and \"Zoe Quinn\" does not."
+          },
+          {
+            "given": "The contact book holds \"Anna Berg\" and \"Zoe Quinn\".",
+            "steps": ["Search for \"Xavier\"."],
+            "expect": "No contact shows, and the page says no contact matches."
+          }
+        ]
+      },
+      {
+        "name": "Change or delete a contact",
+        "checks": [
+          {
+            "given": "The contact book holds \"Anna Berg\" with the phone number 0401 234 567.",
+            "steps": [
+              "Open \"Anna Berg\".",
+              "Change her phone number to 0499 999 999.",
+              "Save it.",
+              "Reload the page."
+            ],
+            "expect": "Opening \"Anna Berg\" shows the phone number 0499 999 999."
+          },
+          {
+            "given": "The contact book holds \"Anna Berg\" and \"Zoe Quinn\".",
+            "steps": ["Delete \"Zoe Quinn\", confirming if the app asks.", "Reload the page."],
+            "expect": "Only \"Anna Berg\" shows in the list."
+          }
+        ]
+      }
+    ]
+  }
+}

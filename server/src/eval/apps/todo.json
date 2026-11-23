@@ -1,0 +1,43 @@
+{
+  "name": "To-do list",
+  "request": "a list of to-dos\nmark a to-do done",
+  "checks": {
+    "features": [
+      {
+        "name": "A list of to-dos",
+        "checks": [
+          {
+            "given": "The app is open and the list has no to-dos.",
+            "steps": ["Type \"Buy oats\" as a new to-do.", "Add it."],
+            "expect": "\"Buy oats\" shows in the list."
+          },
+          {
+            "given": "The list has the to-dos \"Buy oats\" and \"Shoe the horse\", added in that order.",
+            "steps": ["Reload the page."],
+            "expect": "Both to-dos still show, \"Buy oats\" above \"Shoe the horse\"."
+          },
+          {
+            "given": "The app is open.",
+            "steps": ["Add a new to-do with nothing typed."],
+            "expect": "No empty to-do is added to the list."
+          }
+        ]
+      },
+      {
+        "name": "Mark a to-do done",
+        "checks": [
+          {
+            "given": "The list has the to-do \"Buy oats\", not done.",
+            "steps": ["Mark \"Buy oats\" done."],
+            "expect": "\"Buy oats\" shows as done, such as ticked or struck through, and is still in the list."
+          },
+          {
+            "given": "The list has the to-do \"Buy oats\", marked done.",
+            "steps": ["Reload the page."],
+            "expect": "\"Buy oats\" still shows as done."
+          }
+        ]
+      }
+    ]
+  }
+}
