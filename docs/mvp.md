@@ -250,6 +250,11 @@ Print an invoice as a clean page I can save as a PDF
       200: status `live`, with `stagingUrl` and `stagingCommit`. Production is left alone, except for an
       app's first passed build: with nothing live to protect, it is promoted at once (below), so a new
       app is live as soon as it is built.
+   5. `checkAcceptance`, then `goLive`: with the commit on staging, a tester follows every acceptance
+      check in a browser ([How Schmeide knows each feature works](#how-schmeide-knows-each-feature-works)).
+      Broken checks go back to the agent, whose fix passes through steps 3 and 4 again, up to 2 rounds.
+      So step 4 holds on staging, and `goLive` is what sets status `live`, promotes a first build and
+      takes the version's pictures. A `site` build has no tester and deploys in one step.
 
    Every app runs as two copies, named in one place (`copyOf` in `server/src/services/resources.ts`):
 
@@ -702,8 +707,44 @@ must then see.
 - **Soft.** An answer that does not fit, or no answer, is one event and the build goes on without new checks.
 - `SCHMEIDE_ACCEPTANCE=0` turns all of it off, and builds run as they did before.
 
-Nothing follows the checks yet: that is #356, a tester with a browser on staging. Until it lands the checks only
-tell the builder what done means.
+### The tester
+
+Once a build's commit is up on staging, `checkAcceptance` follows every live check in the running app. It is the
+only step that tries a feature the way a person would.
+
+- **Who.** A fresh model run per feature (run kind `acceptance`), a few features at a time. A tester gets its
+  feature's checks and a browser. It gets nothing from the builder: no session, no code, no workspace, no file or
+  shell tool, and no tool server but the browser's (`strictMcpConfig`).
+- **The browser** (`server/src/services/appBrowser.ts`) is the worker's Playwright Chromium, 360px wide, given as
+  ten tools: `open` a path, `read` the page as roles, names and text, `look` at a picture of it, `click`, `type`,
+  `choose`, `press` a key, `swipe`, `upload` sample pictures, and `resize`. The sample pictures are flat colors in
+  a fixed order (red, blue, green, yellow, purple), so the tester can tell which photo a screen shows.
+- **It reaches staging only.** Every request to another origin is refused, web sockets included, and `open` takes
+  a path. A link out of the app puts the tester back in the app and says so.
+- **What it answers.** For each check, `works`, `broken` or `could_not_check`, with a sentence of what it saw. A
+  verdict from a tester that never opened the app, a check it left out, and an answer out of form all count as
+  `could_not_check`.
+- **The gate.** Broken checks go back to the builder's session as a fix round, each with what the tester saw (up to
+  2 rounds, `MAX_ACCEPTANCE_ROUNDS` in `server/src/temporal/workflows.ts`). The fix goes through `runChecks` and
+  onto staging again, and every check is followed once more. An app's first build goes live only after this loop:
+  `deploy` is held on staging (`hold`) and `goLive` does the rest.
+- **What is left.** A check still broken after the last round is recorded and the build finishes: the version is
+  kept, with that feature not working yet. `could_not_check` never causes a fix round.
+- **Where results are.** `build_acceptance` holds each check's last result for the build, and every result is a
+  build event, such as `F1.1 is broken: Photo carousel. Tapped Next photo twice; the picture stayed red.`
+- **Soft.** No browser, a browser that does not open, or a tester that fails is said in an event and never fails
+  the build.
+
+Known limits:
+
+- The tester leaves what it made (accounts, records, pictures) in staging's database. Production has its own.
+- A tester can be wrong. A check it wrongly calls broken costs a fix round. One it wrongly calls working is what
+  #359 measures.
+- The owner sees results only as lines in the build log until #357.
+- The server image has no Chromium yet (#355), so on the cluster the tester's browser does not open and every check
+  is recorded as could not be checked.
+- On one run against a test page with a photo carousel, a tester took about 7 seconds and 2 cents for a feature
+  with two checks, and told a carousel whose Next button did nothing from one that worked.
 
 ## How built apps are made to work on a phone
 

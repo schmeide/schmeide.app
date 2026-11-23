@@ -58,6 +58,16 @@ const { planAcceptance } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "10 minutes",
 });
+// The tester follows every check in a browser, a few features at a time.
+const { checkAcceptance } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: "90 minutes",
+});
+// An app's first build is put live here, which can copy data and roll production out.
+const { goLive } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: DEPLOY_BUDGET,
+});
 const { reviewDesign } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "30 minutes",
@@ -67,47 +77,92 @@ const { reviewDesign } = proxyActivities<Activities>({
 export const MAX_FIX_ATTEMPTS = 3;
 // Fix rounds for the design review's serious problems; what is left after them is recorded.
 export const MAX_REVIEW_ROUNDS = 2;
+// Fix rounds for acceptance checks the tester found broken; what is left after them is recorded.
+export const MAX_ACCEPTANCE_ROUNDS = 2;
 
 // The design lead chooses the look (a no-op unless the design team is on), the acceptance checks
 // are written (a no-op with them off), the agent builds, then
 // the server's own checks run, with fix-up rounds while they fail. Once they pass, a build with a
 // design brief is reviewed against it, with fix rounds of its own; each round is checked again.
 // Each agent run is told its round, which names its Job on the cluster, and so are the checks after it.
-async function buildAndCheck(buildId: number): Promise<void> {
+// Where a build's builder is: the number of its last run, that run's session, and how many of its
+// runs fixed failed checks.
+type Run = { round: number; session: string; checkFixes: number };
+
+// The server's own checks, with fix-up rounds while they fail.
+async function passChecks(buildId: number, run: Run): Promise<void> {
+  for (;;) {
+    const checks = await runChecks(buildId, run.round);
+    if (checks.ok) return;
+    if (run.checkFixes === MAX_FIX_ATTEMPTS) {
+      // A plain Error would fail only the workflow task, which Temporal retries forever.
+      throw ApplicationFailure.nonRetryable(
+        `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
+      );
+    }
+    run.checkFixes++;
+    run.round++;
+    run.session = await runAgent({
+      buildId,
+      round: run.round,
+      resume: run.session,
+      feedback: checks.output,
+    });
+  }
+}
+
+async function buildAndCheck(buildId: number): Promise<Run> {
   // patched: a build already running when the design team was added replays without it.
   const design = patched("design-team") ? await planDesign(buildId) : null;
   // patched: a build already running when the acceptance checks were added replays without them.
   if (patched("acceptance-checks")) await planAcceptance(buildId);
-  let round = 0;
-  let session = await runAgent({ buildId, round });
-  let checkFixes = 0;
+  const run: Run = { round: 0, session: await runAgent({ buildId, round: 0 }), checkFixes: 0 };
   let reviewFixes = 0;
   for (;;) {
-    const checks = await runChecks(buildId, round);
-    if (!checks.ok) {
-      if (checkFixes === MAX_FIX_ATTEMPTS) {
-        // A plain Error would fail only the workflow task, which Temporal retries forever.
-        throw ApplicationFailure.nonRetryable(
-          `Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts:\n${checks.output}`
-        );
-      }
-      checkFixes++;
-      round++;
-      session = await runAgent({ buildId, round, resume: session, feedback: checks.output });
-      continue;
-    }
-    if (!design) return;
+    await passChecks(buildId, run);
+    if (!design) return run;
     const review = await reviewDesign({
       buildId,
       base: design.base,
       round: reviewFixes,
       last: reviewFixes === MAX_REVIEW_ROUNDS,
     });
-    if (review.ok) return;
+    if (review.ok) return run;
     reviewFixes++;
-    round++;
-    session = await runAgent({ buildId, round, resume: session, review: review.output });
+    run.round++;
+    run.session = await runAgent({
+      buildId,
+      round: run.round,
+      resume: run.session,
+      review: review.output,
+    });
   }
+}
+
+// The build's commit goes up on staging and a tester follows every acceptance check there (a
+// no-op with the checks off). What is broken goes back to the builder, whose fix is checked and
+// put on staging again, and every check is followed once more. Only then does an app's first
+// build go live.
+async function deployAndAccept(buildId: number, run: Run): Promise<void> {
+  for (let fixes = 0; ; fixes++) {
+    await deployWithBudget(buildId, { hold: true });
+    const accepted = await checkAcceptance({
+      buildId,
+      round: fixes,
+      last: fixes === MAX_ACCEPTANCE_ROUNDS,
+    });
+    if (accepted.ok) break;
+    run.round++;
+    run.session = await runAgent({
+      buildId,
+      round: run.round,
+      resume: run.session,
+      acceptance: accepted.output,
+    });
+    await passChecks(buildId, run);
+    await applySite(buildId);
+  }
+  await goLive(buildId);
 }
 
 export async function specWorkflow(projectId: number): Promise<void> {
@@ -127,10 +182,12 @@ export async function buildWorkflow(
       await release(buildId);
     } else {
       await prepareWorkspace(buildId);
-      if (kind !== "site") await buildAndCheck(buildId);
+      const run = kind === "site" ? undefined : await buildAndCheck(buildId);
       // patched: a build already running when this step was added replays without it.
       if (patched("apply-site")) await applySite(buildId);
-      await (patched("deploy-budget") ? deployWithBudget : deploy)(buildId);
+      // patched: a build already running when the tester was added deploys as it did.
+      if (run && patched("acceptance-gate")) await deployAndAccept(buildId, run);
+      else await (patched("deploy-budget") ? deployWithBudget : deploy)(buildId);
     }
     await finishBuild(buildId);
   } catch (error) {
