@@ -54,6 +54,7 @@ import {
   builds,
   databaseCopies,
   files,
+  buildAcceptance,
   projectAcceptance,
   projectDesigns,
   projectIcons,
@@ -150,20 +151,28 @@ import type { Summaries } from "../services/summaries.ts";
 import { savePictures, type Photograph } from "../services/pictures.ts";
 import {
   CHANGED_JSON_SCHEMA,
+  TESTED_JSON_SCHEMA,
   WRITTEN_JSON_SCHEMA,
   acceptancePrompt,
+  brokenFeedbackPrompt,
   changePrompt,
   countOf,
   liveChecks,
+  liveFeatures,
   parseChanged,
   parseWritten,
   planAfter,
   planFrom,
   plannedBy,
+  resultsOf,
   specHash,
+  testerPrompt,
   writerPrompt,
   type AcceptancePlan,
+  type Feature,
+  type Result,
 } from "../services/acceptance.ts";
+import { testerOptions, type OpenBrowser } from "../services/appBrowser.ts";
 
 export type { Query };
 
@@ -183,6 +192,9 @@ export type Config = {
   // The acceptance checks (#354, SCHMEIDE_ACCEPTANCE): before the builder runs, every feature in
   // the spec gets checks a person could follow in the running app. Absent is off.
   readonly acceptance?: boolean;
+  // Opens the tester's browser on a built app (services/appBrowser.ts), for following the
+  // acceptance checks on staging (#356); tests stand in for Chromium. Unset follows none.
+  readonly openBrowser?: OpenBrowser;
   // A command that stands in for Claude (SCHMEIDE_AGENT_CMD): `<cmd> spec` prints a spec and
   // `<cmd> build` edits the workspace, both with the prompt in AGENT_PROMPT. Used by `make e2e/fake`.
   readonly agentCmd?: string;
@@ -325,6 +337,17 @@ export const AGENT_ALLOWED_TOOLS = [
 
 // The design reviewer reads; it changes nothing and runs nothing.
 const REVIEWER_TOOLS = ["Read", "Glob", "Grep"];
+
+// How many features are tested at once, each by its own tester in its own browser.
+const TESTERS_AT_ONCE = 3;
+// A tester's turns: enough to sign up and make what a check needs, then follow it.
+const testerTurns = (checks: number) => 30 + 25 * checks;
+
+const VERDICT_WORDS = {
+  works: "works",
+  broken: "is broken",
+  could_not_check: "could not be checked",
+} as const;
 
 // The same skill names appear in server/builder-plugin/skills/.
 const INTERFACE_RULES = `Interface:
@@ -1153,6 +1176,18 @@ export const createActivities = (
       const why = cause instanceof Error ? cause.message : String(cause);
       await event(buildId, "step", `Could not take a picture of this version: ${why}`);
     }
+  };
+
+  // What follows staging answering: an app with nothing live yet is put live at once, and the
+  // version's pictures are taken.
+  const finishDeploy = async (project: Project, buildId: number, commit: string, url: string) => {
+    const [live] = await db
+      .select({ id: builds.id })
+      .from(builds)
+      .where(and(eq(builds.projectId, project.id), eq(builds.release, "promoted")))
+      .limit(1);
+    if (!live) await promote(project, commit, buildId);
+    await takePictures(buildId, url);
   };
 
   // Makes production run `commit` and answers its address. If it cannot start, production goes
@@ -2325,7 +2360,8 @@ export const createActivities = (
           prompt,
           cwd: config.dataDir,
           schema,
-          options: { tools: [], maxTurns: 3 },
+          // strictMcpConfig: no tool server from this machine's or the login's own settings.
+          options: { tools: [], maxTurns: 3, strictMcpConfig: true },
         });
       // A change to an app that has checks adds its own, once: a retried build keeps them.
       if (build.kind === "change" && kept) {
@@ -2453,6 +2489,8 @@ export const createActivities = (
       feedback?: string;
       // The design review's problems, as reviewFeedbackPrompt wrote them.
       review?: string;
+      // The acceptance checks the tester found broken, as brokenFeedbackPrompt wrote them.
+      acceptance?: string;
     }): Promise<string> {
       const { build, project } = await stepOfBuild(input.buildId);
       const retried = Context.current().info.attempt > 1;
@@ -2473,9 +2511,11 @@ export const createActivities = (
           project.shapes,
           checks && acceptancePrompt(checks)
         );
-      // The design review's problems, or the failed checks' output, for a fix round.
+      // The design review's problems, the broken acceptance checks, or the failed checks' output,
+      // for a fix round.
       const fix =
         input.review ??
+        input.acceptance ??
         (input.feedback === undefined ? undefined : checksFeedbackPrompt(input.feedback));
       const prompt =
         (retried ? `${INTERRUPTED_NOTE}\n\n` : "") +
@@ -2489,9 +2529,11 @@ export const createActivities = (
           ? "The server restarted; the agent picks up where it stopped"
           : input.review !== undefined
             ? "Agent is fixing design problems"
-            : input.feedback !== undefined
-              ? "Agent is fixing failed checks"
-              : "Agent is building the app"
+            : input.acceptance !== undefined
+              ? "Agent is fixing features that do not work"
+              : input.feedback !== undefined
+                ? "Agent is fixing failed checks"
+                : "Agent is building the app"
       );
       if (config.agentCmd) {
         await runAgentCmd(project, "build", prompt, workspaceOf(project), input.buildId);
@@ -2641,7 +2683,9 @@ export const createActivities = (
     // Deploys the build's commit to staging, from the workspace. Production changes only when a
     // person promotes, except for an app's first build: with nothing live to protect, it is put
     // live at once, as every build was before staging existed.
-    async deploy(buildId: number): Promise<void> {
+    // With `hold`, that is all it does: the acceptance checks are followed on staging first, and
+    // `goLive` does the rest.
+    async deploy(buildId: number, options: { readonly hold?: boolean } = {}): Promise<void> {
       const { project } = await stepOfBuild(buildId);
       // On the cluster the build's commit is staging's head, which the checks and applySite left.
       const { runner } = config;
@@ -2658,17 +2702,140 @@ export const createActivities = (
       const url = await up(project, "staging", buildId, commit);
       await db
         .update(projects)
-        .set({ stagingUrl: url, stagingCommit: commit, status: "live" })
+        .set({ stagingUrl: url, stagingCommit: commit, ...(!options.hold && { status: "live" }) })
         .where(eq(projects.id, project.id));
       await db.update(builds).set({ commit }).where(eq(builds.id, buildId));
       await event(buildId, "deploy", `The version being worked on is at ${url}`);
-      const [live] = await db
-        .select({ id: builds.id })
-        .from(builds)
-        .where(and(eq(builds.projectId, project.id), eq(builds.release, "promoted")))
-        .limit(1);
-      if (!live) await promote(project, commit, buildId);
-      await takePictures(buildId, url);
+      if (!options.hold) await finishDeploy(project, buildId, commit, url);
+    },
+
+    // The rest of a deploy that was held for the acceptance checks: the app counts as live, an
+    // app's first build is put live, and the version's pictures are taken.
+    async goLive(buildId: number): Promise<void> {
+      const { project } = await stepOfBuild(buildId);
+      const { stagingUrl } = project;
+      if (!stagingUrl)
+        throw ApplicationFailure.nonRetryable("Nothing is on staging to finish deploying");
+      await db.update(projects).set({ status: "live" }).where(eq(projects.id, project.id));
+      await finishDeploy(project, buildId, assertCommit(project.stagingCommit), stagingUrl);
+    },
+
+    // The tester (#356): once the build's commit is up on staging, a fresh run follows every
+    // acceptance check in a browser on it, one feature at a time, and each check's result is
+    // kept. Not ok means a fix round for the broken ones; on the `last` round they are recorded
+    // and the build goes on. Soft everywhere else: no checks, no browser, or a tester with no
+    // usable answer never fails a build.
+    async checkAcceptance(input: {
+      buildId: number;
+      round: number;
+      last: boolean;
+    }): Promise<{ ok: boolean; output: string }> {
+      const passed = { ok: true, output: "" };
+      const { buildId } = input;
+      const { project } = await stepOfBuild(buildId);
+      const plan = await checksFor(project.id);
+      if (!plan) return passed;
+      const { openBrowser } = config;
+      const { stagingUrl } = project;
+      if (!openBrowser || !stagingUrl) {
+        await event(
+          buildId,
+          "check",
+          "Acceptance: there is no browser here, so the features were not checked in the running app"
+        );
+        return passed;
+      }
+      const features = liveFeatures(plan);
+      await event(
+        buildId,
+        "check",
+        `Acceptance: a tester is following the ${countOf(plan)} in the running app`
+      );
+      const test = async (feature: Feature): Promise<readonly Result[]> => {
+        const results = await (async () => {
+          const browser = await openBrowser(stagingUrl).catch(async (cause: unknown) => {
+            if (Context.current().cancellationSignal.aborted) throw cause;
+            await log(buildId, `The tester's browser did not open: ${String(cause)}`);
+            return undefined;
+          });
+          if (!browser) return resultsOf(feature, undefined, 0);
+          try {
+            return resultsOf(
+              feature,
+              await designRun(project, buildId, {
+                kind: "acceptance",
+                prompt: testerPrompt(feature),
+                cwd: config.dataDir,
+                schema: TESTED_JSON_SCHEMA,
+                options: {
+                  ...testerOptions(browser),
+                  maxTurns: testerTurns(feature.checks.length),
+                },
+              }),
+              browser.opened()
+            );
+          } finally {
+            await browser.close().catch(() => undefined);
+          }
+        })();
+        for (const { id, verdict, saw } of results) {
+          await event(
+            buildId,
+            "check",
+            `${id} ${VERDICT_WORDS[verdict]}: ${feature.name}${verdict === "works" ? "" : `. ${saw}`}`
+          );
+        }
+        return results;
+      };
+      // A few features at a time, each with a tester and a browser of its own.
+      const waiting = [...features];
+      const results = (
+        await Promise.all(
+          Array.from({ length: Math.min(TESTERS_AT_ONCE, waiting.length) }, async () => {
+            const done: Result[] = [];
+            for (let next = waiting.shift(); next; next = waiting.shift())
+              done.push(...(await test(next)));
+            return done;
+          })
+        )
+      ).flat();
+      await db.transaction(async (tx) => {
+        await tx.delete(buildAcceptance).where(eq(buildAcceptance.buildId, buildId));
+        await tx.insert(buildAcceptance).values(
+          results.map(({ id, feature, verdict, saw }) => ({
+            buildId,
+            checkId: id,
+            feature,
+            verdict,
+            saw,
+            round: input.round,
+          }))
+        );
+      });
+      const broken = results.filter(({ verdict }) => verdict === "broken");
+      const unchecked = results.filter(({ verdict }) => verdict === "could_not_check").length;
+      const also = unchecked > 0 ? `, and ${unchecked} could not be checked` : "";
+      const of = `${broken.length} of ${results.length} checks`;
+      if (broken.length === 0) {
+        await event(
+          buildId,
+          "check",
+          unchecked === 0
+            ? `Acceptance: all ${results.length} checks work`
+            : `Acceptance: nothing is broken${also}`
+        );
+        return passed;
+      }
+      if (input.last) {
+        await event(
+          buildId,
+          "check",
+          `Acceptance: ${of} are still broken after ${input.round} fix ${input.round === 1 ? "round" : "rounds"}${also}; this version is kept, with those features not working yet`
+        );
+        return passed;
+      }
+      await event(buildId, "check", `Acceptance: ${of} are broken${also}`);
+      return { ok: false, output: brokenFeedbackPrompt(plan, broken) };
     },
 
     // A `promote` build makes production run its commit; a `discard` build returns staging to its

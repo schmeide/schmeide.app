@@ -20,7 +20,12 @@ import { builds, projects } from "../../db/schema.ts";
 import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import { createProject, transition } from "../../services/projects.ts";
 import { GIT_CONFIG, INTERRUPTED_NOTE, createActivities, gitConfigFile } from "../activities.ts";
-import { MAX_FIX_ATTEMPTS, MAX_REVIEW_ROUNDS, buildWorkflow } from "../workflows.ts";
+import {
+  MAX_ACCEPTANCE_ROUNDS,
+  MAX_FIX_ATTEMPTS,
+  MAX_REVIEW_ROUNDS,
+  buildWorkflow,
+} from "../workflows.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
@@ -45,10 +50,12 @@ type Options = {
   // Turns the design team on, with a reviewer that finds a serious problem on its first review
   // only, or on every one.
   readonly review?: "once" | "never";
+  // A tester that finds a check broken the first time it follows them only, or every time.
+  readonly accept?: "once" | "never";
 };
 
 const setup = (
-  { fixOnRun, interruptFirstAgentRun, cancelDuringPrepare, review }: Options,
+  { fixOnRun, interruptFirstAgentRun, cancelDuringPrepare, review, accept }: Options,
   taskQueue: string
 ) => {
   const root = mkdtempSync(join(tmpdir(), "schmeide-wf-"));
@@ -115,17 +122,44 @@ if [ $n -ge ${fixOnRun} ]; then rm -f broken; else touch broken; fi
     if (cancelDuringPrepare) await new Promise((resolve) => setTimeout(resolve, 2000));
     return activities.prepareWorkspace(buildId);
   };
-  // Deploying needs Docker and a real app; only its effect on the project is kept.
-  const deploy = async (buildId: number) => {
+  // Deploying needs Docker and a real app; only its effect on the project is kept. A deploy held
+  // for the acceptance checks notes that it ran, and going live does the rest.
+  const live = async (buildId: number) => {
     const { projectId } = await getBuild(db, buildId);
     await db.update(projects).set({ status: "live" }).where(eq(projects.id, projectId));
+  };
+  const deploy: typeof activities.deploy = async (buildId, options) => {
+    if (options?.hold) await appendEvent(db, buildId, "deploy", "On staging");
+    else await live(buildId);
+  };
+  const goLive: typeof activities.goLive = async (buildId) => {
+    await appendEvent(db, buildId, "deploy", "Went live");
+    await live(buildId);
+  };
+  // The tester needs a browser and a running app; it only says what `accept` has it find.
+  let followed = 0;
+  const checkAcceptance: typeof activities.checkAcceptance = async ({ buildId, last }) => {
+    followed++;
+    const broken = accept === "never" || (accept === "once" && followed === 1);
+    await appendEvent(db, buildId, "check", broken ? "Tester: F1.1 is broken" : "Tester: all work");
+    return broken && !last
+      ? { ok: false, output: "F1.1 is broken: the picture stayed red." }
+      : { ok: true, output: "" };
   };
   // Releasing needs Docker too; it only notes that it ran.
   const release = async (buildId: number) => {
     await appendEvent(db, buildId, "deploy", "Released");
   };
   return {
-    activities: { ...activities, prepareWorkspace, runAgent, deploy, release },
+    activities: {
+      ...activities,
+      prepareWorkspace,
+      runAgent,
+      deploy,
+      goLive,
+      checkAcceptance,
+      release,
+    },
     runPrompts,
   };
 };
@@ -182,6 +216,61 @@ const runBuild = async (options: Options) => {
     events,
   };
 };
+
+describe("buildWorkflow acceptance gate", () => {
+  it("puts a build on staging, has its features checked, and only then goes live", async () => {
+    const { outcome, prompts, events } = await runBuild({ fixOnRun: 1 });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(1);
+    expect(events.filter((message) => /^(On staging|Tester|Went live)/.test(message))).toEqual([
+      "On staging",
+      "Tester: all work",
+      "Went live",
+    ]);
+  }, 120_000);
+
+  it("sends a broken check back to the builder, checks its fix, and follows the checks again", async () => {
+    const { outcome, build, prompts, events } = await runBuild({ fixOnRun: 1, accept: "once" });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("F1.1 is broken: the picture stayed red.");
+    expect(
+      events.filter((message) =>
+        /^(On staging|Tester|Went live|Agent is fixing|make build passed)/.test(message)
+      )
+    ).toEqual([
+      "make build passed",
+      "On staging",
+      "Tester: F1.1 is broken",
+      "Agent is fixing features that do not work",
+      "make build passed",
+      "On staging",
+      "Tester: all work",
+      "Went live",
+    ]);
+    expect(build.status).toBe("passed");
+  }, 120_000);
+
+  it(`goes live after ${MAX_ACCEPTANCE_ROUNDS} fix rounds with what is still broken recorded`, async () => {
+    const { outcome, prompts, events } = await runBuild({ fixOnRun: 1, accept: "never" });
+
+    expect(outcome).toBe("passed");
+    expect(prompts).toHaveLength(1 + MAX_ACCEPTANCE_ROUNDS);
+    expect(events.filter((message) => message === "Tester: F1.1 is broken")).toHaveLength(
+      1 + MAX_ACCEPTANCE_ROUNDS
+    );
+    expect(events.filter((message) => message === "Went live")).toHaveLength(1);
+  }, 120_000);
+
+  it("deploys a change of page title or icon as before, with no tester", async () => {
+    const { outcome, events } = await runBuild({ fixOnRun: 1, kind: "site" });
+
+    expect(outcome).toBe("passed");
+    expect(events.filter((message) => /^(On staging|Tester|Went live)/.test(message))).toEqual([]);
+  }, 120_000);
+});
 
 describe("buildWorkflow check and fix loop", () => {
   it(`feeds failing check output back to the agent and fails after ${MAX_FIX_ATTEMPTS} rounds`, async () => {
