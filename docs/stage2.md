@@ -437,13 +437,14 @@ repository's `size`. The API gets a service account with only `get`/`list` on `p
 
 ### Who holds what
 
-| Component  | Holds                                                                | Never holds                 |
-| ---------- | -------------------------------------------------------------------- | --------------------------- |
-| API        | platform DB login, OAuth secrets, its model key                      | Kubernetes token, build key |
-| Worker     | RBAC, Forgejo token, ACR run role, DB provisioner, summary model key | runs no agent-written code  |
-| Agent pod  | builds model key, one repo's deploy key                              | anything of the server's    |
-| Checks pod | one repo's read-only deploy key                                      | a model key                 |
-| App pod    | its own `DATABASE_URL`                                               | internet egress, a token    |
+| Component    | Holds                                                                | Never holds                 |
+| ------------ | -------------------------------------------------------------------- | --------------------------- |
+| API          | platform DB login, OAuth secrets, its model key                      | Kubernetes token, build key |
+| Worker       | RBAC, Forgejo token, ACR run role, DB provisioner, summary model key | runs no agent-written code  |
+| Agent pod    | builds model key, one repo's deploy key                              | anything of the server's    |
+| Checks pod   | one repo's read-only deploy key                                      | a model key                 |
+| Journeys pod | one repo's read-only deploy key, the journeys to try                 | a model key, a database     |
+| App pod      | its own `DATABASE_URL`                                               | internet egress, a token    |
 
 ### Worker RBAC without cluster-wide power
 

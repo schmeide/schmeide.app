@@ -765,14 +765,22 @@ A check the tester saw work is kept in the app as a Playwright test, `journeys/<
   failed because the change altered its feature is rewritten: by the tester, never by the builder. A check it found
   broken keeps its old journey. A retired check's journey is deleted. They are committed as one commit, and
   staging's commit and the build's commit move to it: the app is the same, and the version holds its journeys.
+- **On the cluster** (`SCHMEIDE_RUNNER=kubernetes`, #372) the worker runs no app code, so the journeys run in a
+  Job like the checks Job (`kube/jobs.ts`): `journeys-<build>-<round>` for the kept ones and
+  `new-journeys-<build>-<round>` for the ones just written, which the worker hands it in the run's Secret. The pod
+  clones staging's commit with a read-only deploy key, runs `make journeys` against staging with the server image's
+  Chromium (`sandbox/runJourneys.ts`), and prints one last line naming the journeys that passed, which the worker
+  reads from its log. A pod that fails passes none. The worker then commits the ones it keeps on a scratch clone of
+  staging and pushes, as it does the page title, and builds that commit's images, because a copy runs its commit's
+  images and that commit is the one that goes live.
 - **Only the server writes them.** `runChecks` refuses a build that changed anything under `journeys/` since the
   build started (`journeyProblems`, and the `journeys` target in a checks pod), and tells the builder how to undo it.
 
 Known limits:
 
-- On the cluster (`SCHMEIDE_RUNNER=kubernetes`) no journeys are written or run: running them means running the app's
-  code, which only a pod may do there, and that needs a journeys Job with Chromium. The tester follows every check
-  there, as before. The refusal to change `journeys/` does run in the checks pod.
+- On the cluster the journeys pod reaches staging by its public address, from the builds namespace, whose policy
+  allows HTTPS to public addresses but not the cluster's own: whether that address is reached, and egress to it
+  alone, needs schmeide/iac#57. Keeping journeys there also builds the images once more, for their commit.
 - `make journeys` is the app's own target, which a builder could change. A run that reports nothing counts as every
   journey failing, so the worst it does is send checks back to the tester.
 - A journey replays the steps of the checks before it in the same feature, so a change to one can fail another's

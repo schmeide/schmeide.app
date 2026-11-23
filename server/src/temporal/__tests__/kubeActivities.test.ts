@@ -12,14 +12,27 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { MockActivityEnvironment } from "@temporalio/testing";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb } from "../../db/client.ts";
-import { buildDependencies, buildFiles, builds, files, projects, usage } from "../../db/schema.ts";
+import {
+  buildAcceptance,
+  buildDependencies,
+  buildFiles,
+  builds,
+  files,
+  projectAcceptance,
+  projects,
+  usage,
+} from "../../db/schema.ts";
 import type { Cluster, Job, Kube, LogLine, Pod } from "../../kube/client.ts";
 import { KubeError } from "../../kube/client.ts";
+import { liveChecks, planFrom, specHash } from "../../services/acceptance.ts";
 import { createAcr, type Acr } from "../../services/acr.ts";
+import type { AppBrowser, Step } from "../../services/appBrowser.ts";
+import { JOURNEY_PASSED, checkHash } from "../../services/journeys.ts";
 import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import type { Forgejo } from "../../services/forgejo.ts";
 import type { AppDatabases } from "../../services/appDatabases.ts";
@@ -35,6 +48,7 @@ import {
   type Config,
   type Hosting,
   type KubeRunner,
+  type Query,
 } from "../activities.ts";
 import { DEMO_TENANT_ID } from "../../__tests__/testAuth.ts";
 
@@ -47,6 +61,9 @@ type Script = { readonly lines: readonly (string | LogLine)[]; readonly exit: nu
 const fakeKube = (scripts: Readonly<Record<string, Script>>) => {
   const jobs = new Map<string, object>();
   const secrets = new Map<string, Record<string, string>>();
+  const madeJobs = new Map<string, object>();
+  // Every Secret made, by name, after its Job deletes it too.
+  const made = new Map<string, Record<string, string>>();
   const deleted: string[] = [];
   const kube = {
     namespace: "schmeide-builds",
@@ -54,6 +71,7 @@ const fakeKube = (scripts: Readonly<Record<string, Script>>) => {
       const { metadata } = job as Job;
       if (jobs.has(metadata.name)) throw new KubeError(409, "exists");
       jobs.set(metadata.name, job);
+      madeJobs.set(metadata.name, job);
       return { metadata: { ...metadata, uid: `uid-${metadata.name}` } };
     },
     getJob: async (name: string) => (jobs.get(name) as Job | undefined) ?? undefined,
@@ -70,6 +88,7 @@ const fakeKube = (scripts: Readonly<Record<string, Script>>) => {
     createSecret: async (secret: object) => {
       const { metadata, stringData } = secret as Job & { stringData: Record<string, string> };
       secrets.set(metadata.name, stringData);
+      made.set(metadata.name, stringData);
     },
     secretExists: async (name: string) => secrets.has(name),
     deleteSecret: async (name: string) => {
@@ -77,7 +96,7 @@ const fakeKube = (scripts: Readonly<Record<string, Script>>) => {
     },
     listPods: async (selector: string): Promise<readonly Pod[]> => {
       const name = selector.replace("job-name=", "");
-      const container = name.split("-")[0];
+      const container = name.replace(/-\d+-\d+$/, "");
       return [
         {
           metadata: { name: `${name}-pod` },
@@ -95,7 +114,7 @@ const fakeKube = (scripts: Readonly<Record<string, Script>>) => {
     },
     canI: async () => true,
   } satisfies Kube;
-  return { kube, jobs, secrets, deleted };
+  return { kube, jobs, secrets, made, madeJobs, deleted };
 };
 
 const git = (cwd: string, ...args: string[]) =>
@@ -1225,6 +1244,270 @@ describe("kubernetes mode", () => {
         `ingresses/app-${project.id}-staging`,
         `secrets/app-${project.id}-staging`,
       ])
+    );
+  });
+});
+
+describe("the journeys on the cluster (#372)", () => {
+  const PLAN = planFrom(
+    {
+      features: [
+        {
+          name: "Photo carousel",
+          checks: [
+            {
+              given: "A profile with three photos.",
+              steps: ["Open the profile.", "Tap Next photo."],
+              expect: "The second photo shows.",
+            },
+            {
+              given: "A profile with one photo.",
+              steps: ["Open the profile."],
+              expect: "No Next photo button shows.",
+            },
+          ],
+        },
+      ],
+    },
+    1
+  );
+  const STAGING = "https://h1.apps.example";
+  const SAW: Readonly<Record<string, string>> = { "F1.1": "Photo 2 of 3", "F1.2": "Photo 1 of 1" };
+
+  // A tester that starts each check it is given, sees what SAW says, and finds it works, through
+  // the tools of its run's own browser, as the SDK would call them.
+  const testerQuery = (calls: string[]): Query =>
+    ((params: { prompt: string; options: Options }) => {
+      calls.push(params.prompt);
+      return (async function* (): AsyncGenerator<SDKMessage> {
+        const server = Object.values(params.options.mcpServers ?? {})[0] as unknown as {
+          instance: { _registeredTools: Record<string, { handler: (a: unknown) => unknown }> };
+        };
+        const use = (name: string, args: unknown) =>
+          server.instance._registeredTools[name].handler(args);
+        const ids = [...params.prompt.matchAll(/^- (F\d+\.\d+)$/gm)].map(([, id]) => id);
+        await use("open", { path: "/" });
+        for (const id of ids) {
+          await use("start", { check: id });
+          await use("see", { name: SAW[id] });
+        }
+        const answer = { results: ids.map((id) => ({ id, verdict: "works", saw: "As written." })) };
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          num_turns: 1,
+          total_cost_usd: 0.01,
+          duration_ms: 100,
+          session_id: "tester",
+          result: JSON.stringify(answer),
+          structured_output: answer,
+          permission_denials: [],
+          modelUsage: {},
+        } as unknown as SDKMessage;
+      })();
+    }) as unknown as Query;
+
+  const openBrowser = async (): Promise<AppBrowser> => {
+    const steps: Step[] = [];
+    let opened = 0;
+    return {
+      open: async (path: string) => {
+        opened++;
+        steps.push({ do: "open", path });
+        return "";
+      },
+      start: async (check: string) => {
+        steps.push({ do: "start", check });
+        return "";
+      },
+      see: async (target: { name: string }) => {
+        steps.push({ do: "see", target, gone: false });
+        return "";
+      },
+      steps: () => steps,
+      opened: () => opened,
+      close: async () => undefined,
+    } as Partial<AppBrowser> as AppBrowser;
+  };
+
+  // A project whose staging has a Makefile that can run journeys, and `kept` in journeys/; staging
+  // is up at STAGING on that commit, with PLAN's checks.
+  const journeying = async (
+    scripts: (buildId: number) => Readonly<Record<string, Script>>,
+    kept: Readonly<Record<string, string>> = {}
+  ) => {
+    const { build, project } = await newBuild();
+    const scripted = setup(scripts(build.id));
+    const calls: string[] = [];
+    const activities = createActivities(
+      deps,
+      { ...scripted.config, acceptance: true, openBrowser },
+      testerQuery(calls)
+    );
+    await new MockActivityEnvironment().run(activities.prepareWorkspace, build.id);
+    const repo = scripted.forgejo.bare(`t${project.tenantId}`, project.slug);
+    const clone = join(scripted.root, `clone-${randomUUID()}`);
+    git(scripted.root, "clone", "-q", "--branch", "staging", repo, clone);
+    writeFileSync(join(clone, "Makefile"), ".PHONY: journeys\njourneys:\n\t@exit 1\n");
+    mkdirSync(join(clone, "journeys"), { recursive: true });
+    for (const [file, text] of Object.entries(kept))
+      writeFileSync(join(clone, "journeys", file), text);
+    git(clone, "add", "-A");
+    git(clone, "commit", "-q", "-m", "build the app");
+    git(clone, "push", "-q", "origin", "HEAD:refs/heads/staging");
+    const head = git(clone, "rev-parse", "HEAD");
+    await db
+      .update(projects)
+      .set({ stagingUrl: STAGING, stagingCommit: head })
+      .where(eq(projects.id, project.id));
+    await db.update(builds).set({ commit: head }).where(eq(builds.id, build.id));
+    await db
+      .insert(projectAcceptance)
+      .values({ projectId: project.id, specHash: specHash(""), plan: PLAN });
+    const readOnly: boolean[] = [];
+    const createSecret = scripted.kube.kube.createSecret;
+    scripted.kube.kube.createSecret = async (secret) => {
+      readOnly.push(...scripted.forgejo.keys.map((key) => key.readOnly));
+      return createSecret(secret);
+    };
+    const check = () =>
+      new MockActivityEnvironment().run(activities.checkAcceptance, {
+        buildId: build.id,
+        round: 0,
+        last: false,
+      });
+    const envOf = (name: string) => {
+      const job = scripted.kube.madeJobs.get(name) as
+        | {
+            spec: {
+              template: {
+                spec: { containers: { env: { name: string; value?: string }[] }[] };
+              };
+            };
+          }
+        | undefined;
+      return Object.fromEntries(
+        (job?.spec.template.spec.containers[0].env ?? []).map(({ name: key, value }) => [
+          key,
+          value,
+        ])
+      );
+    };
+    return { ...scripted, project, build, repo, head, calls, check, envOf, readOnly };
+  };
+
+  it("runs each new journey once in a pod, and pushes the ones that passed to staging", async () => {
+    const { project, build, repo, head, check, kube, envOf, readOnly, hosting } = await journeying(
+      (id) => ({
+        [`new-journeys-${id}-0`]: {
+          lines: ["Running 2 tests", "::schmeide:: journeys passed F1.1.spec.ts"],
+          exit: 0,
+        },
+      })
+    );
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    const name = `new-journeys-${build.id}-0`;
+    expect(envOf(name)).toMatchObject({
+      SCHMEIDE_COMMIT: head,
+      SCHMEIDE_BASE_URL: STAGING,
+      SCHMEIDE_JOURNEYS: "F1.1.spec.ts F1.2.spec.ts",
+    });
+    const written = JSON.parse(kube.made.get(name)?.journeys ?? "{}") as Record<string, string>;
+    expect(Object.keys(written)).toEqual(["F1.1.spec.ts", "F1.2.spec.ts"]);
+    expect(written["F1.1.spec.ts"]).toContain(`// check F1.1 ${checkHash(liveChecks(PLAN)[0])}`);
+    expect(readOnly).toEqual([true]);
+    expect(kube.deleted).toEqual([name]);
+    // Only the journey that passed is kept, in a commit on staging that has images of its own.
+    const commit = git(repo, "rev-parse", "staging");
+    expect(git(repo, "rev-parse", "staging~1")).toBe(head);
+    expect(git(repo, "show", "--name-only", "--format=%s", "staging").split("\n")).toEqual([
+      "keep the journeys of the checks that work",
+      "",
+      "journeys/F1.1.spec.ts",
+    ]);
+    expect(git(repo, "show", "staging:journeys/F1.1.spec.ts")).toBe(
+      written["F1.1.spec.ts"].trimEnd()
+    );
+    expect(hosting.builds.map(({ yaml }) => yaml).join("\n")).toContain(`:${commit} `);
+    expect((await getBuild(db, build.id)).commit).toBe(commit);
+    const [after] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(after.stagingCommit).toBe(commit);
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Acceptance: kept 1 journey of what the tester saw work, to run on every change",
+        "Acceptance: 1 new journey did not pass on its own (F1.2), so the tester follows that check again next time",
+      ])
+    );
+  });
+
+  it("runs the kept journeys in a pod first, and the tester follows only the checks without one that passes", async () => {
+    const [first, second] = liveChecks(PLAN);
+    const { build, check, calls, envOf, kube } = await journeying(
+      (id) => ({
+        [`journeys-${id}-0`]: {
+          lines: ["::schmeide:: journeys passed F1.1.spec.ts"],
+          exit: 0,
+        },
+        [`new-journeys-${id}-0`]: { lines: ["::schmeide:: journeys passed"], exit: 0 },
+      }),
+      {
+        "F1.1.spec.ts": `// check F1.1 ${checkHash(first)}\n`,
+        "F1.2.spec.ts": `// check F1.2 ${checkHash(second)}\n`,
+      }
+    );
+
+    await check();
+
+    expect(envOf(`journeys-${build.id}-0`).SCHMEIDE_JOURNEYS).toBe("F1.1.spec.ts F1.2.spec.ts");
+    expect(kube.made.get(`journeys-${build.id}-0`)?.journeys).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("- F1.2");
+    expect(calls[0]).not.toContain("- F1.1");
+    expect(envOf(`new-journeys-${build.id}-0`).SCHMEIDE_JOURNEYS).toBe("F1.2.spec.ts");
+    expect(
+      (
+        await db
+          .select()
+          .from(buildAcceptance)
+          .where(eq(buildAcceptance.buildId, build.id))
+          .orderBy(buildAcceptance.checkId)
+      ).map(({ checkId, saw }) => [checkId, saw])
+    ).toEqual([
+      ["F1.1", JOURNEY_PASSED],
+      ["F1.2", "As written."],
+    ]);
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        "Acceptance: running the 2 journeys kept from earlier versions",
+        "Acceptance: 1 of 2 journeys passed",
+      ])
+    );
+  });
+
+  it("counts a journeys pod that fails as passing none, and the tester follows every check", async () => {
+    const [first] = liveChecks(PLAN);
+    const { repo, head, check, calls } = await journeying(
+      (id) => ({
+        [`journeys-${id}-0`]: {
+          lines: ["::schmeide:: journeys passed F1.1.spec.ts", "Killed"],
+          exit: 137,
+        },
+        [`new-journeys-${id}-0`]: { lines: [], exit: 1 },
+      }),
+      { "F1.1.spec.ts": `// check F1.1 ${checkHash(first)}\n` }
+    );
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect(calls[0]).toContain("- F1.1");
+    expect(calls[0]).toContain("- F1.2");
+    // No new journey passed, so F1.1's goes too, as on the host: the tester follows it next time.
+    expect(git(repo, "rev-parse", "staging~1")).toBe(head);
+    expect(git(repo, "show", "--name-status", "--format=", "staging")).toBe(
+      "D\tjourneys/F1.1.spec.ts"
     );
   });
 });

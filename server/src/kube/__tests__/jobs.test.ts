@@ -4,7 +4,9 @@ import {
   buildSelector,
   CHECK_TARGETS,
   checksMarker,
+  journeysMarker,
   parseChecksMarker,
+  parseJourneysMarker,
   parseRunName,
   runJob,
   runName,
@@ -59,6 +61,13 @@ describe("run names", () => {
     expect(runName("agent", 12, 0)).toBe("agent-12-0");
     expect(runName("checks", 12, 3)).toBe("checks-12-3");
     expect(parseRunName("checks-12-3")).toEqual({ kind: "checks", buildId: 12, round: 3 });
+    expect(runName("new-journeys", 12, 1)).toBe("new-journeys-12-1");
+    expect(parseRunName("new-journeys-12-1")).toEqual({
+      kind: "new-journeys",
+      buildId: 12,
+      round: 1,
+    });
+    expect(parseRunName("journeys-12-0")).toEqual({ kind: "journeys", buildId: 12, round: 0 });
     expect(parseRunName("something-else")).toBeUndefined();
     expect(buildSelector(12)).toBe("schmeide.app/build=12");
   });
@@ -165,8 +174,45 @@ describe("runJob", () => {
     expect(commandOf(false)).toContain("StrictHostKeyChecking=accept-new");
   });
 
+  it("runs the journeys on a clone of the exact commit, with no database, no model key, and the image's Chromium", () => {
+    for (const kind of ["journeys", "new-journeys"] as const) {
+      const job = runJob({
+        ...agent,
+        kind,
+        env: {
+          SCHMEIDE_COMMIT: "a".repeat(40),
+          SCHMEIDE_BASE_URL: "https://h1.apps.example",
+          SCHMEIDE_JOURNEYS: "F1.1.spec.ts",
+        },
+      }) as JobShape;
+      const pod = job.spec.template.spec;
+      const [container] = pod.containers;
+
+      expect(job.metadata.name).toBe(`${kind}-12-0`);
+      expect(job.metadata.labels["schmeide.app/run"]).toBe(kind);
+      expect(container.name).toBe(kind);
+      expect(job.spec.activeDeadlineSeconds).toBe(1200);
+      expect(pod.initContainers).toEqual([]);
+      expect(pod.volumes.map(({ name }) => name)).toEqual(["home", "work", "tmp", "run"]);
+      const env = envOf(container);
+      expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.TEST_DATABASE_URL).toBeUndefined();
+      expect(env).toMatchObject({
+        SCHMEIDE_COMMIT: "a".repeat(40),
+        SCHMEIDE_BASE_URL: "https://h1.apps.example",
+        SCHMEIDE_JOURNEYS: "F1.1.spec.ts",
+      });
+      expect(container.securityContext).toMatchObject({ readOnlyRootFilesystem: true });
+      const script = container.command.join(" ");
+      expect(script).toContain('git checkout -q --detach "$SCHMEIDE_COMMIT"');
+      // Playwright writes a lock and links where its browsers are: a folder in the pod's home.
+      expect(script).toContain("export PLAYWRIGHT_BROWSERS_PATH=/home/build/browsers");
+      expect(script).toContain("exec node /app/server/src/sandbox/runJourneys.ts");
+    }
+  });
+
   it("hands sh scripts it can parse", () => {
-    for (const kind of ["agent", "checks"] as const) {
+    for (const kind of ["agent", "checks", "journeys", "new-journeys"] as const) {
       const [, flag, script] = (runJob({ ...agent, kind }) as JobShape).spec.template.spec
         .containers[0].command;
       expect(() => execFileSync("sh", ["-n", flag, script])).not.toThrow();
@@ -186,6 +232,19 @@ describe("runSecret", () => {
       },
       stringData: { prompt: "build it" },
     });
+  });
+});
+
+describe("journeys markers", () => {
+  it("reads back the journeys that passed, and only names a journey can have", () => {
+    expect(parseJourneysMarker(journeysMarker(["F1.1.spec.ts", "F2.3.spec.ts"]))).toEqual([
+      "F1.1.spec.ts",
+      "F2.3.spec.ts",
+    ]);
+    expect(parseJourneysMarker(journeysMarker([]))).toEqual([]);
+    expect(parseJourneysMarker("::schmeide:: journeys passed ../etc/passwd")).toBeUndefined();
+    expect(parseJourneysMarker("::schmeide:: journeys passedF1.1.spec.ts")).toBeUndefined();
+    expect(parseJourneysMarker("  1 passed (2.1s)")).toBeUndefined();
   });
 });
 
