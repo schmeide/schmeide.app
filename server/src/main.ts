@@ -146,6 +146,8 @@ const config = {
   builderPlugin: BUILDER_PLUGIN,
   // ponytail: off until the design team is measured on the to-do fixture (#159, #83).
   designTeam: env.SCHMEIDE_DESIGN_TEAM === "1",
+  // On unless SCHMEIDE_ACCEPTANCE=0: every feature gets checks before the builder runs (#354).
+  acceptance: env.SCHMEIDE_ACCEPTANCE !== "0",
 } as const;
 
 // The worker needs none of the sign-in settings or secrets.
@@ -293,7 +295,7 @@ console.log(
     : `Builds are on${builds === "admins" ? " for admins only (SCHMEIDE_BUILDS=admins)" : ""}: apps build with GNU make and Docker on this host.`
 );
 console.log(
-  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}, design team ${config.designTeam ? "on" : "off (SCHMEIDE_DESIGN_TEAM=1 turns it on)"}`
+  `Data dir ${config.dataDir}, template ${config.template}, agent models: ${describeRouting(config.agentModels)}, interview model ${config.interviewModel}, website model ${config.websiteModel}, summary model ${config.summaryModel}, design team ${config.designTeam ? "on" : "off (SCHMEIDE_DESIGN_TEAM=1 turns it on)"}, acceptance checks ${config.acceptance ? "on" : "off (SCHMEIDE_ACCEPTANCE=0)"}`
 );
 if (runner)
   console.log(

@@ -53,6 +53,11 @@ const { planDesign } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "10 minutes",
 });
+// A single model answer with no tools; a retry reuses the checks already stored.
+const { planAcceptance } = proxyActivities<Activities>({
+  ...longRunning,
+  startToCloseTimeout: "10 minutes",
+});
 const { reviewDesign } = proxyActivities<Activities>({
   ...longRunning,
   startToCloseTimeout: "30 minutes",
@@ -63,13 +68,16 @@ export const MAX_FIX_ATTEMPTS = 3;
 // Fix rounds for the design review's serious problems; what is left after them is recorded.
 export const MAX_REVIEW_ROUNDS = 2;
 
-// The design lead chooses the look (a no-op unless the design team is on), the agent builds, then
+// The design lead chooses the look (a no-op unless the design team is on), the acceptance checks
+// are written (a no-op with them off), the agent builds, then
 // the server's own checks run, with fix-up rounds while they fail. Once they pass, a build with a
 // design brief is reviewed against it, with fix rounds of its own; each round is checked again.
 // Each agent run is told its round, which names its Job on the cluster, and so are the checks after it.
 async function buildAndCheck(buildId: number): Promise<void> {
   // patched: a build already running when the design team was added replays without it.
   const design = patched("design-team") ? await planDesign(buildId) : null;
+  // patched: a build already running when the acceptance checks were added replays without them.
+  if (patched("acceptance-checks")) await planAcceptance(buildId);
   let round = 0;
   let session = await runAgent({ buildId, round });
   let checkFixes = 0;

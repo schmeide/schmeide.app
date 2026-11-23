@@ -8,6 +8,7 @@
 # `summary` prints one line of a build's running summary.
 # `design` prints the design lead's choice of look, `review` a design review that finds nothing
 # (both only with SCHMEIDE_DESIGN_TEAM=1).
+# `acceptance` prints one feature with one acceptance check, or for a change nothing to add.
 set -euo pipefail
 
 case "${1:-}" in
@@ -48,6 +49,13 @@ case "${1:-}" in
   review)
     printf '%s\n' '{"problems":[]}'
     ;;
+  acceptance)
+    if [[ "${AGENT_PROMPT:-}" == *'"retire"'* ]]; then
+      printf '%s\n' '{"features":[],"retire":[]}'
+    else
+      printf '%s\n' '{"features":[{"name":"Fake feature","checks":[{"given":"The home page is open.","steps":["Read the page."],"expect":"The sample screen shows."}]}]}'
+    fi
+    ;;
   read)
     printf '%s\n' '{"outcome":"read","items":[{"section":"keeps","text":"Fake item read from the picture"}]}'
     ;;
@@ -55,7 +63,7 @@ case "${1:-}" in
     echo "Fake summary for the end-to-end fixture."
     ;;
   *)
-    echo "usage: $0 spec|build|interview|readback|website|read|summary|design|review (prompt in AGENT_PROMPT)" >&2
+    echo "usage: $0 spec|build|interview|readback|website|read|summary|design|review|acceptance (prompt in AGENT_PROMPT)" >&2
     exit 2
     ;;
 esac
