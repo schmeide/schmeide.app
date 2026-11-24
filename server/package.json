@@ -32,7 +32,7 @@
   },
   "devDependencies": {
     "@temporalio/testing": "^1.26.0",
-    "@trpc/client": "^11.28.5",
+    "@trpc/client": "^11.29.7",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11"
   }
