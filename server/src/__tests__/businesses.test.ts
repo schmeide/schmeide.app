@@ -89,6 +89,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "projects.setFeatures": { id, features: "Take over" },
   "projects.generateSpec": { id },
   "projects.approveSpec": { id },
+  "projects.checks": { id },
+  "projects.acceptance": { id },
   "projects.requestChange": { id, request: "Take over" },
   "projects.setSite": { id, title: "Taken over" },
   "projects.promote": { id },
@@ -123,6 +125,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "builds.editQueued": { buildId, request: "Take over" },
   "builds.removeQueued": { buildId },
   "builds.picture": { buildId, width: "desktop" },
+  "builds.acceptance": { buildId },
 });
 const takesAnId = (input: unknown) => typeof input === "object" && input !== null;
 // The caller's own account: about the person, never a project or build.

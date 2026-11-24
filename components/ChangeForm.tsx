@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
@@ -13,15 +13,24 @@ type Props = {
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly note?: string;
+  // Changed when something else wrote the request, such as "Ask for a fix": the box takes the
+  // focus so it can be read and sent.
+  readonly focusSignal?: number;
 };
 
 // A box to request a change. It is also the way to retry a failed build and to bring an offline
 // app back; while a build runs, the change waits its turn.
-export function ChangeForm({ project, request, onRequestChange, note }: Props) {
+export function ChangeForm({ project, request, onRequestChange, note, focusSignal = 0 }: Props) {
   const trpc = useTRPC();
   const refresh = useRefreshProjects();
   const field = useRef<HTMLTextAreaElement>(null);
   const [missing, setMissing] = useState(false);
+  // A frame later: a move to the changes view first gives the focus to the page's heading.
+  useEffect(() => {
+    if (focusSignal === 0) return;
+    const frame = requestAnimationFrame(() => field.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [focusSignal]);
   const change = useMutation(
     trpc.projects.requestChange.mutationOptions({
       onSuccess: () => onRequestChange(""),

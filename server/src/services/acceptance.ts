@@ -53,7 +53,8 @@ export const parseChanged = (value: unknown): Changed | undefined => {
 };
 
 // A check as it is kept. `id` is `F<feature>.<check>` and is never reused: a check a change made
-// untrue is `retired`, not removed. `build` is the build that added it.
+// untrue is `retired`, not removed. `build` is the build that added it, or SPEC_BUILD for one
+// written with the spec, before there was a build (#357).
 export type Check = z.infer<typeof checkSchema> & {
   readonly id: string;
   readonly build: number;
@@ -65,6 +66,8 @@ export type Feature = {
   readonly checks: readonly Check[];
 };
 export type AcceptancePlan = { readonly features: readonly Feature[] };
+
+export const SPEC_BUILD = 0;
 
 export const specHash = (spec: string): string => createHash("sha256").update(spec).digest("hex");
 
@@ -287,6 +290,100 @@ export const liveFeatures = (plan: AcceptancePlan): readonly Feature[] =>
   plan.features
     .map((feature) => ({ ...feature, checks: feature.checks.filter((check) => !check.retired) }))
     .filter((feature) => feature.checks.length > 0);
+
+// What the owner reads (#357): a check in plain words, with no bookkeeping.
+export type PlannedCheck = Pick<Check, "id" | "given" | "steps" | "expect">;
+export type PlannedFeature = {
+  readonly number: number;
+  readonly name: string;
+  readonly checks: readonly PlannedCheck[];
+};
+
+const plainCheck = ({ id, given, steps, expect }: Check): PlannedCheck => ({
+  id,
+  given,
+  steps,
+  expect,
+});
+
+// The features with a check still true, each with those checks, for the spec's "How we will know
+// it works".
+export const plannedFeatures = (plan: AcceptancePlan): readonly PlannedFeature[] =>
+  liveFeatures(plan).map(({ number, name, checks }) => ({
+    number,
+    name,
+    checks: checks.map(plainCheck),
+  }));
+
+// A build's result for one check, with the check's words when the plan still has it.
+export type CheckResult = {
+  readonly id: string;
+  readonly given: string | null;
+  readonly steps: readonly string[];
+  readonly expect: string | null;
+  readonly verdict: Verdict;
+  readonly saw: string;
+};
+// A feature works when every check of it did, and is not working yet when one is broken. One
+// with nothing broken that the tester could not follow to the end is unchecked.
+export type FeatureState = "works" | "broken" | "unchecked";
+export type FeatureResult = {
+  readonly number: number;
+  readonly name: string;
+  readonly state: FeatureState;
+  readonly checks: readonly CheckResult[];
+};
+
+const idParts = (id: string): readonly [number, number] => {
+  const [, feature = "0", check = "0"] = /^F(\d+)\.(\d+)$/.exec(id) ?? [];
+  return [Number(feature), Number(check)];
+};
+
+// A build's results (build_acceptance), grouped by feature in the plan's order. `plan` gives each
+// check its words; a check the plan does not have keeps its result without them.
+export const featureResults = (
+  plan: AcceptancePlan | undefined,
+  rows: readonly {
+    readonly checkId: string;
+    readonly feature: string;
+    readonly verdict: Verdict;
+    readonly saw: string;
+  }[]
+): readonly FeatureResult[] => {
+  const checks = new Map(
+    (plan?.features ?? []).flatMap((feature) => feature.checks.map((check) => [check.id, check]))
+  );
+  const sorted = [...rows].sort((a, b) => {
+    const [af, ac] = idParts(a.checkId);
+    const [bf, bc] = idParts(b.checkId);
+    return af - bf || ac - bc;
+  });
+  const features = new Map<number, { name: string; checks: CheckResult[] }>();
+  for (const { checkId, feature, verdict, saw } of sorted) {
+    const [number] = idParts(checkId);
+    const check = checks.get(checkId);
+    const group = features.get(number) ?? { name: feature, checks: [] };
+    group.checks.push({
+      id: checkId,
+      given: check?.given ?? null,
+      steps: check?.steps ?? [],
+      expect: check?.expect ?? null,
+      verdict,
+      saw,
+    });
+    features.set(number, group);
+  }
+  return [...features].map(([number, { name, checks: results }]) => ({
+    number,
+    name,
+    state: results.some(({ verdict }) => verdict === "broken")
+      ? "broken"
+      : results.some(({ verdict }) => verdict === "could_not_check")
+        ? "unchecked"
+        : "works",
+    checks: results,
+  }));
+};
 
 // One tester follows one feature's checks, in a browser of its own.
 export const testerPrompt = (feature: Feature, marker: string = randomUUID()): string =>

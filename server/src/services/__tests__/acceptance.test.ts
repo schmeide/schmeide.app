@@ -7,6 +7,7 @@ import {
   changePrompt,
   checksText,
   countOf,
+  featureResults,
   liveChecks,
   liveFeatures,
   parseChanged,
@@ -14,10 +15,12 @@ import {
   planAfter,
   planFrom,
   plannedBy,
+  plannedFeatures,
   resultsOf,
   specHash,
   testerPrompt,
   writerPrompt,
+  type Verdict,
   type Written,
 } from "../acceptance.ts";
 
@@ -255,5 +258,98 @@ describe("specHash", () => {
     expect(specHash("a")).toHaveLength(64);
     expect(specHash("a")).toBe(specHash("a"));
     expect(specHash("a")).not.toBe(specHash("b"));
+  });
+});
+
+describe("plannedFeatures", () => {
+  it("answers each feature with the checks still true, in plain words, and leaves out the rest", () => {
+    const plan = planAfter(planFrom(WRITTEN, 0), { features: [], retire: ["F2.1"] }, 7);
+
+    expect(plannedFeatures(plan)).toEqual([
+      {
+        number: 1,
+        name: "Photo carousel",
+        checks: [
+          { id: "F1.1", ...check("The second photo shows.") },
+          { id: "F1.2", ...check("It wraps.") },
+        ],
+      },
+    ]);
+  });
+});
+
+describe("featureResults", () => {
+  const plan = planFrom(WRITTEN, 3);
+  const row = (checkId: string, feature: string, verdict: Verdict, saw = "Saw it.") => ({
+    checkId,
+    feature,
+    verdict,
+    saw,
+  });
+
+  it("groups a build's results by feature, in the plan's order, each check with its words", () => {
+    const results = featureResults(plan, [
+      row("F2.1", "Messages", "works"),
+      row("F1.2", "Photo carousel", "broken", "Tapped Next; it stayed red."),
+      row("F1.1", "Photo carousel", "works"),
+    ]);
+
+    expect(results).toEqual([
+      {
+        number: 1,
+        name: "Photo carousel",
+        state: "broken",
+        checks: [
+          { id: "F1.1", ...check("The second photo shows."), verdict: "works", saw: "Saw it." },
+          {
+            id: "F1.2",
+            ...check("It wraps."),
+            verdict: "broken",
+            saw: "Tapped Next; it stayed red.",
+          },
+        ],
+      },
+      {
+        number: 2,
+        name: "Messages",
+        state: "works",
+        checks: [
+          {
+            id: "F2.1",
+            ...check("The message is in the thread."),
+            verdict: "works",
+            saw: "Saw it.",
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("calls a feature with nothing broken but a check not followed unchecked", () => {
+    const [feature] = featureResults(plan, [
+      row("F1.1", "Photo carousel", "works"),
+      row("F1.2", "Photo carousel", "could_not_check"),
+    ]);
+    expect(feature.state).toBe("unchecked");
+  });
+
+  it("keeps a result whose check the plan no longer has, without its words", () => {
+    expect(featureResults(undefined, [row("F9.1", "Gone", "broken")])).toEqual([
+      {
+        number: 9,
+        name: "Gone",
+        state: "broken",
+        checks: [
+          {
+            id: "F9.1",
+            given: null,
+            steps: [],
+            expect: null,
+            verdict: "broken",
+            saw: "Saw it.",
+          },
+        ],
+      },
+    ]);
   });
 });

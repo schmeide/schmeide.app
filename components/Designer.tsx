@@ -1,5 +1,8 @@
+import { useState } from "react";
+
 import { copy } from "../data/copy";
 import type { Build, BuiltChange, Project, TimeTotals, Usage } from "../trpc";
+import { navigate } from "../utils/navigation";
 import { pathTo } from "../utils/routes";
 import { appName } from "../utils/appName";
 import { AppFrame } from "./AppFrame";
@@ -13,6 +16,7 @@ import { Release } from "./Release";
 import { Spec } from "./Spec";
 import { StopButton } from "./StopButton";
 import { UsageSummary } from "./UsageSummary";
+import { useStagingFeatures, VersionFeatures } from "./VersionFeatures";
 
 import stepStyles from "./Step.module.css";
 import styles from "./Designer.module.css";
@@ -63,6 +67,18 @@ export function Designer({
   onStop,
 }: Props) {
   const note = frameNote(project, latestBuild);
+  const staging = useStagingFeatures(project, latestBuild);
+  const notWorking = staging.features
+    .filter((feature) => feature.state === "broken")
+    .map((feature) => feature.name);
+  // Bumped by "Ask for a fix", which moves the focus to the change request it wrote.
+  const [fixAsked, setFixAsked] = useState(0);
+  const askForFix = (text: string) => {
+    const typed = request.trim();
+    onRequestChange(typed && !typed.includes(text) ? `${typed}\n\n${text}` : text);
+    if (view !== "changes") navigate(pathTo("projectChanges", { id: project.id }));
+    setFixAsked((count) => count + 1);
+  };
   const noChanges =
     changes.length === 0 && queued.length === 0 && (!latestBuild || latestBuild.kind === "initial");
 
@@ -89,7 +105,7 @@ export function Designer({
           {(project.stagingUrl ?? project.previewUrl) ? (
             <>
               {note && <p>{note}</p>}
-              <Release project={project} unreleased={unreleased} />
+              <Release project={project} unreleased={unreleased} notWorking={notWorking} />
               <AppFrame
                 name={appName(project)}
                 stagingUrl={project.stagingUrl}
@@ -102,6 +118,7 @@ export function Designer({
                     : null
                 }
               />
+              <VersionFeatures features={staging.features} onAskForFix={askForFix} />
             </>
           ) : (
             <>
@@ -110,7 +127,7 @@ export function Designer({
                   ? copy.project.designer.buildingNoApp
                   : copy.project.designer.offline}
               </p>
-              <Release project={project} unreleased={unreleased} />
+              <Release project={project} unreleased={unreleased} notWorking={notWorking} />
             </>
           )}
         </section>
@@ -123,6 +140,7 @@ export function Designer({
               request={request}
               onRequestChange={onRequestChange}
               note={copy.project.designer.buildsToStaging}
+              focusSignal={fixAsked}
             />
             {noChanges && <p className={stepStyles.muted}>{copy.project.designer.noChanges}</p>}
           </section>

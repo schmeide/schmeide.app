@@ -16,11 +16,13 @@ import type {
   Invitation,
   Member,
   PlanItem,
+  PlannedFeature,
   Project,
   Question,
   ReadBack,
   TimeTotals,
   Usage,
+  VersionFeature,
 } from "../../trpc";
 import { TRPCProvider } from "../../trpc";
 import type { Provider, Session } from "../../utils/session";
@@ -283,6 +285,10 @@ export const projectServer = (state: {
   interview?: Interview;
   readBack?: ReadBack;
   design?: Design;
+  // The checks written with the spec, and which features work in each build's version.
+  checks?: readonly PlannedFeature[];
+  staging?: { readonly buildId: number | null; readonly features: readonly VersionFeature[] };
+  results?: Readonly<Record<number, readonly VersionFeature[]>>;
 }): Handlers => ({
   "readBack.get": () => state.readBack ?? aReadBack(),
   "design.get": () => state.design ?? { enabled: false, current: null, styles: [] },
@@ -304,6 +310,9 @@ export const projectServer = (state: {
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),
   "builds.summaries": () => state.summaries ?? [],
+  "projects.checks": () => state.checks ?? [],
+  "projects.acceptance": () => state.staging ?? { buildId: null, features: [] },
+  "builds.acceptance": (input) => state.results?.[Number(input.buildId)] ?? [],
   "builds.list": () => ({
     builds: (state.history ?? []).map((build) => ({ ...build, costUsd: 0 })),
     nextCursor: null,
@@ -350,3 +359,23 @@ export const authServer = (state: {
   };
   return { handlers, requests };
 };
+
+export const aCheckResult = (
+  overrides: Partial<VersionFeature["checks"][number]> = {}
+): VersionFeature["checks"][number] => ({
+  id: "F1.1",
+  given: "A profile with three photos.",
+  steps: ["Open the profile.", "Tap Next photo."],
+  expect: "The second photo shows.",
+  verdict: "works",
+  saw: "Tapped Next photo; the second photo showed.",
+  ...overrides,
+});
+
+export const aFeatureResult = (overrides: Partial<VersionFeature> = {}): VersionFeature => ({
+  number: 1,
+  name: "Photo carousel",
+  state: "works",
+  checks: [aCheckResult()],
+  ...overrides,
+});

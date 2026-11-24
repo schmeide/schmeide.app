@@ -691,13 +691,17 @@ the builder runs, every feature gets **acceptance checks** (`server/src/services
 person could follow in the running app, each with where they start and what must exist, what they do, and what they
 must then see.
 
-- **Who writes them.** `planAcceptance` in `server/src/temporal/activities.ts` (run kind `acceptance`), at the start
-  of every build but a `site` one. It is one model answer with no tools and no project settings, given only the spec
-  (fenced off as material, never instructions) and held to a JSON schema. The builder has no say in them.
+- **Who writes them.** `generateSpec` in `server/src/temporal/activities.ts` (run kind `acceptance`), right after
+  the spec, so the owner reads them before approving it. It is one model answer with no tools and no project
+  settings, given only the spec (fenced off as material, never instructions) and held to a JSON schema. The builder
+  has no say in them. `planAcceptance`, at the start of every build but a `site` one, keeps checks written from the
+  same spec, and writes them itself when there are none: a spec written before checks were written with it, or one
+  whose checks could not be written.
 - **What they are.** One to four checks per feature, each with an id such as `F3.2` (feature 3, check 2). A feature
   with parts that can break alone gets a check per part.
 - **Where they are kept.** `project_acceptance`, one row per project, with a hash of the spec they were written
-  from. A rebuild of the same spec keeps them; a first build from another spec writes them again.
+  from. A rebuild of the same spec keeps them; a first build from another spec writes them again. A check written
+  with the spec names build `0` (`SPEC_BUILD`) as the one that added it.
 - **A change adds to them.** The writer is given the checks there are and the request, and answers with the checks
   the change needs and the ids of those it makes untrue. A retired check stays in the row, so an id is never used
   twice. A change that needs none says so. An app built before there were checks gets them on its next change, from
@@ -735,13 +739,29 @@ only step that tries a feature the way a person would.
 - **Soft.** No browser, a browser that does not open, or a tester that fails is said in an event and never fails
   the build.
 
+### What the owner sees
+
+`server/src/services/featureChecks.ts` answers the checks and results to the UI.
+
+- **On the spec.** `projects.checks({ id })` answers each feature's checks, when they were written from the spec the
+  project has. The spec step shows them under each bullet of "Features" as "How we will know it works", folded away;
+  when the features do not match the bullets one for one, they follow the spec.
+- **On a version.** `projects.acceptance({ id })` answers which features work in the version being worked on: the
+  newest passed build whose commit staging runs and that a tester followed. `builds.acceptance({ buildId })` answers
+  the same for any build, shown under "Past builds" once opened. A feature "Works" when every check did, is "Not
+  working yet" when one is broken, and "Not checked" when nothing is broken but a check could not be checked. Each
+  check shows what should happen, what the tester saw, and its steps.
+- **Putting it live.** "Put this version live" on a version with a feature not working yet names those features and
+  asks first.
+- **Ask for a fix.** On a feature not working yet, it writes a change request with each broken check's expectation
+  and what the tester saw, and moves to it. Nothing is sent until the owner sends it.
+
 Known limits:
 
 - The tester leaves what it made (accounts, records, pictures) in staging's database. Production has its own.
 - A tester can be wrong. A check it wrongly calls broken costs a fix round. One it wrongly calls working is what
   `make eval/features` measures ([feature-eval.md](feature-eval.md)): it builds fixed test apps with checks a person
   agreed, reports the share that work, and a person marks a sample of the tester's verdicts.
-- The owner sees results only as lines in the build log until #357.
 - The server image has no Chromium yet (#355), so on the cluster the tester's browser does not open and every check
   is recorded as could not be checked.
 - On one run against a test page with a photo carousel, a tester took about 7 seconds and 2 cents for a feature

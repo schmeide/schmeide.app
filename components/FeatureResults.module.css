@@ -1,0 +1,122 @@
+.features {
+  display: grid;
+  gap: var(--space-s);
+  margin: var(--space-s) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.feature {
+  min-width: 0;
+  background: var(--color-inset);
+  border-radius: var(--radius-input);
+  box-shadow: inset 4px 0 0 var(--color-success);
+}
+
+.feature[data-state="broken"] {
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.feature[data-state="unchecked"] {
+  box-shadow: inset 4px 0 0 var(--color-warning);
+}
+
+.head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-xs) var(--space-m);
+  padding: 0.75rem var(--space-m) 0;
+}
+
+.more {
+  padding: 0 var(--space-m);
+}
+
+.more summary,
+.steps summary {
+  padding-block: 0.625rem;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
+
+.more .checks {
+  padding-inline: 0;
+}
+
+.name {
+  margin: 0;
+  font-family: inherit;
+  font-size: var(--text-body);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.state {
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--color-success);
+}
+
+.feature[data-state="broken"] .state {
+  color: var(--color-danger);
+}
+
+.feature[data-state="unchecked"] .state {
+  color: var(--color-muted);
+}
+
+.checks {
+  display: grid;
+  gap: var(--space-m);
+  margin: 0;
+  padding: var(--space-s) var(--space-m) var(--space-m);
+  list-style: none;
+}
+
+.check {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--color-border);
+}
+
+.expect,
+.saw {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.saw {
+  font-size: var(--text-small);
+}
+
+.verdict {
+  color: var(--color-success);
+}
+
+.check[data-verdict="broken"] .verdict {
+  color: var(--color-danger);
+}
+
+.check[data-verdict="could_not_check"] .verdict {
+  color: var(--color-muted);
+}
+
+.steps {
+  font-size: var(--text-small);
+}
+
+.fix {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-xs);
+  padding: 0 var(--space-m) var(--space-m);
+}
+
+.hint {
+  margin: 0;
+  font-size: var(--text-small);
+  color: var(--color-muted);
+}
