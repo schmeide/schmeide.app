@@ -1,12 +1,15 @@
-// The Jobs that run a build's agent and its checks in the builds namespace (docs/stage2.md,
-// "Agent runs: a Job per run" and "Checks: a Job per round"). Pure: what to create, never how.
+// The Jobs that run a build's agent, its checks, and its journeys in the builds namespace
+// (docs/stage2.md, "Agent runs: a Job per run" and "Checks: a Job per round"). Pure: what to
+// create, never how.
 
 export const BUILDS_NAMESPACE = "schmeide-builds";
 // The builds model key, projected into the builds namespace only.
 export const ANTHROPIC_SECRET = { name: "anthropic-builds", key: "key" } as const;
 export const POSTGRES_IMAGE = "schmeide.azurecr.io/mirror/postgres:18-alpine";
 
-export type RunKind = "agent" | "checks";
+// `journeys` runs the journeys kept from earlier versions against staging, `new-journeys` the ones
+// just written from what the tester did, before they are kept (#372).
+export type RunKind = "agent" | "checks" | "journeys" | "new-journeys";
 
 // A Job's name says what it runs, so a restarted worker finds the one it was following.
 export const runName = (kind: RunKind, buildId: number, round: number): string =>
@@ -14,7 +17,7 @@ export const runName = (kind: RunKind, buildId: number, round: number): string =
 export const parseRunName = (
   name: string
 ): { readonly kind: RunKind; readonly buildId: number; readonly round: number } | undefined => {
-  const match = /^(agent|checks)-(\d+)-(\d+)$/.exec(name);
+  const match = /^(agent|checks|journeys|new-journeys)-(\d+)-(\d+)$/.exec(name);
   return match
     ? { kind: match[1] as RunKind, buildId: Number(match[2]), round: Number(match[3]) }
     : undefined;
@@ -30,8 +33,16 @@ export const buildSelector = (buildId: number) => `${LABELS.build}=${buildId}`;
 // Every run of every build.
 export const RUNS_SELECTOR = LABELS.build;
 
-// Matches workflows.ts: runAgent's startToCloseTimeout is 90 minutes, runChecks' 30.
-const DEADLINE_SECONDS: Readonly<Record<RunKind, number>> = { agent: 5400, checks: 1800 };
+// Matches workflows.ts: runAgent's startToCloseTimeout is 90 minutes, runChecks' 30. The journeys
+// run inside checkAcceptance's 90, twice at most, beside the testers.
+const DEADLINE_SECONDS: Readonly<Record<RunKind, number>> = {
+  agent: 5400,
+  checks: 1800,
+  journeys: 1200,
+  "new-journeys": 1200,
+};
+// The runs that need a database of their own: the journeys use staging's.
+const WITH_DATABASE: ReadonlySet<RunKind> = new Set(["agent", "checks"]);
 // What a dead worker leaves behind goes an hour after it finished.
 const TTL_SECONDS = 3600;
 
@@ -85,6 +96,8 @@ export const CHECK_TARGETS = [
   { target: "files", command: "node /app/server/src/sandbox/files.ts" },
   // Schmeide's check of the app's packages for security holes and licenses, as on the host.
   { target: "packages", command: "node /app/server/src/sandbox/packages.ts" },
+  // Schmeide's check that the build left journeys/ as the tester wrote it, as on the host.
+  { target: "journeys", command: "node /app/server/src/sandbox/journeys.ts" },
 ] as const;
 export type CheckTarget = (typeof CHECK_TARGETS)[number]["target"];
 
@@ -98,7 +111,7 @@ export const parseChecksMarker = (
   | { readonly step: MarkerStep; readonly target: CheckTarget; readonly code?: number }
   | undefined => {
   const match =
-    /^::schmeide:: (start|passed|failed) (check|test|build|phones|files|packages)(?: (\d+))?$/.exec(
+    /^::schmeide:: (start|passed|failed) (check|test|build|phones|files|packages|journeys)(?: (\d+))?$/.exec(
       line
     );
   if (!match) return undefined;
@@ -137,6 +150,38 @@ const CHECKS_SCRIPT = [
 
 const AGENT_SCRIPT = [...PREPARE, "exec node /app/server/src/sandbox/agent.ts"].join("\n");
 
+// The journeys of one run, by file name, that passed: the last line sandbox/runJourneys.ts prints
+// once `make journeys` has exited. Only names a journey can have are read back.
+const JOURNEYS_PASSED = `${MARKER} journeys passed`;
+export const journeysMarker = (passed: readonly string[]): string =>
+  [JOURNEYS_PASSED, ...passed].join(" ");
+export const parseJourneysMarker = (line: string): readonly string[] | undefined => {
+  if (line !== JOURNEYS_PASSED && !line.startsWith(`${JOURNEYS_PASSED} `)) return undefined;
+  const files = line.slice(JOURNEYS_PASSED.length).split(" ").filter(Boolean);
+  return files.every((file) => /^F\d+\.\d+\.spec\.ts$/.test(file)) ? files : undefined;
+};
+
+// The image's Chromium (#355) is at PLAYWRIGHT_BROWSERS_PATH, which the read-only root filesystem
+// keeps Playwright from writing its lock and links in. The template's `make journeys` installs the
+// browser its lockfile pins, so it is shown each browser the image has from a folder it may write
+// in: the same version is found there, and another one is downloaded beside it.
+const BROWSERS = `${HOME}/browsers`;
+const JOURNEYS_SCRIPT = [
+  ...PREPARE,
+  'git checkout -q --detach "$SCHMEIDE_COMMIT"',
+  `mkdir -p ${BROWSERS}`,
+  `for each in "\${PLAYWRIGHT_BROWSERS_PATH:-/nonexistent}"/*; do if [ -e "$each" ]; then ln -s "$each" ${BROWSERS}/; fi; done`,
+  `export PLAYWRIGHT_BROWSERS_PATH=${BROWSERS}`,
+  "exec node /app/server/src/sandbox/runJourneys.ts",
+].join("\n");
+
+const SCRIPTS: Readonly<Record<RunKind, string>> = {
+  agent: AGENT_SCRIPT,
+  checks: CHECKS_SCRIPT,
+  journeys: JOURNEYS_SCRIPT,
+  "new-journeys": JOURNEYS_SCRIPT,
+};
+
 export const restricted = {
   allowPrivilegeEscalation: false,
   readOnlyRootFilesystem: true,
@@ -151,10 +196,11 @@ const emptyDir = (name: string, medium?: "Memory") => ({
 export const runJob = (run: RunJob): object => {
   const name = runName(run.kind, run.buildId, run.round);
   const labels = labelsOf(run);
+  const database = WITH_DATABASE.has(run.kind);
   const env = {
     HOME,
     TMPDIR: "/tmp",
-    TEST_DATABASE_URL,
+    ...(database && { TEST_DATABASE_URL }),
     SCHMEIDE_REPO: run.repo,
     // ponytail: without a configured host key the first one seen is trusted; set
     // SCHMEIDE_FORGEJO_KNOWN_HOSTS to pin it.
@@ -187,40 +233,42 @@ export const runJob = (run: RunJob): object => {
             fsGroup: UID,
             seccompProfile: { type: "RuntimeDefault" },
           },
-          initContainers: [
-            {
-              // A native sidecar: it starts first and stops when the run's container exits.
-              name: "postgres",
-              image: run.postgresImage,
-              restartPolicy: "Always",
-              // The image's own postgres user (alpine's uid 70), which its entrypoint expects.
-              securityContext: { ...restricted, runAsUser: 70, runAsGroup: 70 },
-              env: [
-                { name: "POSTGRES_PASSWORD", value: "postgres" },
-                { name: "POSTGRES_DB", value: "app" },
-                { name: "PGDATA", value: "/var/lib/postgresql/data" },
-              ],
-              startupProbe: {
-                exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] },
-                periodSeconds: 2,
-                failureThreshold: 60,
-              },
-              resources: {
-                requests: { cpu: "100m", memory: "256Mi" },
-                limits: { memory: "512Mi" },
-              },
-              volumeMounts: [
-                { name: "pgdata", mountPath: "/var/lib/postgresql" },
-                { name: "pgrun", mountPath: "/var/run/postgresql" },
-                { name: "pgtmp", mountPath: "/tmp" },
-              ],
-            },
-          ],
+          initContainers: database
+            ? [
+                {
+                  // A native sidecar: it starts first and stops when the run's container exits.
+                  name: "postgres",
+                  image: run.postgresImage,
+                  restartPolicy: "Always",
+                  // The image's own postgres user (alpine's uid 70), which its entrypoint expects.
+                  securityContext: { ...restricted, runAsUser: 70, runAsGroup: 70 },
+                  env: [
+                    { name: "POSTGRES_PASSWORD", value: "postgres" },
+                    { name: "POSTGRES_DB", value: "app" },
+                    { name: "PGDATA", value: "/var/lib/postgresql/data" },
+                  ],
+                  startupProbe: {
+                    exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] },
+                    periodSeconds: 2,
+                    failureThreshold: 60,
+                  },
+                  resources: {
+                    requests: { cpu: "100m", memory: "256Mi" },
+                    limits: { memory: "512Mi" },
+                  },
+                  volumeMounts: [
+                    { name: "pgdata", mountPath: "/var/lib/postgresql" },
+                    { name: "pgrun", mountPath: "/var/run/postgresql" },
+                    { name: "pgtmp", mountPath: "/tmp" },
+                  ],
+                },
+              ]
+            : [],
           containers: [
             {
               name: run.kind,
               image: run.image,
-              command: ["sh", "-c", run.kind === "agent" ? AGENT_SCRIPT : CHECKS_SCRIPT],
+              command: ["sh", "-c", SCRIPTS[run.kind]],
               env: [
                 ...Object.entries(env).map(([key, value]) => ({ name: key, value })),
                 ...(run.kind === "agent"
@@ -249,9 +297,9 @@ export const runJob = (run: RunJob): object => {
             emptyDir("home"),
             emptyDir("work"),
             emptyDir("tmp"),
-            emptyDir("pgdata", "Memory"),
-            emptyDir("pgrun"),
-            emptyDir("pgtmp"),
+            ...(database
+              ? [emptyDir("pgdata", "Memory"), emptyDir("pgrun"), emptyDir("pgtmp")]
+              : []),
             // Readable by the run's group (fsGroup), not world.
             { name: "run", secret: { secretName: name, defaultMode: 0o440 } },
           ],

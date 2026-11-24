@@ -767,6 +767,50 @@ Known limits:
 - On one run against a test page with a photo carousel, a tester took about 7 seconds and 2 cents for a feature
   with two checks, and told a carousel whose Next button did nothing from one that worked.
 
+### The journeys
+
+A check the tester saw work is kept in the app as a Playwright test, `journeys/<check id>.spec.ts`
+(`server/src/services/journeys.ts`), so a later change that breaks it is found without a model following it again.
+
+- **Who writes them.** The server, from what the tester did. The tester's browser records every action that worked,
+  in order. Two tools mark the journey: `start` says which check the tester begins, and `see` confirms what "Then"
+  names is on the page (or, with `gone`, is not). A check's journey is everything the tester did up to the end of
+  that check, so "Given" is made again, with only that check's `see` steps as what must hold. A check the tester
+  confirmed nothing in gets no journey. No model writes code for it.
+- **How they find things.** By role and name, with the same locators the tester's browser used. The tester puts a
+  code of its own (its email is `tester-<code>@example.com`) in anything that must be unique, and the journey puts a
+  fresh code there on every run, so it can sign up again on staging's database.
+- **When they run.** In `checkAcceptance`, before any tester: every journey written from a check as it is now runs
+  against staging with the app's own `make journeys BASE_URL=... JOURNEYS=...` (schmeide/template#102), and its JSON
+  report says which passed. A check whose journey passed is recorded `works` and not followed. The tester follows
+  the rest: checks that are new, changed, or whose journey failed.
+- **When they are written.** Once the round's outcome is final (nothing broken, or the last round), so the builder
+  never runs after them in the same build. A new journey is run once on its own and kept only if it passes. A
+  check the tester followed and saw work gets its new journey in place of the old one, which is how a journey that
+  failed because the change altered its feature is rewritten: by the tester, never by the builder. A check it found
+  broken keeps its old journey. A retired check's journey is deleted. They are committed as one commit, and
+  staging's commit and the build's commit move to it: the app is the same, and the version holds its journeys.
+- **On the cluster** (`SCHMEIDE_RUNNER=kubernetes`, #372) the worker runs no app code, so the journeys run in a
+  Job like the checks Job (`kube/jobs.ts`): `journeys-<build>-<round>` for the kept ones and
+  `new-journeys-<build>-<round>` for the ones just written, which the worker hands it in the run's Secret. The pod
+  clones staging's commit with a read-only deploy key, runs `make journeys` against staging with the server image's
+  Chromium (`sandbox/runJourneys.ts`), and prints one last line naming the journeys that passed, which the worker
+  reads from its log. A pod that fails passes none. The worker then commits the ones it keeps on a scratch clone of
+  staging and pushes, as it does the page title, and builds that commit's images, because a copy runs its commit's
+  images and that commit is the one that goes live.
+- **Only the server writes them.** `runChecks` refuses a build that changed anything under `journeys/` since the
+  build started (`journeyProblems`, and the `journeys` target in a checks pod), and tells the builder how to undo it.
+
+Known limits:
+
+- On the cluster the journeys pod reaches staging by its public address, from the builds namespace, whose policy
+  allows HTTPS to public addresses but not the cluster's own: whether that address is reached, and egress to it
+  alone, needs schmeide/iac#57. Keeping journeys there also builds the images once more, for their commit.
+- `make journeys` is the app's own target, which a builder could change. A run that reports nothing counts as every
+  journey failing, so the worst it does is send checks back to the tester.
+- A journey replays the steps of the checks before it in the same feature, so a change to one can fail another's
+  journey; the tester then follows that check and rewrites it.
+
 ## How built apps are made to work on a phone
 
 Three things, all in this repo, so they reach every build whatever the workspace was copied from:
