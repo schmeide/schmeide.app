@@ -739,7 +739,8 @@ Known limits:
 
 - The tester leaves what it made (accounts, records, pictures) in staging's database. Production has its own.
 - A tester can be wrong. A check it wrongly calls broken costs a fix round. One it wrongly calls working is what
-  #359 measures.
+  `make eval/features` measures ([feature-eval.md](feature-eval.md)): it builds fixed test apps with checks a person
+  agreed, reports the share that work, and a person marks a sample of the tester's verdicts.
 - The owner sees results only as lines in the build log until #357.
 - The server image has no Chromium yet (#355), so on the cluster the tester's browser does not open and every check
   is recorded as could not be checked.

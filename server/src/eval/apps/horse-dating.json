@@ -1,0 +1,82 @@
+{
+  "name": "Horse dating",
+  "request": "a dating app for horses: an owner signs up and makes a profile for their horse with its name, breed, age and up to five photos\nthe profile shows its photos in a carousel: swipe, or tap next and previous, to move through them, with a marker of which photo is showing\nbrowse other horses' profiles one at a time and like or pass on each\nwhen two horses like each other it is a match, shown in a list of matches",
+  "checks": {
+    "features": [
+      {
+        "name": "A profile for the horse",
+        "checks": [
+          {
+            "given": "A new owner has signed up.",
+            "steps": [
+              "Make a profile for a horse named \"Comet\", a Haflinger aged 7.",
+              "Add one photo.",
+              "Save it."
+            ],
+            "expect": "Comet's profile shows the name Comet, the breed Haflinger and the age 7, with the photo."
+          },
+          {
+            "given": "An owner is making a horse profile and has added five photos.",
+            "steps": ["Try to add a sixth photo."],
+            "expect": "The sixth photo is not added: the profile keeps five photos, or the app says five is the most."
+          }
+        ]
+      },
+      {
+        "name": "Profile photo carousel",
+        "checks": [
+          {
+            "given": "A horse profile with three photos, added in the order red, blue, green, is open on its first photo.",
+            "steps": ["Tap the control for the next photo."],
+            "expect": "The blue photo shows, and the marker shows the second of three photos."
+          },
+          {
+            "given": "A horse profile with three photos, added in the order red, blue, green, is open on its second photo.",
+            "steps": ["Tap the control for the previous photo."],
+            "expect": "The red photo shows, and the marker shows the first of three photos."
+          },
+          {
+            "given": "A horse profile with three photos, added in the order red, blue, green, is open on its first photo.",
+            "steps": ["Swipe left on the photo.", "Swipe left on the photo again."],
+            "expect": "The green photo shows, and the marker shows the third of three photos."
+          },
+          {
+            "given": "A horse profile with only one photo, a red one, is open.",
+            "steps": ["Try to move to the next photo, by tapping or swiping."],
+            "expect": "The red photo still shows, with no blank photo, no error and no marker saying there is a second photo."
+          }
+        ]
+      },
+      {
+        "name": "Browse, like and pass",
+        "checks": [
+          {
+            "given": "Two owners have signed up: one with a horse named \"Bella\", the other with a horse named \"Comet\". Comet's owner is signed in.",
+            "steps": ["Open the profiles to browse."],
+            "expect": "Bella's profile shows on its own, with a way to like her and a way to pass."
+          },
+          {
+            "given": "Comet's owner is browsing and Bella's profile shows.",
+            "steps": ["Pass on Bella.", "Reload the page and browse again."],
+            "expect": "Bella's profile does not show again."
+          }
+        ]
+      },
+      {
+        "name": "Matches",
+        "checks": [
+          {
+            "given": "Bella's owner has liked Comet. Comet's owner is signed in and Bella's profile shows.",
+            "steps": ["Like Bella.", "Open the list of matches."],
+            "expect": "Bella is in Comet's list of matches."
+          },
+          {
+            "given": "Nobody has liked Comet. Comet's owner is signed in and Bella's profile shows.",
+            "steps": ["Like Bella.", "Open the list of matches."],
+            "expect": "The list of matches is empty."
+          }
+        ]
+      }
+    ]
+  }
+}

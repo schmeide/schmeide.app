@@ -250,6 +250,16 @@ interview/eval: node_modules ## Real Claude run of the interview against the scr
 		$(if $(OWNER),--owner $(OWNER)) $(if $(MODEL),--model $(MODEL))
 	$(JS_EXEC) exec prettier -- --write docs/interview-transcripts >/dev/null
 
+.PHONY: eval/features
+eval/features: node_modules ## Real Claude builds of the test apps against `make serve`; reports the checks that work, fix rounds, time and cost (APP=todo, KEEP=1)
+	$(JS_EXEC) run features:eval -w server -- $(if $(APP),--app $(APP)) $(if $(OUT),--out $(abspath $(OUT))) \
+		$(if $(SAMPLE),--sample $(SAMPLE))
+
+.PHONY: eval/features/report
+eval/features/report: node_modules ## Report of a feature eval run, with the tester's verdicts a person marked (RUN=<dir>)
+	$(if $(RUN),,$(error RUN=<dir> is required: the directory `make eval/features` printed))
+	$(JS_EXEC) run --silent features:eval -w server -- --report $(abspath $(RUN))
+
 E2E_FAKE_PORT ?= 3199
 
 .PHONY: e2e/fake
