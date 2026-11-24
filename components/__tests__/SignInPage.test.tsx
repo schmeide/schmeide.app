@@ -36,13 +36,16 @@ describe("the sign-in page", () => {
   });
 
   it("says the app is invitation-only and offers a button for each provider that is on", async () => {
-    open("/sign-in", { session: signedOut, providers: ["google", "apple"] });
+    open("/sign-in", { session: signedOut, providers: ["google", "apple", "auth0"] });
     expect(await screen.findByText(copy.signInPage.intro)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: copy.signInPage.provider.google })
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: copy.signInPage.provider.apple })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: copy.signInPage.provider.auth0 })
     ).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: copy.signInPage.provider.microsoft })).toBeNull();
   });

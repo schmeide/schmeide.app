@@ -1,11 +1,12 @@
 import { eq } from "drizzle-orm";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { randomUUID } from "node:crypto";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
-import { invites } from "../db/schema.ts";
+import { accounts, invites, users } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { approveEmail, listApproved, removeApproval } from "../services/access.ts";
-import { admit, authConfigFromEnv, REFUSED } from "../services/auth.ts";
+import { admit, authConfigFromEnv, enabledProviders, REFUSED } from "../services/auth.ts";
 import {
   anEmail,
   callApi,
@@ -14,6 +15,8 @@ import {
   TEST_ORIGIN,
   testAuth,
 } from "./testAuth.ts";
+
+const AUTH0_DOMAIN = "schmeide-test.us.auth0.com";
 
 const db = createDb(process.env.DATABASE_URL ?? "");
 afterAll(() => db.$client.end());
@@ -299,5 +302,88 @@ describe("sign-in settings", () => {
     });
     expect(providers.google).toEqual({ clientId: "id", clientSecret: "secret" });
     expect(providers.apple).toBeUndefined();
+  });
+
+  it("turns Auth0 on only when its domain is set as well", () => {
+    const values = { SCHMEIDE_AUTH0_CLIENT_ID: "id", SCHMEIDE_AUTH0_CLIENT_SECRET: "secret" };
+    expect(authConfigFromEnv(values).providers.auth0).toBeUndefined();
+
+    const config = authConfigFromEnv({ ...values, SCHMEIDE_AUTH0_DOMAIN: AUTH0_DOMAIN });
+    expect(config.providers.auth0).toEqual({
+      clientId: "id",
+      clientSecret: "secret",
+      domain: AUTH0_DOMAIN,
+    });
+    expect(enabledProviders(config)).toEqual(["auth0"]);
+  });
+});
+
+describe("sign-in with Auth0", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Auth0's own description of itself, which the server reads once to find its addresses.
+  const discovery = {
+    issuer: `https://${AUTH0_DOMAIN}/`,
+    authorization_endpoint: `https://${AUTH0_DOMAIN}/authorize`,
+    token_endpoint: `https://${AUTH0_DOMAIN}/oauth/token`,
+    userinfo_endpoint: `https://${AUTH0_DOMAIN}/userinfo`,
+    jwks_uri: `https://${AUTH0_DOMAIN}/.well-known/jwks.json`,
+    end_session_endpoint: `https://${AUTH0_DOMAIN}/oidc/logout`,
+    id_token_signing_alg_values_supported: ["RS256"],
+  };
+
+  const withAuth0 = () => {
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+      asked.push(String(input instanceof Request ? input.url : input));
+      return Response.json(discovery);
+    });
+    const auth0 = { clientId: "auth0-client", clientSecret: "auth0-secret", domain: AUTH0_DOMAIN };
+    const server = buildApp({ ...context, auth: testAuth(db, { providers: { auth0 } }) });
+    return { server, asked };
+  };
+
+  it("sends the person to the Auth0 tenant, to return to the same address as any provider", async () => {
+    const { server, asked } = withAuth0();
+    const response = await server.inject({
+      method: "POST",
+      url: "/auth/sign-in/social",
+      headers: { origin: TEST_ORIGIN },
+      payload: { provider: "auth0", callbackURL: `${TEST_ORIGIN}/usage` },
+    });
+    await server.close();
+
+    expect(response.statusCode).toBe(200);
+    const url = new URL(response.json().url);
+    expect(url.origin + url.pathname).toBe(discovery.authorization_endpoint);
+    expect(url.searchParams.get("client_id")).toBe("auth0-client");
+    expect(url.searchParams.get("redirect_uri")).toBe(`${TEST_ORIGIN}/api/auth/callback/auth0`);
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual(
+      expect.arrayContaining(["openid", "email"])
+    );
+    expect(asked).toEqual([`https://${AUTH0_DOMAIN}/.well-known/openid-configuration`]);
+  });
+
+  it("leaves the Auth0 session alone on sign-out, as with every other provider", async () => {
+    const { server } = withAuth0();
+    const email = await aPerson();
+    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.email, email));
+    await db.insert(accounts).values({
+      id: randomUUID(),
+      userId: user.id,
+      providerId: "auth0",
+      accountId: `auth0|${randomUUID()}`,
+    });
+    const { cookie } = await signInTo(server, email);
+    const response = await server.inject({
+      method: "POST",
+      url: "/auth/sign-out",
+      headers: { origin: TEST_ORIGIN, cookie },
+    });
+    await server.close();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ success: true });
+    expect(response.headers.location).toBeUndefined();
   });
 });
