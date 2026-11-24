@@ -3,6 +3,7 @@
 // as Jobs in the builds namespace. Read here, from the environment, and checked once at startup.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { chromium } from "playwright";
 import {
   createCluster,
   createKube,
@@ -120,9 +121,16 @@ const missingRight = (verb: string, resource: string) =>
 // `make doctor` does for dev mode.
 export const checkRunner = async (
   runner: KubeRunner,
-  tokenFile: string = join(SERVICE_ACCOUNT_DIR, "token")
+  tokenFile: string = join(SERVICE_ACCOUNT_DIR, "token"),
+  // Starts and stops the headless Chromium Playwright was built for.
+  launch: () => Promise<unknown> = () => chromium.launch().then((browser) => browser.close())
 ): Promise<readonly string[]> => {
   const problems: string[] = [];
+  await launch().catch((error: unknown) => {
+    problems.push(
+      `Cannot start Chromium (${String(error).split("\n")[0]}), so versions get no pictures and no feature is checked in a browser. Run the server from the image this repository's Dockerfile builds, which installs it.`
+    );
+  });
   await runner.forgejo.whoami().catch((error: unknown) => {
     problems.push(
       `Cannot use Forgejo (${String(error)}). Check SCHMEIDE_FORGEJO_URL and that SCHMEIDE_FORGEJO_TOKEN is a token of the schmeide-platform user.`
