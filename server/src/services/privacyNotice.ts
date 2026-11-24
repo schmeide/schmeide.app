@@ -39,7 +39,9 @@ const given = (value: string | null): string =>
 
 export const privacyPage = (facts: PrivacyFacts & { readonly tables: readonly string[] }) => {
   const business = given(facts.business);
+  // prettier-ignore: the app's own `make check` runs prettier, and this page is written for it.
   return `<!doctype html>
+<!-- prettier-ignore -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -71,14 +73,22 @@ ${facts.tables.map((table) => `        <li>${escapeHtml(table)}</li>`).join("\n"
 
 const FOOTER = /[ \t]*<!-- schmeide:footer -->[\s\S]*?<!-- \/schmeide:footer -->\n?/g;
 
-// Replaces the footer it added before, if any, so running it again changes nothing.
+// Replaces the footer it added before, if any, so running it again changes nothing. The footer is
+// on its own lines behind prettier-ignore, so the app's prettier check passes on it as written.
 export const withFooter = (
   html: string,
   links: { readonly privacy: boolean; readonly report: string }
 ): string => {
   const privacy = links.privacy ? `<a href="/${PRIVACY_FILE}">Privacy notice</a> · ` : "";
-  const footer = `    <!-- schmeide:footer --><footer style="text-align:center;font-size:0.875rem;padding:1rem">${privacy}<a href="${escapeHtml(links.report)}">Report this app</a></footer><!-- /schmeide:footer -->\n`;
-  return html.replace(FOOTER, "").replace(/<\/body>/i, () => `${footer}  </body>`);
+  const footer = [
+    "<!-- schmeide:footer -->",
+    "<!-- prettier-ignore -->",
+    `<footer style="text-align:center;font-size:0.875rem;padding:1rem">${privacy}<a href="${escapeHtml(links.report)}">Report this app</a></footer>`,
+    "<!-- /schmeide:footer -->",
+  ]
+    .map((line) => `    ${line}\n`)
+    .join("");
+  return html.replace(FOOTER, "").replace(/[ \t]*<\/body>/i, () => `${footer}  </body>`);
 };
 
 // Writes frontend/public/privacy.html (or removes it when the app keeps no table) and the footer
