@@ -17,7 +17,7 @@ import { join, relative } from "node:path";
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CancelledFailure } from "@temporalio/common";
 import { MockActivityEnvironment } from "@temporalio/testing";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb } from "../../db/client.ts";
 import {
@@ -27,6 +27,7 @@ import {
   builds,
   databaseCopies,
   files,
+  buildAcceptance,
   projectAcceptance,
   projectDesigns,
   projectIcons,
@@ -39,7 +40,15 @@ import {
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createSummaries, listSummaries } from "../../services/summaries.ts";
 import type { Summarizer } from "../../services/summarizer.ts";
-import { acceptancePrompt, liveChecks, specHash } from "../../services/acceptance.ts";
+import {
+  NEVER_OPENED,
+  NO_ANSWER,
+  acceptancePrompt,
+  liveChecks,
+  planFrom,
+  specHash,
+} from "../../services/acceptance.ts";
+import type { AppBrowser } from "../../services/appBrowser.ts";
 import { briefPrompt, designBrief } from "../../services/designBrief.ts";
 import { reviewFeedbackPrompt, type ScreenCapture } from "../../services/designReview.ts";
 import { DEFAULT_STYLE } from "../../services/designStyles.ts";
@@ -1304,6 +1313,35 @@ describe("the two copies", () => {
     });
   });
 
+  it("holds a first build on staging while its features are checked, then puts it live", async () => {
+    const { project, build, activities, env, workspace, production, staging, live, ran } =
+      await prepared();
+
+    await env.run(activities.deploy, build.id, { hold: true });
+
+    const commit = (await buildRow(build.id)).commit;
+    expect(ran()).toEqual([`up ${staging} ${commit} ${workspace}`]);
+    expect(await projectRow(project.id)).toMatchObject({
+      stagingCommit: commit,
+      stagingUrl: `http://localhost:${project.webPort + 10_000}`,
+      productionCommit: null,
+      status: "building",
+    });
+
+    await env.run(activities.goLive, build.id);
+
+    expect(ran()).toEqual([
+      `up ${staging} ${commit} ${workspace}`,
+      `up ${live} ${commit} ${production}`,
+    ]);
+    expect(await projectRow(project.id)).toMatchObject({
+      productionCommit: commit,
+      previewUrl: `http://localhost:${project.webPort}`,
+      status: "live",
+    });
+    expect((await buildRow(build.id)).release).toBe("promoted");
+  });
+
   it("gives an app that is live with one copy a staging copy on its next build", async () => {
     const { project, activities, env, workspace, staging, ran, anotherBuild, dataDir } =
       await prepared();
@@ -2213,6 +2251,274 @@ describe("the acceptance checks", () => {
 
     expect(calls).toHaveLength(0);
     expect(await acceptanceOf(project.id)).toBeUndefined();
+  });
+});
+
+describe("the tester", () => {
+  const PLAN = planFrom(
+    {
+      features: [
+        {
+          name: "Photo carousel",
+          checks: [
+            {
+              given: "A profile with three photos.",
+              steps: ["Open the profile.", "Tap Next photo."],
+              expect: "The second photo shows.",
+            },
+            {
+              given: "A profile with one photo.",
+              steps: ["Open the profile."],
+              expect: "No Next photo button shows.",
+            },
+          ],
+        },
+        {
+          name: "Messages",
+          checks: [
+            { given: "Two horses.", steps: ["Send Hello."], expect: "Hello is in the thread." },
+          ],
+        },
+      ],
+    },
+    1
+  );
+  const STAGING = "http://localhost:18100";
+
+  type Answer = (prompt: string, browser: AppBrowser | undefined) => Promise<unknown>;
+  // A project with checks and its build up on staging, a browser that notes where it was opened
+  // and closed, and a tester that answers with `answer` after using that browser as it likes.
+  const testing = async (
+    answer: Answer,
+    configured: Partial<Config> & { readonly noBrowser?: boolean } = {}
+  ) => {
+    const { config } = setup();
+    const { project, build } = await newBuild();
+    await db.update(projects).set({ stagingUrl: STAGING }).where(eq(projects.id, project.id));
+    await db
+      .insert(projectAcceptance)
+      .values({ projectId: project.id, specHash: specHash(""), plan: PLAN });
+    const browsers: { origin: string; opened: number; closed: boolean }[] = [];
+    const calls: { prompt: string; options: Options }[] = [];
+    const openBrowser = async (origin: string): Promise<AppBrowser> => {
+      const state = { origin, opened: 0, closed: false };
+      browsers.push(state);
+      return {
+        open: async (path) => {
+          state.opened++;
+          return `Opened ${path}`;
+        },
+        opened: () => state.opened,
+        close: async () => {
+          state.closed = true;
+        },
+      } as Partial<AppBrowser> as AppBrowser;
+    };
+    // The tester's browser is the one opened last when its run starts.
+    const pending: AppBrowser[] = [];
+    const opening = async (origin: string) => {
+      const browser = await openBrowser(origin);
+      pending.push(browser);
+      return browser;
+    };
+    const query = ((params: { prompt: string; options: Options }) => {
+      const browser = pending.shift();
+      const holder: { value?: unknown } = {};
+      const inner = (async function* (): AsyncGenerator<SDKMessage> {
+        holder.value = await answer(params.prompt, browser);
+        yield* leadQuery(calls, holder.value)(params) as AsyncGenerator<SDKMessage>;
+      })();
+      return inner;
+    }) as unknown as Query;
+    const { noBrowser, ...rest } = configured;
+    const activities = createActivities(
+      deps,
+      { ...config, acceptance: true, ...(!noBrowser && { openBrowser: opening }), ...rest },
+      query
+    );
+    const env = new MockActivityEnvironment();
+    const check = (round = 0, last = false) =>
+      env.run(activities.checkAcceptance, { buildId: build.id, round, last });
+    const kept = async () =>
+      (
+        await db
+          .select()
+          .from(buildAcceptance)
+          .where(eq(buildAcceptance.buildId, build.id))
+          .orderBy(asc(buildAcceptance.checkId))
+      ).map(({ checkId, verdict, saw, round }) => [checkId, verdict, saw, round]);
+    return { project, build, browsers, calls, check, kept };
+  };
+  // Opens the app, then answers `verdict` for every check in the prompt, but for `broken`.
+  const verdicts =
+    (broken: Readonly<Record<string, string>> = {}): Answer =>
+    async (prompt, browser) => {
+      await browser?.open("/");
+      return {
+        results: [...prompt.matchAll(/^- (F\d+\.\d+)$/gm)].map(([, id]) =>
+          id in broken
+            ? { id, verdict: "broken", saw: broken[id] }
+            : { id, verdict: "works", saw: "It ended as written." }
+        ),
+      };
+    };
+
+  it("follows each feature's checks with a browser on staging and nothing else, and keeps what it found", async () => {
+    const { build, browsers, calls, check, kept } = await testing(verdicts());
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect(browsers).toEqual([
+      { origin: STAGING, opened: 1, closed: true },
+      { origin: STAGING, opened: 1, closed: true },
+    ]);
+    expect(calls).toHaveLength(2);
+    const carousel = calls.find(({ prompt }) => prompt.includes("F1: Photo carousel"));
+    expect(carousel?.prompt).toContain("- F1.2");
+    expect(carousel?.prompt).not.toContain("Messages");
+    expect(carousel?.prompt).not.toContain("## Features");
+    expect(carousel?.options).toMatchObject({
+      model: "sonnet",
+      tools: [],
+      settingSources: [],
+      persistSession: false,
+      outputFormat: { type: "json_schema" },
+      strictMcpConfig: true,
+      maxTurns: 80,
+    });
+    expect(carousel?.options.allowedTools).toContain("mcp__app__click");
+    expect(carousel?.options.allowedTools?.every((tool) => tool.startsWith("mcp__app__"))).toBe(
+      true
+    );
+    expect(await kept()).toEqual([
+      ["F1.1", "works", "It ended as written.", 0],
+      ["F1.2", "works", "It ended as written.", 0],
+      ["F2.1", "works", "It ended as written.", 0],
+    ]);
+    const said = await messages(build.id);
+    expect(said[0]).toBe(
+      "Acceptance: a tester is following the 2 features, 3 checks in the running app"
+    );
+    expect(said).toEqual(
+      expect.arrayContaining(["F1.1 works: Photo carousel", "F2.1 works: Messages"])
+    );
+    expect(said.at(-1)).toBe("Acceptance: all 3 checks work");
+    expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toHaveLength(2);
+  });
+
+  it("sends a broken check back to the builder with what the tester saw", async () => {
+    const saw = "Tapped Next photo twice; the picture stayed red.";
+    const { build, check, kept } = await testing(verdicts({ "F1.1": saw }));
+
+    const result = await check();
+
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("F1.1 (Photo carousel)");
+    expect(result.output).toContain("Then: The second photo shows.");
+    expect(result.output).toContain(`What the tester saw: ${saw}`);
+    expect(result.output).not.toContain("F1.2");
+    expect(result.output).not.toContain("F2.1");
+    expect((await kept())[0]).toEqual(["F1.1", "broken", saw, 0]);
+    expect(await messages(build.id)).toEqual(
+      expect.arrayContaining([
+        `F1.1 is broken: Photo carousel. ${saw}`,
+        "Acceptance: 1 of 3 checks are broken",
+      ])
+    );
+  });
+
+  it("keeps a version whose check is still broken after the last round, and says which", async () => {
+    const { build, check, kept } = await testing(verdicts({ "F2.1": "Send did nothing." }));
+
+    await check(0);
+    expect(await check(2, true)).toEqual({ ok: true, output: "" });
+
+    expect((await kept())[2]).toEqual(["F2.1", "broken", "Send did nothing.", 2]);
+    expect((await messages(build.id)).at(-1)).toBe(
+      "Acceptance: 1 of 3 checks are still broken after 2 fix rounds; this version is kept, with those features not working yet"
+    );
+  });
+
+  it.each([
+    [
+      "answered without opening the app",
+      async () => ({ results: [{ id: "F1.1", verdict: "works", saw: "Looks fine." }] }),
+      ["F1.1", "could_not_check", NEVER_OPENED, 0],
+    ],
+    [
+      "answered out of form",
+      async (_prompt: string, browser: AppBrowser | undefined) => {
+        await browser?.open("/");
+        return "all good";
+      },
+      ["F1.1", "could_not_check", NO_ANSWER, 0],
+    ],
+    [
+      "could not be reached",
+      async () => {
+        throw new Error("network down");
+      },
+      ["F1.1", "could_not_check", NO_ANSWER, 0],
+    ],
+  ] as const)("counts no check as working when the tester %s", async (_what, answer, first) => {
+    const { build, check, kept } = await testing(answer);
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect((await kept())[0]).toEqual(first);
+    expect((await messages(build.id)).at(-1)).toBe(
+      "Acceptance: nothing is broken, and 3 could not be checked"
+    );
+  });
+
+  it("goes on, and says so, where there is no browser", async () => {
+    const { build, calls, check, kept } = await testing(verdicts(), { noBrowser: true });
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect(calls).toHaveLength(0);
+    expect(await kept()).toEqual([]);
+    expect(await messages(build.id)).toEqual([
+      "Acceptance: there is no browser here, so the features were not checked in the running app",
+    ]);
+  });
+
+  it("could not check a feature whose browser did not open", async () => {
+    const { calls, check, kept } = await testing(verdicts(), {
+      openBrowser: () => Promise.reject(new Error("Chromium is not installed")),
+    });
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect(calls).toHaveLength(0);
+    expect((await kept()).map(([, verdict]) => verdict)).toEqual([
+      "could_not_check",
+      "could_not_check",
+      "could_not_check",
+    ]);
+  });
+
+  it("does nothing while the checks are off", async () => {
+    const { build, browsers, check } = await testing(verdicts(), { acceptance: false });
+
+    expect(await check()).toEqual({ ok: true, output: "" });
+
+    expect(browsers).toEqual([]);
+    expect(await messages(build.id)).toEqual([]);
+  });
+
+  it("gives the builder the broken checks for its fix round", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, fakeQuery(calls));
+    const env = new MockActivityEnvironment();
+    const { build } = await newBuild();
+    await env.run(activities.prepareWorkspace, build.id);
+
+    await env.run(activities.runAgent, { buildId: build.id, acceptance: "F1.1 is broken" });
+
+    expect(calls[0].prompt).toBe("F1.1 is broken");
+    expect(await messages(build.id)).toContain("Agent is fixing features that do not work");
   });
 });
 

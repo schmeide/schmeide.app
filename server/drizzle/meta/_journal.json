@@ -267,6 +267,13 @@
       "when": 1795398380554,
       "tag": "0037_acceptance_checks",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1795400436593,
+      "tag": "0038_build_acceptance",
+      "breakpoints": true
     }
   ]
 }

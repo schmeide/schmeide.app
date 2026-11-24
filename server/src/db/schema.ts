@@ -19,7 +19,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
-import type { AcceptancePlan } from "../services/acceptance.ts";
+import { VERDICTS, type AcceptancePlan } from "../services/acceptance.ts";
 import { DESIGN_CHOOSERS, type DesignBrief } from "../services/designBrief.ts";
 
 // Tables are the single source: validation and API types derive from them.
@@ -338,6 +338,25 @@ export const projectAcceptance = pgTable("project_acceptance", {
     .defaultNow()
     .$onUpdate(() => new Date()),
 });
+
+export const acceptanceVerdict = pgEnum("acceptance_verdict", VERDICTS);
+
+// What the tester found for each acceptance check of a build (#356), from the last time it
+// followed them: a fix round's results replace the round before.
+export const buildAcceptance = pgTable(
+  "build_acceptance",
+  {
+    buildId: integer("build_id")
+      .notNull()
+      .references(() => builds.id, { onDelete: "cascade" }),
+    checkId: varchar("check_id", { length: 16 }).notNull(),
+    feature: text("feature").notNull(),
+    verdict: acceptanceVerdict("verdict").notNull(),
+    saw: text("saw").notNull(),
+    round: integer("round").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.buildId, table.checkId] })]
+);
 
 // The plan the interview builds: the same parts the spec has, plus the business it serves, who uses
 // the app, and the rules that break a simple version of it.
