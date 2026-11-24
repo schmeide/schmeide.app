@@ -11,17 +11,19 @@ export const ROUTED_KINDS = [
   "change",
   "design",
   "review",
+  "acceptance",
 ] as const satisfies readonly RunKind[];
 export type RoutedKind = (typeof ROUTED_KINDS)[number];
 
 export const FALLBACK_MODEL_ENV = "SCHMEIDE_AGENT_MODEL";
 export const DEFAULT_MODEL = "opus";
 
-// Kinds that start on their own model rather than the fallback: the design team's runs judge and
-// write little code, so a mid-size model does (#159).
+// Kinds that start on their own model rather than the fallback: the design team's runs and the
+// acceptance checks' judge and write little code, so a mid-size model does (#159, #354).
 const KIND_DEFAULTS: Readonly<Partial<Record<RoutedKind, string>>> = {
   design: "sonnet",
   review: "sonnet",
+  acceptance: "sonnet",
 };
 
 // A route per run kind; a kind without one uses the fallback. A route is `provider:model` or a bare

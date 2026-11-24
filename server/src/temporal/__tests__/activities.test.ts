@@ -27,6 +27,7 @@ import {
   builds,
   databaseCopies,
   files,
+  projectAcceptance,
   projectDesigns,
   projectIcons,
   projects,
@@ -38,6 +39,7 @@ import {
 import { getBuild, listEvents } from "../../services/builds.ts";
 import { createSummaries, listSummaries } from "../../services/summaries.ts";
 import type { Summarizer } from "../../services/summarizer.ts";
+import { acceptancePrompt, liveChecks, specHash } from "../../services/acceptance.ts";
 import { briefPrompt, designBrief } from "../../services/designBrief.ts";
 import { reviewFeedbackPrompt, type ScreenCapture } from "../../services/designReview.ts";
 import { DEFAULT_STYLE } from "../../services/designStyles.ts";
@@ -266,6 +268,15 @@ describe("buildPrompt", () => {
       expect(prompt).toContain("schmeide:mobile-first");
       expect(prompt).toContain("360px");
       expect(prompt).toMatch(/stylesheet/);
+    }
+  );
+
+  it.each(["initial", "change"] as const)(
+    "gives a %s build the acceptance checks after the standing rules",
+    (kind) => {
+      const prompt = buildPrompt(kind, "## Features", "Add a due date", [], undefined, [], "F1.1");
+
+      expect(prompt).toMatch(/Standing rules:[^]*F1\.1[^]*## Features/);
     }
   );
 
@@ -2007,6 +2018,201 @@ describe("the design lead", () => {
     const brief = (await designOf(project.id)).brief;
     expect(calls[0].prompt).toContain(briefPrompt(brief, "initial"));
     expect(calls[1].prompt).toContain(briefPrompt(brief, "change"));
+  });
+});
+
+const WRITTEN = {
+  features: [
+    {
+      name: "Notes",
+      checks: [
+        {
+          given: "No notes yet.",
+          steps: ["Type Milk into New note.", "Tap Add."],
+          expect: "Milk is first in the list.",
+        },
+      ],
+    },
+  ],
+};
+
+const acceptanceOf = async (projectId: number) =>
+  (await db.select().from(projectAcceptance).where(eq(projectAcceptance.projectId, projectId)))[0];
+
+describe("the acceptance checks", () => {
+  const writing = (answer: unknown = WRITTEN, fail = false) => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const answers = { next: answer };
+    const writer = ((params: { prompt: string; options: Options }) =>
+      leadQuery(calls, answers.next, fail)(params)) as unknown as Query;
+    const activities = createActivities(deps, { ...config, acceptance: true }, writer);
+    const env = new MockActivityEnvironment();
+    const plan = (buildId: number) => env.run(activities.planAcceptance, buildId);
+    return { activities, answers, calls, env, plan };
+  };
+  const changeOf = async (projectId: number, request = "add due dates") =>
+    (await db.insert(builds).values({ projectId, kind: "change", request }).returning())[0];
+
+  it("writes checks from the spec before the first build, and keeps them for a rebuild", async () => {
+    const { calls, plan } = writing();
+    const { project, build } = await newBuild();
+
+    await plan(build.id);
+    const [again] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "initial", request: "spec" })
+      .returning();
+    await plan(again.id);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].prompt).toContain("## Features\n- notes");
+    expect(calls[0].options).toMatchObject({
+      model: "sonnet",
+      tools: [],
+      settingSources: [],
+      persistSession: false,
+      outputFormat: { type: "json_schema" },
+    });
+    const kept = await acceptanceOf(project.id);
+    expect(kept.specHash).toBe(specHash("## Features\n- notes"));
+    expect(liveChecks(kept.plan)).toEqual([
+      {
+        ...WRITTEN.features[0].checks[0],
+        id: "F1.1",
+        feature: "Notes",
+        build: build.id,
+        retired: false,
+      },
+    ]);
+    expect(await messages(build.id)).toEqual([
+      "Writing down how each feature will be checked",
+      "Acceptance: 1 feature, 1 check to follow in the running app",
+    ]);
+    expect(await messages(again.id)).toEqual([
+      "Acceptance: keeping the 1 feature, 1 check written before",
+    ]);
+    expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([
+      expect.objectContaining({ runKind: "acceptance", costUsd: 0.02 }),
+    ]);
+  });
+
+  it("writes them again for a first build from another spec", async () => {
+    const { calls, plan } = writing();
+    const { project, build } = await newBuild();
+    await plan(build.id);
+    await db
+      .update(projects)
+      .set({ spec: "## Features\n- orders" })
+      .where(eq(projects.id, project.id));
+    const [again] = await db
+      .insert(builds)
+      .values({ projectId: project.id, kind: "initial", request: "spec" })
+      .returning();
+
+    await plan(again.id);
+
+    expect(calls).toHaveLength(2);
+    expect((await acceptanceOf(project.id)).specHash).toBe(specHash("## Features\n- orders"));
+  });
+
+  it.each([
+    ["answers in the wrong form", "they all work", false],
+    ["names no feature", { features: [] }, false],
+    ["fails", WRITTEN, true],
+    ["cannot be reached", new Error("network down"), false],
+  ])("goes on without checks, and says so, when the writer %s", async (_what, answer, fail) => {
+    const { plan } = writing(answer, fail);
+    const { project, build } = await newBuild();
+
+    await plan(build.id);
+
+    expect(await acceptanceOf(project.id)).toBeUndefined();
+    expect(await messages(build.id)).toContain(
+      "Acceptance: the checks could not be written, so this build goes on without new ones"
+    );
+  });
+
+  it("adds a change's checks and retires what it makes untrue, once", async () => {
+    const { answers, calls, plan } = writing();
+    const { project, build } = await newBuild();
+    await plan(build.id);
+    const change = await changeOf(project.id);
+    answers.next = {
+      features: [{ name: "Due dates", checks: WRITTEN.features[0].checks }],
+      retire: ["F1.1"],
+    };
+
+    await plan(change.id);
+    await plan(change.id);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].prompt).toContain("BEGIN CHANGE REQUEST");
+    expect(calls[1].prompt).toContain("add due dates");
+    expect(calls[1].prompt).toContain("- F1.1");
+    const { plan: kept } = await acceptanceOf(project.id);
+    expect(liveChecks(kept).map(({ id, build: by }) => [id, by])).toEqual([["F2.1", change.id]]);
+    expect(await messages(change.id)).toEqual([
+      "Writing down how this change will be checked",
+      "Acceptance: 1 feature, 1 check to follow in the running app",
+      "Acceptance: keeping the 1 feature, 1 check written before",
+    ]);
+  });
+
+  it("leaves the checks as they are for a change that needs none", async () => {
+    const { answers, plan } = writing();
+    const { project, build } = await newBuild();
+    await plan(build.id);
+    const change = await changeOf(project.id, "make the heading blue");
+    answers.next = { features: [], retire: [] };
+
+    await plan(change.id);
+
+    expect(liveChecks((await acceptanceOf(project.id)).plan).map(({ id }) => id)).toEqual(["F1.1"]);
+    expect(await messages(change.id)).toContain("Acceptance: this change needs no new checks");
+  });
+
+  it("writes checks for an app built before there were any, from the spec and its changes", async () => {
+    const { calls, plan } = writing();
+    const { project } = await newBuild();
+    const change = await changeOf(project.id);
+
+    await plan(change.id);
+
+    expect(calls[0].prompt).toContain("BEGIN SPEC");
+    expect(calls[0].prompt).toMatch(/BEGIN CHANGES [^\n]*\n1\. add due dates\nEND CHANGES/);
+    expect(liveChecks((await acceptanceOf(project.id)).plan)).toHaveLength(1);
+  });
+
+  it("gives the builder the checks", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const builder = fakeQuery(calls);
+    const query = ((params: { prompt: string; options: Options }) =>
+      params.options.outputFormat
+        ? leadQuery([], WRITTEN)(params)
+        : builder(params)) as unknown as Query;
+    const activities = createActivities(deps, { ...config, acceptance: true }, query);
+    const env = new MockActivityEnvironment();
+    const { project, build } = await newBuild();
+    await env.run(activities.prepareWorkspace, build.id);
+    await env.run(activities.planAcceptance, build.id);
+
+    await env.run(activities.runAgent, { buildId: build.id });
+
+    expect(calls[0].prompt).toContain(acceptancePrompt((await acceptanceOf(project.id)).plan));
+  });
+
+  it("does nothing while it is off", async () => {
+    const { config } = setup();
+    const calls: { prompt: string; options: Options }[] = [];
+    const activities = createActivities(deps, config, leadQuery(calls, WRITTEN));
+    const { project, build } = await newBuild();
+
+    await new MockActivityEnvironment().run(activities.planAcceptance, build.id);
+
+    expect(calls).toHaveLength(0);
+    expect(await acceptanceOf(project.id)).toBeUndefined();
   });
 });
 

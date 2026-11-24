@@ -19,6 +19,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema, createSelectSchema } from "drizzle-zod";
 import { z } from "zod";
+import type { AcceptancePlan } from "../services/acceptance.ts";
 import { DESIGN_CHOOSERS, type DesignBrief } from "../services/designBrief.ts";
 
 // Tables are the single source: validation and API types derive from them.
@@ -250,6 +251,7 @@ export const agentRunKind = pgEnum("agent_run_kind", [
   "summary",
   "design",
   "review",
+  "acceptance",
 ]);
 
 // A plain-language account of a build, written as it runs from its events (services/summaries.ts).
@@ -314,6 +316,22 @@ export const projectDesigns = pgTable("project_designs", {
   style: varchar("style", { length: 32 }).notNull(),
   chosenBy: designChooser("chosen_by").notNull(),
   brief: jsonb("brief").$type<DesignBrief>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+});
+
+// The acceptance checks of a project's app (services/acceptance.ts): written from the spec before
+// its first build and added to by every change. specHash is the spec they were written from, so
+// a first build from another spec writes them again.
+export const projectAcceptance = pgTable("project_acceptance", {
+  projectId: integer("project_id")
+    .primaryKey()
+    .references(() => projects.id),
+  specHash: varchar("spec_hash", { length: 64 }).notNull(),
+  plan: jsonb("plan").$type<AcceptancePlan>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true })
     .notNull()

@@ -35,7 +35,7 @@ describe("agent model routing", () => {
     const routing = routingFromEnv({ SCHMEIDE_AGENT_MODEL_SPEC: "haiku" });
 
     expect(describeRouting(routing)).toBe(
-      "spec haiku, initial opus, change opus, design sonnet, review sonnet"
+      "spec haiku, initial opus, change opus, design sonnet, review sonnet, acceptance sonnet"
     );
   });
 
@@ -94,7 +94,7 @@ describe("agent model routing", () => {
     expect(pickModel(routing, "design")).toMatchObject({ provider: "claude", model: "sonnet" });
     expect(pickModel(routing, "review")).toMatchObject({ provider: "claude", model: "sonnet" });
     expect(describeRouting(routing)).toBe(
-      "spec openai:gpt-5-mini, initial opus, change openai:gpt-5-codex, design sonnet, review sonnet"
+      "spec openai:gpt-5-mini, initial opus, change openai:gpt-5-codex, design sonnet, review sonnet, acceptance sonnet"
     );
   });
 

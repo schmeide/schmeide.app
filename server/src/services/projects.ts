@@ -32,6 +32,7 @@ import {
   interviews,
   planItems,
   readBacks,
+  projectAcceptance,
   projectDesigns,
   projectIcons,
   projects,
@@ -1018,6 +1019,7 @@ export const deleteProjectRows = (db: Db, id: number): Promise<void> =>
     await tx.delete(agentRuns).where(eq(agentRuns.projectId, id));
     await tx.delete(projectIcons).where(eq(projectIcons.projectId, id));
     await tx.delete(projectDesigns).where(eq(projectDesigns.projectId, id));
+    await tx.delete(projectAcceptance).where(eq(projectAcceptance.projectId, id));
     await tx.delete(planItems).where(eq(planItems.projectId, id));
     await tx.delete(interviewQuestions).where(eq(interviewQuestions.projectId, id));
     await tx.delete(interviews).where(eq(interviews.projectId, id));

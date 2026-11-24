@@ -54,6 +54,7 @@ import {
   builds,
   databaseCopies,
   files,
+  projectAcceptance,
   projectDesigns,
   projectIcons,
   projects,
@@ -147,6 +148,22 @@ import { writePrivacy } from "../services/privacyNotice.ts";
 import { ICON_FILE, iconType, withSite } from "../services/site.ts";
 import type { Summaries } from "../services/summaries.ts";
 import { savePictures, type Photograph } from "../services/pictures.ts";
+import {
+  CHANGED_JSON_SCHEMA,
+  WRITTEN_JSON_SCHEMA,
+  acceptancePrompt,
+  changePrompt,
+  countOf,
+  liveChecks,
+  parseChanged,
+  parseWritten,
+  planAfter,
+  planFrom,
+  plannedBy,
+  specHash,
+  writerPrompt,
+  type AcceptancePlan,
+} from "../services/acceptance.ts";
 
 export type { Query };
 
@@ -163,6 +180,9 @@ export type Config = {
   // The design team (#159, SCHMEIDE_DESIGN_TEAM): a design lead chooses the app's look before
   // its first build and the builder builds to it. Off by default, so builds run as they did.
   readonly designTeam?: boolean;
+  // The acceptance checks (#354, SCHMEIDE_ACCEPTANCE): before the builder runs, every feature in
+  // the spec gets checks a person could follow in the running app. Absent is off.
+  readonly acceptance?: boolean;
   // A command that stands in for Claude (SCHMEIDE_AGENT_CMD): `<cmd> spec` prints a spec and
   // `<cmd> build` edits the workspace, both with the prompt in AGENT_PROMPT. Used by `make e2e/fake`.
   readonly agentCmd?: string;
@@ -332,7 +352,8 @@ ${changes.map((change, index) => `${index + 1}. ${change}`).join("\n")}
 `
     : "";
 
-// `design` is the design brief's part of the prompt (services/designBrief.ts), when there is one.
+// `design` is the design brief's part of the prompt (services/designBrief.ts), when there is one,
+// and `acceptance` the acceptance checks' (services/acceptance.ts).
 export const buildPrompt = (
   kind: "initial" | "change",
   spec: string,
@@ -340,9 +361,10 @@ export const buildPrompt = (
   changes: readonly string[] = [],
   design?: string,
   // The template's app shapes the workspace kept (services/shapes.ts).
-  shapes: readonly string[] = []
+  shapes: readonly string[] = [],
+  acceptance?: string
 ): string => {
-  const rules = design ? `${STANDING_RULES}\n\n${design}` : STANDING_RULES;
+  const rules = [STANDING_RULES, design, acceptance].filter(Boolean).join("\n\n");
   return kind === "initial"
     ? `Build the web app described by the spec below inside this repository, a Schmeide project template.
 ${shapesPrompt(shapes) || "Replace the sample notes feature entirely (table, migration, service, router, page, and tests) with the spec's features."}
@@ -744,7 +766,7 @@ export const createActivities = (
 
   const runAgentCmd = async (
     project: Project,
-    mode: "spec" | "build" | "design" | "review",
+    mode: "spec" | "build" | "design" | "review" | "acceptance",
     prompt: string,
     cwd: string,
     buildId?: number
@@ -1863,13 +1885,14 @@ export const createActivities = (
       ?.brief;
 
   // One answer from the design team, held to `schema`: the lead (no tools, sees only the spec) or
-  // the reviewer (read-only tools in the workspace). Undefined when there is no answer that can be
+  // the reviewer (read-only tools in the workspace). The writer of the acceptance checks answers
+  // the same way. Undefined when there is no answer that can be
   // used; a failure of any kind but a cancel is logged, never thrown, so it cannot fail the build.
   const designRun = async (
     project: Project,
     buildId: number,
     ask: {
-      readonly kind: "design" | "review";
+      readonly kind: "design" | "review" | "acceptance";
       readonly prompt: string;
       readonly cwd: string;
       readonly schema: Readonly<Record<string, unknown>>;
@@ -1926,6 +1949,18 @@ export const createActivities = (
         options: { tools: [], maxTurns: 3 },
       })
     );
+
+  const acceptanceOf = async (projectId: number) =>
+    (
+      await db.select().from(projectAcceptance).where(eq(projectAcceptance.projectId, projectId))
+    )[0];
+
+  // The acceptance checks a build's builder is given: none with the checks off.
+  const checksFor = async (projectId: number): Promise<AcceptancePlan | undefined> => {
+    if (!config.acceptance) return undefined;
+    const plan = (await acceptanceOf(projectId))?.plan;
+    return plan && liveChecks(plan).length > 0 ? plan : undefined;
+  };
 
   const headOf = async (project: Project): Promise<string> =>
     (
@@ -2259,6 +2294,66 @@ export const createActivities = (
       return { base: await headOf(project) };
     },
 
+    // The acceptance checks (#354), written before the builder runs by a model that sees only the
+    // spec, or on a change the request and the checks there are. A first build keeps the checks
+    // of the same spec; a change adds to them and retires what it makes untrue. Soft: an answer
+    // that cannot be used is said, and the build goes on without new checks.
+    async planAcceptance(buildId: number): Promise<void> {
+      if (!config.acceptance) return;
+      const { build, project } = await stepOfBuild(buildId);
+      const spec = project.spec ?? "";
+      const kept = await acceptanceOf(project.id);
+      const save = async (plan: AcceptancePlan) => {
+        const values = { specHash: specHash(spec), plan };
+        await db
+          .insert(projectAcceptance)
+          .values({ projectId: project.id, ...values })
+          .onConflictDoUpdate({ target: projectAcceptance.projectId, set: values });
+        await event(buildId, "step", `Acceptance: ${countOf(plan)} to follow in the running app`);
+      };
+      const keeping = (plan: AcceptancePlan) =>
+        event(buildId, "step", `Acceptance: keeping the ${countOf(plan)} written before`);
+      const unusable = () =>
+        event(
+          buildId,
+          "step",
+          "Acceptance: the checks could not be written, so this build goes on without new ones"
+        );
+      const ask = (prompt: string, schema: Readonly<Record<string, unknown>>) =>
+        designRun(project, buildId, {
+          kind: "acceptance",
+          prompt,
+          cwd: config.dataDir,
+          schema,
+          options: { tools: [], maxTurns: 3 },
+        });
+      // A change to an app that has checks adds its own, once: a retried build keeps them.
+      if (build.kind === "change" && kept) {
+        if (plannedBy(kept.plan, buildId)) return keeping(kept.plan);
+        await event(buildId, "step", "Writing down how this change will be checked");
+        const changed = parseChanged(
+          await ask(changePrompt(kept.plan, build.request), CHANGED_JSON_SCHEMA)
+        );
+        if (!changed) return unusable();
+        if (changed.features.length === 0 && changed.retire.length === 0)
+          return event(buildId, "step", "Acceptance: this change needs no new checks");
+        return save(planAfter(kept.plan, changed, buildId));
+      }
+      if (build.kind === "initial" && kept?.specHash === specHash(spec)) return keeping(kept.plan);
+      await event(buildId, "step", "Writing down how each feature will be checked");
+      // An app from before there were checks: the spec, the changes built since, and this one.
+      const changes =
+        build.kind === "change"
+          ? [
+              ...(await builtChanges(db, project.id, build.id)).map((change) => change.request),
+              build.request,
+            ]
+          : [];
+      const written = parseWritten(await ask(writerPrompt(spec, changes), WRITTEN_JSON_SCHEMA));
+      if (!written) return unusable();
+      return save(planFrom(written, buildId));
+    },
+
     // The design review (#159), after the checks pass: a reviewer compares every screen with the
     // brief, from pictures when `capture` can take them and from the code when it cannot. Not ok
     // means a fix round; on the `last` round what is left is recorded and the build goes on. A
@@ -2364,6 +2459,7 @@ export const createActivities = (
       const runKind: RoutedKind = build.kind === "initial" ? "initial" : "change";
       if (config.runner) await refuseAttachments(input.buildId);
       const brief = config.designTeam ? await briefOf(project.id) : undefined;
+      const checks = await checksFor(project.id);
       const attachments = config.runner ? [] : await stageAttachments(project, input.buildId);
       const task = async () =>
         buildPrompt(
@@ -2374,7 +2470,8 @@ export const createActivities = (
             ? (await builtChanges(db, project.id, build.id)).map((change) => change.request)
             : [],
           brief && briefPrompt(brief, runKind),
-          project.shapes
+          project.shapes,
+          checks && acceptancePrompt(checks)
         );
       // The design review's problems, or the failed checks' output, for a fix round.
       const fix =

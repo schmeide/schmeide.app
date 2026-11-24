@@ -483,6 +483,7 @@ What the server does with a file:
 | `SCHMEIDE_BUILDS`          | `on`                                       | `off`: none; `admins`: admins only    |
 | `SCHMEIDE_ROLE`            | `all`                                      | `api` or `worker`: one half only      |
 | `SCHMEIDE_DESIGN_TEAM`     | unset (off)                                | `1` turns on the design team (below)  |
+| `SCHMEIDE_ACCEPTANCE`      | unset (on)                                 | `0` turns off the acceptance checks   |
 | `SCHMEIDE_CLAMAV_ADDRESS`  | unset (every file passes)                  | ClamAV `host:port` that scans uploads |
 
 ### Building on the cluster
@@ -511,17 +512,18 @@ about 0.9 GB of the image.
 Each agent run gets its model from what the run is. `pickModel` in `server/src/agentModel.ts` is the one place that
 decides, and the run kind is its only input.
 
-| Run kind  | What it is                                           | Variable                       |
-| --------- | ---------------------------------------------------- | ------------------------------ |
-| `spec`    | Writing the plain-language spec                      | `SCHMEIDE_AGENT_MODEL_SPEC`    |
-| `initial` | The first build from the spec, and its fix-up runs   | `SCHMEIDE_AGENT_MODEL_INITIAL` |
-| `change`  | A change request on a built app, and its fix-up runs | `SCHMEIDE_AGENT_MODEL_CHANGE`  |
-| `design`  | The design lead choosing an app's look               | `SCHMEIDE_AGENT_MODEL_DESIGN`  |
-| `review`  | The design review of a build against its brief       | `SCHMEIDE_AGENT_MODEL_REVIEW`  |
+| Run kind     | What it is                                         | Variable                          |
+| ------------ | -------------------------------------------------- | --------------------------------- |
+| `spec`       | Writing the plain-language spec                    | `SCHMEIDE_AGENT_MODEL_SPEC`       |
+| `initial`    | The first build from the spec, and its fix-up runs | `SCHMEIDE_AGENT_MODEL_INITIAL`    |
+| `change`     | A change request on a built app, and its fix-ups   | `SCHMEIDE_AGENT_MODEL_CHANGE`     |
+| `design`     | The design lead choosing an app's look             | `SCHMEIDE_AGENT_MODEL_DESIGN`     |
+| `review`     | The design review of a build against its brief     | `SCHMEIDE_AGENT_MODEL_REVIEW`     |
+| `acceptance` | Writing the acceptance checks of a build           | `SCHMEIDE_AGENT_MODEL_ACCEPTANCE` |
 
-- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`, except `design` and `review`, which use
-  `sonnet`: they judge and write no code, so a mid-size model does. With none of them set, every build run uses that
-  one model, as before.
+- A kind whose variable is unset or empty uses `SCHMEIDE_AGENT_MODEL`, except `design`, `review` and `acceptance`,
+  which use `sonnet`: they judge and write no code, so a mid-size model does. With none of them set, every build
+  run uses that one model, as before.
 - The server prints the resolved table at startup. Each build run adds an event with the model and the reason, for
   example `Model sonnet for this change run (SCHMEIDE_AGENT_MODEL_CHANGE routes change runs)`, just before
   `Agent started (...)`, which shows the model the SDK resolved it to.
@@ -676,6 +678,32 @@ build prompt names the kept shapes and their docs.
 The match is by keyword, so a passing word can keep a shape the build then has to drop. The choice is stored in
 `projects.shapes` (a `jsonb` list, default `[]`, migration `0031_project_shapes.sql`). A template with no `shapes/`
 directory is used whole and stores nothing.
+
+## How Schmeide knows each feature works
+
+A spec is short bullets, and "a photo carousel on the profile" does not say when the carousel is done. So before
+the builder runs, every feature gets **acceptance checks** (`server/src/services/acceptance.ts`): short journeys a
+person could follow in the running app, each with where they start and what must exist, what they do, and what they
+must then see.
+
+- **Who writes them.** `planAcceptance` in `server/src/temporal/activities.ts` (run kind `acceptance`), at the start
+  of every build but a `site` one. It is one model answer with no tools and no project settings, given only the spec
+  (fenced off as material, never instructions) and held to a JSON schema. The builder has no say in them.
+- **What they are.** One to four checks per feature, each with an id such as `F3.2` (feature 3, check 2). A feature
+  with parts that can break alone gets a check per part.
+- **Where they are kept.** `project_acceptance`, one row per project, with a hash of the spec they were written
+  from. A rebuild of the same spec keeps them; a first build from another spec writes them again.
+- **A change adds to them.** The writer is given the checks there are and the request, and answers with the checks
+  the change needs and the ids of those it makes untrue. A retired check stays in the row, so an id is never used
+  twice. A change that needs none says so. An app built before there were checks gets them on its next change, from
+  the spec and every change built since.
+- **The builder is told.** Its prompt carries every live check and says a tester will follow them in the running
+  app, 360px wide, and that a passing test of its own does not make a check pass.
+- **Soft.** An answer that does not fit, or no answer, is one event and the build goes on without new checks.
+- `SCHMEIDE_ACCEPTANCE=0` turns all of it off, and builds run as they did before.
+
+Nothing follows the checks yet: that is #356, a tester with a browser on staging. Until it lands the checks only
+tell the builder what done means.
 
 ## How built apps are made to work on a phone
 
