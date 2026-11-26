@@ -25,8 +25,8 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.108.2",
-    "@trpc/client": "^11.29.7",
-    "@trpc/tanstack-react-query": "^11.29.7",
+    "@trpc/client": "^11.29.11",
+    "@trpc/tanstack-react-query": "^11.29.11",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "superjson": "^2.2.6"
