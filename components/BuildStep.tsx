@@ -63,7 +63,7 @@ export function useBuildEvents(build: Pick<Build, "id" | "status">): readonly Bu
 const FINAL_SUMMARY_WAIT_MS = 2 * 60_000;
 
 // The plain-language account of the build, every POLL_MS until its last summary is in.
-function useBuildSummaries(build: Build): readonly BuildSummary[] {
+export function useBuildSummaries(build: Build): readonly BuildSummary[] {
   const trpc = useTRPC();
   const { data } = useQuery({
     ...trpc.builds.summaries.queryOptions({ buildId: build.id }),

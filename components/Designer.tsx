@@ -7,7 +7,7 @@ import { pathTo } from "../utils/routes";
 import { appName } from "../utils/appName";
 import { AppFrame } from "./AppFrame";
 import { BuildHistory } from "./BuildHistory";
-import { BuildStep } from "./BuildStep";
+import { BuildStep, requestText, useBuildSummaries } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
 import { Link } from "./Link";
 import { LookStep } from "./LookStep";
@@ -53,6 +53,30 @@ const frameNote = (project: Project, build: Build | null): string | null =>
         ? copy.project.designer.failed
         : null;
 
+// The builder's work takes the frame's place while it runs, and when it did not finish. Releases
+// (put live, throw away) run no builder and stay in the side column.
+const inPlaceOfFrame = (project: Project, build: Build | null): Build | null =>
+  build &&
+  (build.kind === "change" || build.kind === "initial") &&
+  ((project.status === "building" && build.status === "running") || project.status === "failed")
+    ? build
+    : null;
+
+// What a change built while the page was open came to, until it is dismissed.
+function Built({ build, onDismiss }: { readonly build: Build; readonly onDismiss: () => void }) {
+  const final = useBuildSummaries(build).find((summary) => summary.final);
+  return (
+    <>
+      <p>
+        <strong>{copy.project.designer.built}</strong> {final?.text}
+      </p>
+      <button type="button" onClick={onDismiss}>
+        {copy.project.designer.dismiss}
+      </button>
+    </>
+  );
+}
+
 export function Designer({
   view,
   project,
@@ -80,6 +104,15 @@ export function Designer({
     if (view !== "changes") navigate(pathTo("projectChanges", { id: project.id }));
     setFixAsked((count) => count + 1);
   };
+  const progress = inPlaceOfFrame(project, latestBuild);
+  // "Show the app as it is now" holds for this build in this state: it ends when the build does.
+  const progressKey = progress && `${progress.id} ${progress.status}`;
+  const [frameFor, setFrameFor] = useState<string | null>(null);
+  const showProgress = progress !== null && frameFor !== progressKey;
+  // A change seen building here keeps its final summary above the frame until dismissed.
+  const [watched, setWatched] = useState<number | null>(null);
+  if (progress?.status === "running" && watched !== progress.id) setWatched(progress.id);
+  const built = latestBuild?.status === "passed" && watched === latestBuild.id ? latestBuild : null;
   const noChanges =
     changes.length === 0 && queued.length === 0 && (!latestBuild || latestBuild.kind === "initial");
 
@@ -101,43 +134,87 @@ export function Designer({
           </ul>
         </nav>
 
-        <section aria-labelledby="your-app" className={`${stepStyles.step} ${styles.app}`}>
-          <h2 id="your-app">{copy.project.designer.appTitle}</h2>
-          {(project.stagingUrl ?? project.previewUrl) ? (
-            <>
-              {note && (
-                <p>
-                  {project.status === "building" ? <Working size="page">{note}</Working> : note}
-                </p>
+        <div className={styles.app}>
+          {(progress ?? built) && (
+            <div className={styles.switch}>
+              {built && <Built build={built} onDismiss={() => setWatched(null)} />}
+              {progress && progress.status !== "running" && (
+                <button type="button" onClick={() => askForFix(requestText(progress))}>
+                  {copy.project.retryTitle}
+                </button>
               )}
-              <Release project={project} unreleased={unreleased} notWorking={notWorking} />
-              <AppFrame
-                name={appName(project)}
-                stagingUrl={project.stagingUrl}
-                liveUrl={project.previewUrl}
-                // A new version is a passed build that changed staging: every kind but a promote,
-                // which changes only the live app. A discard returns staging to the live version.
-                version={
-                  latestBuild?.status === "passed" && latestBuild.kind !== "promote"
-                    ? latestBuild.id
-                    : null
-                }
-              />
-              <VersionFeatures features={staging.features} onAskForFix={askForFix} />
-            </>
-          ) : (
-            <>
-              <p>
-                {project.status === "building" ? (
-                  <Working size="page">{copy.project.designer.buildingNoApp}</Working>
-                ) : (
-                  copy.project.designer.offline
-                )}
-              </p>
-              <Release project={project} unreleased={unreleased} notWorking={notWorking} />
-            </>
+              {progress && (
+                <button
+                  type="button"
+                  onClick={() => setFrameFor(showProgress ? progressKey : null)}
+                >
+                  {showProgress
+                    ? copy.project.designer.showApp
+                    : progress.status === "running"
+                      ? copy.project.designer.showBuild
+                      : copy.project.designer.showResult}
+                </button>
+              )}
+            </div>
           )}
-        </section>
+          {/* Both stay mounted in one grid cell, so switching keeps the app's place and its height. */}
+          <div className={styles.panels}>
+            {progress && (
+              <div className={`${styles.panel} ${styles.progress}`} hidden={!showProgress}>
+                <BuildStep
+                  key={progress.id}
+                  build={progress}
+                  by={latestBuildBy}
+                  title={copy.project.changeTitle}
+                />
+              </div>
+            )}
+            <section
+              aria-labelledby="your-app"
+              className={`${stepStyles.step} ${styles.panel}`}
+              hidden={showProgress}
+            >
+              <h2 id="your-app">{copy.project.designer.appTitle}</h2>
+              {(project.stagingUrl ?? project.previewUrl) ? (
+                <>
+                  {note && (
+                    <p>
+                      {project.status === "building" ? <Working size="page">{note}</Working> : note}
+                    </p>
+                  )}
+                  <Release project={project} unreleased={unreleased} notWorking={notWorking} />
+                  <AppFrame
+                    // Loaded afresh each time it comes back from behind the build, so a change
+                    // built while its progress showed comes back with its new version in.
+                    key={showProgress ? "behind" : "shown"}
+                    name={appName(project)}
+                    stagingUrl={project.stagingUrl}
+                    liveUrl={project.previewUrl}
+                    // A new version is a passed build that changed staging: every kind but a promote,
+                    // which changes only the live app. A discard returns staging to the live version.
+                    version={
+                      latestBuild?.status === "passed" && latestBuild.kind !== "promote"
+                        ? latestBuild.id
+                        : null
+                    }
+                  />
+                  <VersionFeatures features={staging.features} onAskForFix={askForFix} />
+                </>
+              ) : (
+                <>
+                  <p>
+                    {project.status === "building" ? (
+                      <Working size="page">{copy.project.designer.buildingNoApp}</Working>
+                    ) : (
+                      copy.project.designer.offline
+                    )}
+                  </p>
+                  <Release project={project} unreleased={unreleased} notWorking={notWorking} />
+                </>
+              )}
+            </section>
+          </div>
+        </div>
 
         <div className={styles.changes}>
           <section aria-labelledby="request-change" className={stepStyles.step}>
@@ -151,7 +228,7 @@ export function Designer({
             />
             {noChanges && <p className={stepStyles.muted}>{copy.project.designer.noChanges}</p>}
           </section>
-          {latestBuild && (
+          {latestBuild && !progress && (
             <BuildStep
               key={latestBuild.id}
               build={latestBuild}

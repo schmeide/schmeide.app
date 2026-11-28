@@ -703,13 +703,19 @@ export const copy = {
       buildingNoApp:
         "Your app is being built. It appears here when the build finishes; this page updates by itself.",
       failed:
-        "The last change did not finish, so this is the version being worked on from before it. See what went wrong under “Latest change”.",
+        "The last change did not finish, so this is the version being worked on from before it. To see what went wrong, press “Show what happened to the change”.",
       canceled: "You canceled this build, so this is the version being worked on from before it.",
       offline:
         "Your app is offline, so there is nothing to show here. To bring it back, put a version live: this one, when it is offered below, or a change you request.",
       buildsToStaging:
         "Your change is built into the version being worked on, for you to look at first. Your customers see it once you put it live.",
       noChanges: "No changes yet. The first change you request shows here while it is built.",
+      // While a change builds, and when it did not finish, its progress takes the frame's place.
+      showApp: "Show the app as it is now",
+      showBuild: "Show the build's progress",
+      showResult: "Show what happened to the change",
+      built: "Your change is built.",
+      dismiss: "Dismiss",
     },
     appBuildingHint:
       "A change is being built. Your live app stays as it is; this page updates by itself.",
