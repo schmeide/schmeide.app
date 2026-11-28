@@ -18,6 +18,7 @@ export function SignUpPage() {
   return (
     <>
       <h1>{copy.routes.signUp}</h1>
+      <p className={styles.intro}>{copy.entry.about}</p>
       <p className={styles.intro}>{copy.signUpPage.inviteOnly}</p>
       {plan && <p className={styles.hint}>{copy.signUpPage.planKept}</p>}
       <div className={styles.actions}>
