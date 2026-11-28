@@ -1099,19 +1099,21 @@ export const createActivities = (
   // with nothing live has nothing to copy. A copy that fails fails the step before production is
   // touched. `keep` false leaves the keep rule for later, so a restore cannot lose its own copy.
   // ponytail: a dump file on this machine; blob storage (#195) in production.
-  // ponytail: the cluster's databases are not copied yet; its promotes and roll backs go without.
+  // ponytail: the cluster's databases are not copied yet, so its promotes and roll backs go
+  // without one and a roll back there cannot restore; copy them to blob storage with #195.
   const copyProductionData = async (
     project: Project,
     buildId: number,
     keep = true
   ): Promise<DatabaseCopy | undefined> => {
+    // Before the checkout is looked for: the worker running a cluster's promote may have none.
+    if (config.runner && project.productionCommit !== null) {
+      await event(buildId, "deploy", "The live app's information is not copied on the cluster yet");
+      return undefined;
+    }
     const dir = await composeDir(project, "production");
     if (project.productionCommit === null || !dir) {
       await event(buildId, "deploy", "Nothing is live yet, so there is no information to copy");
-      return undefined;
-    }
-    if (config.runner) {
-      await event(buildId, "deploy", "The live app's information is not copied on the cluster yet");
       return undefined;
     }
     const path = join(backupsDir(config.dataDir, project.slug), `${buildId}.dump`);
@@ -1176,6 +1178,11 @@ export const createActivities = (
     if (down.code !== 0)
       throw new Error(`make down failed (exit ${down.code}): ${down.output.slice(-2000)}`);
     await startProductionDb(project, dir, buildId);
+    await event(
+      buildId,
+      "deploy",
+      "Emptying your live app's information and putting the copy back"
+    );
     await inProductionDb(project, dir, ["dropdb", ...APP_DB, "--force", "--if-exists", "app"]);
     await inProductionDb(project, dir, ["createdb", ...APP_DB, "app"]);
     await inProductionDb(project, dir, ["pg_restore", ...APP_DB, "--no-owner", "-d", "app"], {
