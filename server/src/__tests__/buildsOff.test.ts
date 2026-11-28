@@ -65,7 +65,7 @@ describe("with builds off", () => {
     expect(
       await callApi(app, "projects.requestChange", { id: project.id, request: "x" }, owner.cookie)
     ).toMatchObject({ code: "CONFLICT", message: BUILDS_OFF });
-    for (const procedure of ["projects.stop", "projects.buildWaiting"])
+    for (const procedure of ["projects.stop", "projects.start", "projects.buildWaiting"])
       expect(await callApi(app, procedure, { id: project.id }, owner.cookie)).toMatchObject({
         code: "CONFLICT",
         message: BUILDS_OFF,

@@ -4,8 +4,9 @@ import { pathTo } from "../utils/routes";
 import { canDelete, DeleteProject } from "./DeleteProject";
 import { Designer } from "./Designer";
 import { Link } from "./Link";
+import { NameStep } from "./NameStep";
+import { OfflineStep } from "./OfflineStep";
 import { SiteStep } from "./SiteStep";
-import { StopButton } from "./StopButton";
 import { Versions } from "./Versions";
 
 import stepStyles from "./Step.module.css";
@@ -117,13 +118,16 @@ export function ProjectWorkspace({
       )}
 
       {view === "settings" && (
+        // Each section saves by itself, in the order of #56. A rename starts the page title over,
+        // since an unset title follows the name.
         <div className={styles.settings}>
-          <SiteStep project={project} hasIcon={hasIcon} />
-          <section aria-labelledby="manage" className={stepStyles.step}>
-            <h2 id="manage">{copy.project.manageTitle}</h2>
+          <NameStep project={project} />
+          <SiteStep key={project.name} project={project} hasIcon={hasIcon} />
+          <OfflineStep project={project} onStop={onStop} />
+          <section aria-labelledby="delete" className={stepStyles.step}>
+            <h2 id="delete">{copy.project.deleteTitle}</h2>
             {!canDelete(project) && <p className={stepStyles.muted}>{copy.project.manageBusy}</p>}
             <div className={styles.manage}>
-              {project.status === "live" && <StopButton project={project} onStop={onStop} />}
               <DeleteProject project={project} />
             </div>
           </section>

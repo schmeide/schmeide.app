@@ -47,6 +47,7 @@ import type {
   buildWorkflow,
   deleteWorkflow,
   specWorkflow,
+  restartWorkflow,
   stopWorkflow,
 } from "../temporal/workflows.ts";
 import {
@@ -1000,6 +1001,50 @@ export const stopProject = async (
     workflowId: `stop-${id}-${Date.now()}`,
     args: [id],
   });
+  return project;
+};
+
+// Brings an app taken offline back as it was: its copies start on the versions they ran, with no
+// build. Waits for them to answer.
+export const startProject = async (
+  { db, workflows, taskQueue, buildsOff }: Deps,
+  id: number
+): Promise<Project> => {
+  assertBuildsOn({ buildsOff });
+  const project = await findProject(db, id);
+  if (project.status !== "stopped")
+    throw new ConflictError(
+      `There is nothing to put back online: the app is ${statusWord(project.status)} now.`
+    );
+  const [passed] = await db
+    .select({ id: builds.id })
+    .from(builds)
+    .where(and(eq(builds.projectId, id), eq(builds.status, "passed")))
+    .limit(1);
+  if (!passed)
+    throw new ConflictError(
+      "This app has never been live, so there is nothing to put back online. Request a change to build it."
+    );
+  const handle = await workflows.start<typeof restartWorkflow>("restartWorkflow", {
+    taskQueue,
+    workflowId: `start-${id}-${Date.now()}`,
+    args: [id],
+  });
+  await handle.result();
+  return findProject(db, id);
+};
+
+// A new name for the app. Its slug, and so its address, stays the one it was made with (#89).
+export const renameProject = async (
+  db: Db,
+  input: { readonly id: number; readonly name: string }
+): Promise<Project> => {
+  const [project] = await db
+    .update(projects)
+    .set({ name: input.name })
+    .where(eq(projects.id, input.id))
+    .returning();
+  if (!project) throw new NotFoundError(`Project ${input.id} not found`);
   return project;
 };
 

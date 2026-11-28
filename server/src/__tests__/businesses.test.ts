@@ -98,6 +98,8 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "projects.rollBack": { id, version: 1 },
   "projects.buildWaiting": { id },
   "projects.stop": { id },
+  "projects.start": { id },
+  "projects.rename": { id, name: "Taken over" },
   "projects.delete": { id },
   "interview.get": { id },
   "interview.start": { id },
@@ -357,5 +359,107 @@ describe("a business", () => {
     // Bob names Ada's business, which he is not in: he stays in his own.
     const bobs = await callApi(app, "projects.list", undefined, bob.cookie, inAdas);
     expect(bobs.data.map((project: { id: number }) => project.id)).toEqual([shared.data.id]);
+  });
+});
+
+// #56 and #89: an app's name, and bringing it back after "Take the app offline".
+describe("an app's settings", () => {
+  // An app whose first build passed, taken offline.
+  const anOfflineApp = async (tenantId: number) => {
+    const { project, build } = await aBuiltProject(tenantId);
+    await finishBuild(db, build.id);
+    return transition(db, project.id, ["building"], {
+      status: "stopped",
+      previewUrl: null,
+      stagingUrl: null,
+    });
+  };
+  const rowOf = async (id: number) =>
+    (await db.select().from(projects).where(eq(projects.id, id)))[0];
+
+  it("renames for a member of the business, keeping its slug and address", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const member = await aSignedInPerson(app, deps, { name: "Bob", joins: owner.tenantId });
+    const project = await createProject(db, { name: "Invoices", tenantId: owner.tenantId });
+    await transition(db, project.id, ["draft"], {
+      status: "live",
+      previewUrl: "http://localhost:8100",
+    });
+
+    const renamed = await callApi(
+      app,
+      "projects.rename",
+      { id: project.id, name: "  Billing  " },
+      member.cookie
+    );
+
+    expect(renamed.data).toMatchObject({ name: "Billing", slug: project.slug });
+    expect(await rowOf(project.id)).toMatchObject({
+      name: "Billing",
+      slug: project.slug,
+      previewUrl: "http://localhost:8100",
+      status: "live",
+    });
+  });
+
+  it("refuses a name a new app could not have, and keeps the old one", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: "Invoices", tenantId: owner.tenantId });
+    for (const name of ["", "   ", "x".repeat(101)])
+      expect(
+        (await callApi(app, "projects.rename", { id: project.id, name }, owner.cookie)).code
+      ).toBe("BAD_REQUEST");
+    expect((await rowOf(project.id)).name).toBe("Invoices");
+  });
+
+  it("does not let a person outside the business rename the app or put it back online", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const outsider = await aSignedInPerson(app, deps, { name: "Mallory" });
+    const project = await anOfflineApp(owner.tenantId);
+    start.mockClear();
+
+    for (const [path, input] of [
+      ["projects.rename", { id: project.id, name: "Mine now" }],
+      ["projects.start", { id: project.id }],
+    ] as const)
+      expect((await callApi(app, path, input, outsider.cookie)).code).toBe("NOT_FOUND");
+
+    expect(await rowOf(project.id)).toMatchObject({ name: project.name, status: "stopped" });
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("puts an offline app back online for a member, without a new build", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const member = await aSignedInPerson(app, deps, { name: "Bob", joins: owner.tenantId });
+    const project = await anOfflineApp(owner.tenantId);
+    start.mockClear();
+    start.mockResolvedValueOnce({ result: async () => undefined } as never);
+
+    const answer = await callApi(app, "projects.start", { id: project.id }, member.cookie);
+
+    expect(answer.status).toBe(200);
+    expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0]).toEqual([
+      "restartWorkflow",
+      expect.objectContaining({ args: [project.id] }),
+    ]);
+  });
+
+  it("refuses to put back online an app that is not offline, is building, or was never live", async () => {
+    const owner = await aSignedInPerson(app, deps);
+    const live = await createProject(db, { name: "Live", tenantId: owner.tenantId });
+    await transition(db, live.id, ["draft"], { status: "live" });
+    const { project: building, build } = await aBuiltProject(owner.tenantId);
+    const neverLive = await createProject(db, { name: "Never", tenantId: owner.tenantId });
+    await transition(db, neverLive.id, ["draft"], { status: "stopped" });
+    start.mockClear();
+    try {
+      for (const id of [live.id, building.id, neverLive.id])
+        expect((await callApi(app, "projects.start", { id }, owner.cookie)).code).toBe("CONFLICT");
+      expect(start).not.toHaveBeenCalled();
+      expect((await rowOf(building.id)).status).toBe("building");
+    } finally {
+      await finishBuild(db, build.id);
+    }
   });
 });

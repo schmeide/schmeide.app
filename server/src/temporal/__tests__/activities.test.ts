@@ -1771,6 +1771,30 @@ describe("the two copies", () => {
     });
   });
 
+  it("puts both copies back online from their own folders, without building anything", async () => {
+    const { project, build, activities, env, workspace, production, ran } = await prepared();
+    await env.run(activities.deploy, build.id);
+    await env.run(activities.stopDeployment, project.id);
+    const before = ran().length;
+
+    await env.run(activities.startDeployment, project.id);
+
+    expect(
+      ran()
+        .slice(before)
+        .map((line) => line.split(" ").toSpliced(3, 1).join(" "))
+    ).toEqual([
+      `up schmeide-${project.slug}_staging ${project.webPort + 10_000} ${workspace}`,
+      `up schmeide-${project.slug} ${project.webPort} ${production}`,
+    ]);
+    expect(await projectRow(project.id)).toMatchObject({
+      status: "live",
+      previewUrl: `http://localhost:${project.webPort}`,
+      stagingUrl: `http://localhost:${project.webPort + 10_000}`,
+    });
+    expect(await db.select().from(builds).where(eq(builds.projectId, project.id))).toHaveLength(1);
+  });
+
   it("removes both copies with their volumes, the checkout, the workspace, and the database copies when the project is deleted", async () => {
     const { project, build, activities, env, workspace, production, ran, dataDir } =
       await prepared();

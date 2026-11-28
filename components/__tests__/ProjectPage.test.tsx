@@ -586,9 +586,19 @@ describe("ProjectPage", () => {
     });
     await userEvent.click(await screen.findByRole("button", { name: copy.project.delete }));
     expect(screen.getByText(copy.project.deleteConfirm("Invoices"))).toBeInTheDocument();
-    expect(calls.some((call) => call.path === "projects.delete")).toBe(false);
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Delete project" }));
+
+    // The app's name has to be typed first.
+    const name = screen.getByLabelText(copy.project.deleteLabel("Invoices"));
+    expect(name).toHaveFocus();
+    await userEvent.type(name, "Invoice");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.deleteYes }));
+    expect(name).toBeInvalid();
+    expect(name).toHaveAccessibleDescription(copy.project.deleteMismatch);
+    expect(calls.some((call) => call.path === "projects.delete")).toBe(false);
+
+    await userEvent.type(name, "s");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.deleteYes }));
     expect(calls).toContainEqual({ path: "projects.delete", input: { id: 7 } });
     await waitFor(() => expect(window.location.pathname).toBe("/"));
   });
@@ -1222,6 +1232,99 @@ describe("ProjectPage designer", () => {
     });
     await userEvent.click(await screen.findByRole("button", { name: copy.project.takeOffline }));
     expect(calls).toContainEqual({ path: "projects.stop", input: { id: 7 } });
+  });
+
+  it("lays settings out in order: name, page title and icon, offline, delete", async () => {
+    renderWithApi(
+      <ProjectPage id={7} view="settings" />,
+      projectServer({ project: live, latestBuild: passed, hasBeenLive: true })
+    );
+    await screen.findByLabelText(copy.project.name.label);
+    expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual([
+      copy.project.name.title,
+      copy.project.site.title,
+      copy.project.offline.title,
+      copy.project.deleteTitle,
+    ]);
+    expect(screen.getByText(copy.project.offline.intro)).toBeVisible();
+  });
+
+  it("renames the app and says so beside its button, keeping the address", async () => {
+    const state = { project: live, latestBuild: passed, hasBeenLive: true };
+    const calls = renderWithApi(<ProjectPage id={7} view="settings" />, {
+      ...projectServer(state),
+      "projects.rename": (input) => {
+        state.project = { ...state.project, name: String(input.name) };
+        return state.project;
+      },
+    });
+    const name = await screen.findByLabelText(copy.project.name.label);
+    expect(name).toHaveValue("Invoices");
+    await userEvent.clear(name);
+    await userEvent.type(name, "Billing");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.name.save }));
+
+    expect(calls).toContainEqual({ path: "projects.rename", input: { id: 7, name: "Billing" } });
+    expect(await screen.findByText(copy.project.name.saved)).toBeVisible();
+    expect(await screen.findByRole("heading", { level: 1, name: "Billing" })).toBeVisible();
+    expect(calls.some((call) => call.path === "projects.setSite")).toBe(false);
+  });
+
+  it("keeps the typed name and says why when a rename could not be saved", async () => {
+    renderWithApi(<ProjectPage id={7} view="settings" />, {
+      ...projectServer({ project: live, latestBuild: passed, hasBeenLive: true }),
+      "projects.rename": () => {
+        throw new ApiFailure("BAD_REQUEST", "Name is too long");
+      },
+    });
+    const name = await screen.findByLabelText(copy.project.name.label);
+    await userEvent.clear(name);
+    await userEvent.type(name, "Billing");
+    await userEvent.click(screen.getByRole("button", { name: copy.project.name.save }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Name is too long.");
+    expect(name).toHaveValue("Billing");
+    expect(screen.queryByText(copy.project.name.saved)).toBeNull();
+  });
+
+  it("puts an offline app back online from settings, saying what visitors see meanwhile", async () => {
+    const state = {
+      project: aProject({ status: "stopped" }),
+      latestBuild: passed,
+      hasBeenLive: true,
+    };
+    const calls = renderWithApi(<ProjectPage id={7} view="settings" />, {
+      ...projectServer(state),
+      "projects.start": () => {
+        state.project = live;
+        return state.project;
+      },
+    });
+    expect(
+      await screen.findByRole("heading", { level: 2, name: copy.project.offline.offTitle })
+    ).toBeVisible();
+    expect(screen.getByText(copy.project.offline.offIntro)).toBeVisible();
+    expect(screen.queryByRole("button", { name: copy.project.takeOffline })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.offline.start }));
+
+    expect(calls).toContainEqual({ path: "projects.start", input: { id: 7 } });
+    expect(await screen.findByText(copy.project.offline.started)).toBeVisible();
+    expect(await screen.findByRole("button", { name: copy.project.takeOffline })).toBeVisible();
+  });
+
+  it("says why an offline app could not be put back online", async () => {
+    renderWithApi(<ProjectPage id={7} view="settings" />, {
+      ...projectServer({ project: aProject({ status: "stopped" }), hasBeenLive: true }),
+      "projects.start": () => {
+        throw new ApiFailure("CONFLICT", "There is nothing to put back online");
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: copy.project.offline.start }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "There is nothing to put back online."
+    );
+    expect(screen.queryByText(copy.project.offline.started)).toBeNull();
   });
 
   it("offers to cancel a running change beside its log, and says why delete is not there", async () => {
