@@ -943,6 +943,13 @@ export const copy = {
       canceled: "Canceled",
     },
     elapsed: "Time:",
+    // A first build while it runs (#52): its phases, in `phase`'s words, and how long it takes.
+    phasesLabel: "Where the build is",
+    // `ago` is Intl's "3 minutes ago"; null under a minute.
+    firstBuildTime: (ago: string | null) =>
+      `Usually about 10 minutes. Started ${ago ?? "less than a minute ago"}.`,
+    canLeave: "You can close this page. The build carries on, and this page shows how it went.",
+    openApp: "Open your app",
     history: {
       title: "Past builds",
       intro: "Every build before the latest one, newest first.",

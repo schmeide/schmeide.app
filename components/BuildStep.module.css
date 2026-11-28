@@ -13,6 +13,61 @@
   color: var(--color-success);
 }
 
+/* A first build's phases, top to bottom, numbered like the setup stepper: done ones checked. */
+.phases {
+  display: grid;
+  gap: var(--space-s);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: phase;
+}
+
+.phases li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-s);
+  color: var(--color-muted);
+  counter-increment: phase;
+}
+
+.phases li::before {
+  content: counter(phase);
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 2em;
+  height: 2em;
+  background: var(--color-inset);
+  border-radius: var(--radius-badge);
+  font-weight: 700;
+}
+
+.phases li[data-state="done"]::before {
+  content: "✓";
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.phases li[data-state="current"] {
+  color: var(--color-fg);
+  font-weight: 700;
+}
+
+.phases li[data-state="current"]::before {
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+}
+
+.hidden {
+  composes: hidden from "./SetupStepper.module.css";
+}
+
+.openApp {
+  composes: primaryLink from "./SignInPage.module.css";
+}
+
 .failure {
   padding: var(--space-m);
   background: var(--color-danger-bg);

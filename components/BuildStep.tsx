@@ -10,6 +10,7 @@ import {
   type BuildEvent,
   type BuildSummary,
 } from "../trpc";
+import { ageOf } from "../utils/reviewAge";
 import { formatDuration } from "../utils/usage";
 import { useNow } from "./useNow";
 
@@ -85,15 +86,32 @@ const REQUESTS: Readonly<Partial<Record<Build["kind"], string>>> = {
 export const requestText = (build: Pick<Build, "kind" | "request">): string =>
   REQUESTS[build.kind] ?? build.request;
 
+// The four phases of a first build, in order, and the phase each kind of event belongs to. A
+// problem belongs to none: the build is still in the phase it happened in.
+const PHASES = ["step", "agent", "check", "deploy"] as const;
+const PHASE_OF: Readonly<Record<BuildEvent["kind"], number | null>> = {
+  step: 0,
+  agent: 1,
+  skill: 1,
+  check: 2,
+  warning: 2,
+  deploy: 3,
+  error: null,
+};
+
+const ago = new Intl.RelativeTimeFormat("en", { numeric: "always" });
+
 type Props = {
   readonly build: Build;
   readonly title: string;
   // Who asked for it, for a build a person asked for by name (putting live, throwing away).
   readonly by?: string | null;
+  // The live app, offered as the one way on once a first build finished.
+  readonly appUrl?: string | null;
 };
 
 // `title` differs by place: a numbered setup step, or the latest change of a running app.
-export function BuildStep({ build, title, by = null }: Props) {
+export function BuildStep({ build, title, by = null, appUrl = null }: Props) {
   const events = useBuildEvents(build);
   const summaries = useBuildSummaries(build);
   const running = build.status === "running";
@@ -125,6 +143,10 @@ export function BuildStep({ build, title, by = null }: Props) {
   }, [events, showLog, pinnedAt]);
 
   const end = build.finishedAt?.getTime() ?? now;
+  // A first build shows its phases while it runs; before its first step it is getting ready.
+  const first = build.kind === "initial";
+  const phase = events.reduce((at, event) => PHASE_OF[event.kind] ?? at, 0);
+  const age = ageOf(build.startedAt, new Date(now));
   return (
     <section aria-labelledby="build" className={stepStyles.step}>
       <h2 id="build">{title}</h2>
@@ -137,11 +159,44 @@ export function BuildStep({ build, title, by = null }: Props) {
       )}
       <p className={styles.summary} data-status={build.status}>
         <strong>{copy.project.buildStatus[build.status]}</strong>
-        {running && last && <span>{copy.project.phase[last.kind]}</span>}
+        {/* For a first build, the phase list below says this, except for a problem. */}
+        {running && last && (!first || last.kind === "error") && (
+          <span>{copy.project.phase[last.kind]}</span>
+        )}
         <span className={stepStyles.muted}>
-          {copy.project.elapsed} {formatDuration(end - build.startedAt.getTime())}
+          {first && running
+            ? copy.project.firstBuildTime(
+                age.amount === 0 ? null : ago.format(-age.amount, age.unit)
+              )
+            : `${copy.project.elapsed} ${formatDuration(end - build.startedAt.getTime())}`}
         </span>
       </p>
+
+      {first && running && (
+        <>
+          <ol aria-label={copy.project.phasesLabel} className={styles.phases}>
+            {PHASES.map((kind, index) => (
+              <li
+                key={kind}
+                aria-current={index === phase ? "step" : undefined}
+                data-state={index < phase ? "done" : index === phase ? "current" : "todo"}
+              >
+                {copy.project.phase[kind]}
+                {index < phase && <span className={styles.hidden}> {copy.project.setup.done}</span>}
+              </li>
+            ))}
+          </ol>
+          <p className={stepStyles.muted}>{copy.project.canLeave}</p>
+        </>
+      )}
+
+      {first && build.status === "passed" && appUrl && (
+        <p>
+          <a href={appUrl} target="_blank" rel="noreferrer" className={styles.openApp}>
+            {copy.project.openApp} {copy.project.opensInNewTab}
+          </a>
+        </p>
+      )}
 
       {build.status === "failed" && build.error && (
         <div className={styles.failure}>
