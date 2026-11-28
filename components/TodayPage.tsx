@@ -8,6 +8,7 @@ import { ErrorNote } from "./ErrorNote";
 import { Link } from "./Link";
 import { StartWays } from "./StartWays";
 import { useStartApp } from "./useStartApp";
+import { Working } from "./Working";
 
 import styles from "./StartPage.module.css";
 
@@ -149,7 +150,7 @@ export function TodayPage() {
           </button>
           {busy && (
             <p role="status" className={styles.muted}>
-              {copy.start.continuing}
+              <Working>{copy.start.continuing}</Working>
             </p>
           )}
         </div>

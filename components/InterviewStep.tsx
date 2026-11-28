@@ -15,6 +15,7 @@ import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
 import { ReadBackStep } from "./ReadBack";
 import { useDraft } from "./useDraft";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 import styles from "./InterviewStep.module.css";
@@ -532,7 +533,7 @@ export function InterviewStep({
             )}
             {thinking && (
               <p role="status" className={stepStyles.muted}>
-                {started ? copy.interview.thinking : copy.interview.starting}
+                <Working>{started ? copy.interview.thinking : copy.interview.starting}</Working>
               </p>
             )}
             {unavailable ? (

@@ -17,6 +17,7 @@ import { Spec } from "./Spec";
 import { StopButton } from "./StopButton";
 import { UsageSummary } from "./UsageSummary";
 import { useStagingFeatures, VersionFeatures } from "./VersionFeatures";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 import styles from "./Designer.module.css";
@@ -104,7 +105,11 @@ export function Designer({
           <h2 id="your-app">{copy.project.designer.appTitle}</h2>
           {(project.stagingUrl ?? project.previewUrl) ? (
             <>
-              {note && <p>{note}</p>}
+              {note && (
+                <p>
+                  {project.status === "building" ? <Working size="page">{note}</Working> : note}
+                </p>
+              )}
               <Release project={project} unreleased={unreleased} notWorking={notWorking} />
               <AppFrame
                 name={appName(project)}
@@ -123,9 +128,11 @@ export function Designer({
           ) : (
             <>
               <p>
-                {project.status === "building"
-                  ? copy.project.designer.buildingNoApp
-                  : copy.project.designer.offline}
+                {project.status === "building" ? (
+                  <Working size="page">{copy.project.designer.buildingNoApp}</Working>
+                ) : (
+                  copy.project.designer.offline
+                )}
               </p>
               <Release project={project} unreleased={unreleased} notWorking={notWorking} />
             </>

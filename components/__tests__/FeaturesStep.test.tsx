@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -84,7 +84,9 @@ describe("FeaturesStep", () => {
     await userEvent.type(first(), "Clients");
     await userEvent.click(writeSpec());
 
-    expect(await screen.findByRole("button", { name: copy.project.startingSpec })).toBeDisabled();
+    const starting = await screen.findByRole("button", { name: copy.project.startingSpec });
+    expect(starting).toBeDisabled();
+    expect(within(starting).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
     await waitFor(() =>
       expect(calls.map((call) => call.path)).toEqual([
         "projects.setFeatures",

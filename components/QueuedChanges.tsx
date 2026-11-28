@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Build, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 import styles from "./QueuedChanges.module.css";
@@ -130,7 +131,11 @@ function BuildWaiting({ project }: { readonly project: Project }) {
           onClick={() => start.mutate({ id: project.id })}
           disabled={start.isPending}
         >
-          {start.isPending ? copy.project.queueStarting : copy.project.queueBuildNow}
+          {start.isPending ? (
+            <Working>{copy.project.queueStarting}</Working>
+          ) : (
+            copy.project.queueBuildNow
+          )}
         </button>
       </div>
       <ErrorNote error={start.error} />
