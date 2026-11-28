@@ -2,14 +2,16 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { copy } from "../../data/copy";
+
 const html = readFileSync(resolve(__dirname, "../../index.html"), "utf8");
 const publicFile = (name: string) => resolve(__dirname, "../../public", name);
 const meta = (key: string) =>
   new RegExp(`<meta\\s+(?:name|property)="${key}"\\s+content="([^"]*)"`).exec(html)?.[1];
 
 const title = "Schmeide: software for your small business, built and run for you";
-const description =
-  "Schmeide builds software for small businesses. We ask questions, show you designs, build only what you approve, and keep it running.";
+// The invite-only pages say the same sentence, so a forwarded link and its preview agree.
+const description = copy.entry.about;
 
 describe("index.html head", () => {
   it("has a real title and description", () => {

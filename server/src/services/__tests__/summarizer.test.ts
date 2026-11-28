@@ -72,12 +72,23 @@ describe("summaryPrompt", () => {
     expect(summaryPrompt(input())).not.toContain("marker-1");
   });
 
+  it("keeps an update during the build to what was done, with no word on whether it is ready", () => {
+    const prompt = summaryPrompt(input(), "m");
+    expect(prompt).toContain("Say only what was made or done since your last update.");
+    expect(prompt).toContain("Do not mention whether anything is ready, live, or available to try");
+    // The guard against promising still holds.
+    expect(prompt).toContain("never say the app is ready, online, or live");
+  });
+
   it("asks for an account of what changed once the build passed", () => {
     const prompt = summaryPrompt(input({ outcome: { status: "passed", error: null } }), "m");
     expect(prompt).toContain("two or three sentences");
     expect(prompt).toContain("The build finished and passed.");
     // A passed change waits on the version being worked on until the person puts it live.
+    expect(prompt).toContain("for them to try first");
     expect(prompt).toContain("Their customers do not see it until an event says it is live");
+    expect(prompt).toContain("once they put that version live");
+    expect(prompt).not.toContain("Do not mention whether anything is ready");
   });
 
   it("asks a failed build to say what went wrong without guessing, and fences the error too", () => {
