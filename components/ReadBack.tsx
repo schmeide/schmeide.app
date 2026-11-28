@@ -5,6 +5,7 @@ import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type PlanItem, type Project, type ReadBack } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 import styles from "./ReadBack.module.css";
@@ -182,7 +183,9 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
     <section aria-labelledby="readback" className={stepStyles.step}>
       <h2 id="readback">{copy.readBack.title}</h2>
       {(readBack.isPending || (write.isPending && !account)) && (
-        <p role="status">{copy.readBack.writing}</p>
+        <p role="status">
+          <Working>{copy.readBack.writing}</Working>
+        </p>
       )}
       {failed && (
         <div role="alert">
@@ -209,7 +212,9 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
             <ol aria-labelledby="readback-steps">{sentences("steps")}</ol>
           </section>
           {(correct.isPending || (write.isPending && update.isSuccess)) && (
-            <p role="status">{copy.readBack.rewriting}</p>
+            <p role="status">
+              <Working>{copy.readBack.rewriting}</Working>
+            </p>
           )}
           {listSection(
             "chosen",
@@ -283,7 +288,7 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
           {data.open.length > 0 && <p>{copy.readBack.openLeft(data.open.length)}</p>}
           <div className={`${stepStyles.actions} ${styles.actions}`}>
             <button type="button" data-variant="primary" onClick={onWriteSpec} disabled={busy}>
-              {writing ? copy.project.startingSpec : copy.readBack.confirm}
+              {writing ? <Working>{copy.project.startingSpec}</Working> : copy.readBack.confirm}
             </button>
             <button type="button" onClick={() => window.print()}>
               {copy.readBack.print}

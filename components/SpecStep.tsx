@@ -5,6 +5,7 @@ import { useRefreshProjects, useTRPC, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
 import { useSession } from "./SessionProvider";
 import { Spec } from "./Spec";
+import { Working } from "./Working";
 
 import styles from "./Step.module.css";
 
@@ -30,7 +31,11 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
   return (
     <section aria-labelledby="spec" className={styles.step}>
       <h2 id="spec">{copy.project.specTitle}</h2>
-      {project.status === "spec_generating" && <p>{copy.project.specWriting}</p>}
+      {project.status === "spec_generating" && (
+        <p>
+          <Working size="page">{copy.project.specWriting}</Working>
+        </p>
+      )}
       {project.status === "spec_ready" && project.spec && (
         <>
           <p className={styles.muted}>{copy.project.specIntro}</p>
@@ -51,7 +56,11 @@ export function SpecStep({ project, onChangeFeatures }: Props) {
                 onClick={() => approve.mutate({ id: project.id })}
                 disabled={approve.isPending}
               >
-                {approve.isPending ? copy.project.approving : copy.project.approve}
+                {approve.isPending ? (
+                  <Working>{copy.project.approving}</Working>
+                ) : (
+                  copy.project.approve
+                )}
               </button>
             )}
             <button type="button" onClick={onChangeFeatures} disabled={approve.isPending}>

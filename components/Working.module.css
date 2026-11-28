@@ -1,0 +1,26 @@
+/* The spinner sits in the line of text, colored by it (currentColor), and fades in after 300ms
+ * so a fast answer never flashes one. It takes space from the start, so a button does not widen
+ * when it appears. */
+.spinner {
+  display: inline-block;
+  margin-inline-end: 0.5em;
+  vertical-align: middle;
+  animation: working-appear 1ms var(--duration-gentle) both;
+}
+
+/* The package sizes the spinner in px; these follow the text instead. */
+.spinner > .inline {
+  width: 1em;
+  height: 1em;
+}
+
+.spinner > .page {
+  width: 1.5em;
+  height: 1.5em;
+}
+
+@keyframes working-appear {
+  from {
+    opacity: 0;
+  }
+}
