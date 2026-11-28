@@ -59,6 +59,7 @@ export const copy = {
     startExisting: "What you have today",
     project: "App",
     projectChanges: "Changes",
+    projectVersions: "Versions",
     projectSettings: "Settings",
     usage: "Usage",
     billing: "Billing",
@@ -680,6 +681,7 @@ export const copy = {
       designer: "Designer",
       overview: "App",
       changes: "Changes",
+      versions: "Versions",
       settings: "Settings",
     },
     viewTitle: (view: string, name: string) => `${view} · ${name}`,
@@ -749,6 +751,59 @@ export const copy = {
       promoteRequest: "Put the version being worked on live.",
       discardRequest: "Throw away the changes your customers did not see yet.",
       askedBy: (name: string) => `Asked for by ${name}.`,
+    },
+    // Every version of the app, and putting an earlier one live (#230).
+    versions: {
+      title: "Versions",
+      intro: "Every version of your app, newest first, with what happened between them.",
+      only: "This is the only version so far, so there is nothing to go back to. Each change you ask for becomes a new version here.",
+      building:
+        "A build is running. You can put a version live once it has finished; this page updates by itself.",
+      noLiveVersion:
+        "Your live app went live before Schmeide kept track of versions, so there is no recorded version to go back from. Put the version being worked on live once, and from then on you can go back.",
+      version: (version: number) => `Version ${version}`,
+      unnumbered: "From before versions were kept",
+      unnumberedWhy:
+        "Your app was built before Schmeide numbered its versions, so this one cannot be put live again.",
+      live: "Live",
+      working: "Being worked on",
+      pictureAlt: (version: number) => `The home page of version ${version}`,
+      putLive: "Put this version live",
+      more: "Show older versions",
+      // What happened between the versions, newest first.
+      putLiveEvent: (version: number) => `Put version ${version} live`,
+      putLiveUnnumbered: "Put a version from before versions were kept live",
+      discardEvent: "Threw away the changes your customers did not see yet",
+      event: (what: string, by: string | null, date: string) =>
+        by ? `${what}, by ${by}, ${date}` : `${what}, ${date}`,
+      rollBackTitle: "Putting a version live",
+      // A shortcut on the overview to the version live before the current one.
+      goBack: (version: number) => `Go back to version ${version}`,
+      // The confirmation, in two parts.
+      confirmTitle: (version: number) => `Put version ${version} live?`,
+      customersTitle: "What your customers will see",
+      goesBack: (version: number) =>
+        `Your live app goes back to version ${version}. These changes will no longer be live:`,
+      goesForward: (version: number) =>
+        `Your live app moves on to version ${version}. These changes will be live:`,
+      informationTitle: "What happens to your information",
+      keeps: (since: number) =>
+        `Everything your app has stored stays as it is, including what was added since version ${since}.`,
+      copiesLegend: "The information to go back with",
+      withCopy: (version: number, when: string) =>
+        `Go back to version ${version} with the information from ${when}`,
+      when: (at: Date) =>
+        new Intl.DateTimeFormat(undefined, { dateStyle: "long", timeStyle: "short" }).format(at),
+      loses: "Anything entered after that time, such as new orders or sign-ups, will be gone.",
+      noCopies: (version: number) =>
+        `No copy of your app's information from then was kept, so version ${version} cannot be put live.`,
+      typeName: (name: string) => `Type “${name}” to confirm`,
+      nameMismatch: (name: string) => `Type “${name}” exactly as it is written, to confirm.`,
+      undo: (live: number) => `You can undo this: put version ${live} live again from this page.`,
+      confirm: (version: number) => `Put version ${version} live`,
+      confirmWithCopy: (version: number) => `Put version ${version} live with that information`,
+      cancel: (live: number) => `Keep version ${live} live`,
+      starting: "Starting…",
     },
     appFailedHint:
       "The last change did not finish. See what went wrong under “Latest change”, then request a change to try again.",

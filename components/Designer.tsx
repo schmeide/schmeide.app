@@ -9,6 +9,7 @@ import { AppFrame } from "./AppFrame";
 import { BuildHistory } from "./BuildHistory";
 import { BuildStep, requestText, useBuildSummaries } from "./BuildStep";
 import { ChangeForm } from "./ChangeForm";
+import { GoBack } from "./GoBack";
 import { Link } from "./Link";
 import { LookStep } from "./LookStep";
 import { QueuedChanges } from "./QueuedChanges";
@@ -39,6 +40,9 @@ type Props = {
   readonly changes: readonly BuiltChange[];
   readonly usage: Usage;
   readonly time: TimeTotals;
+  readonly liveVersion: number | null;
+  // Changes when the latest build does; it restarts the shortcut back to an earlier version.
+  readonly latestKey: string | null;
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly onStop: () => void;
@@ -87,6 +91,8 @@ export function Designer({
   changes,
   usage,
   time,
+  liveVersion,
+  latestKey,
   request,
   onRequestChange,
   onStop,
@@ -183,6 +189,7 @@ export function Designer({
                     </p>
                   )}
                   <Release project={project} unreleased={unreleased} notWorking={notWorking} />
+                  <GoBack key={latestKey} project={project} liveVersion={liveVersion} />
                   <AppFrame
                     // Loaded afresh each time it comes back from behind the build, so a change
                     // built while its progress showed comes back with its new version in.

@@ -30,9 +30,10 @@ const pages: Readonly<Record<RouteName, (params: RouteParams) => ReactNode>> = {
   apps: () => <ProjectList />,
   start: () => <StartPage />,
   startExisting: () => <TodayPage />,
-  // One key for the three views, so moving between them keeps the page and what was typed.
+  // One key for the four views, so moving between them keeps the page and what was typed.
   project: ({ id }) => <ProjectPage key={id} id={id} view="overview" />,
   projectChanges: ({ id }) => <ProjectPage key={id} id={id} view="changes" />,
+  projectVersions: ({ id }) => <ProjectPage key={id} id={id} view="versions" />,
   projectSettings: ({ id }) => <ProjectPage key={id} id={id} view="settings" />,
   usage: placeholder("usage"),
   billing: placeholder("billing"),

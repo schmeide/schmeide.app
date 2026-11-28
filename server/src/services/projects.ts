@@ -588,24 +588,33 @@ const startOrQueue = async (
   tx: Db,
   project: Project,
   kind: Build["kind"],
-  request: string
+  request: string,
+  byUserId: string | null = null
 ): Promise<{ project: Project; build: Build }> => {
   assertBuildsOn(deps);
   if (project.status === "building" || (await hasRunningBuild(tx, project.id))) {
     const [build] = await tx
       .insert(builds)
-      .values({ projectId: project.id, kind, request, status: "queued" })
+      .values({ projectId: project.id, kind, request, status: "queued", byUserId })
       .returning();
     return { project, build };
   }
-  return startBuild(deps, tx, project.id, ["live", "failed", "stopped"], kind, () => request);
+  return startBuild(deps, tx, project.id, ["live", "failed", "stopped"], kind, () => request, {
+    byUserId,
+  });
 };
 
 // On a failed or offline project a change starts now even with changes queued: it is the retry,
 // and the queue follows it.
 export const requestChange = (
   deps: Deps,
-  input: { readonly id: number; readonly request: string; readonly fileIds?: readonly number[] }
+  input: {
+    readonly id: number;
+    readonly request: string;
+    readonly fileIds?: readonly number[];
+    // Who asked, for the versions list (#230).
+    readonly byUserId?: string;
+  }
 ): Promise<{ project: Project; build: Build }> =>
   deps.db.transaction(async (raw) => {
     const tx = raw as unknown as Db;
@@ -619,7 +628,7 @@ export const requestChange = (
       : [];
     const unknown = fileIds.find((fileId) => !attached.some(({ id }) => id === fileId));
     if (unknown !== undefined) throw new NotFoundError(`File ${unknown} not found`);
-    const started = await startOrQueue(deps, tx, project, "change", input.request);
+    const started = await startOrQueue(deps, tx, project, "change", input.request, input.byUserId);
     if (attached.length) {
       await tx
         .insert(buildFiles)
@@ -733,11 +742,14 @@ export type CopyOffer = Pick<DatabaseCopy, "id" | "version" | "takenAt">;
 
 // A roll back that cannot keep today's information. `copies` are the ones it can go back with
 // instead, newest first, for the confirmation (#230) to offer.
+// `reason` is the message's first sentence, why, which the confirmation shows above its offers.
 export class RollBackRefusedError extends ConflictError {
   readonly copies: readonly CopyOffer[];
-  constructor(message: string, copies: readonly CopyOffer[]) {
+  readonly reason: string;
+  constructor(message: string, copies: readonly CopyOffer[], reason: string) {
     super(message);
     this.copies = copies;
+    this.reason = reason;
   }
 }
 
@@ -841,12 +853,14 @@ export const rollBackProduction = (
       );
       if (changed) {
         const may = changed.additive === null;
+        const reason = `Version ${changed.version} ${may ? "may have changed" : "changed"} how your app stores its information, so version ${input.version} ${may ? "may not" : "cannot"} read it.`;
         throw new RollBackRefusedError(
-          `Version ${changed.version} ${may ? "may have changed" : "changed"} how your app stores its information, so version ${input.version} ${may ? "may not" : "cannot"} read it. ` +
+          `${reason} ` +
             (copies.length > 0
               ? `You can go back to version ${input.version} with the information from ${when(copies[0].takenAt)}.`
               : "No copy of the information from then was kept."),
-          copies
+          copies,
+          reason
         );
       }
     }

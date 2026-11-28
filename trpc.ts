@@ -11,6 +11,7 @@ export type Project = Outputs["projects"]["get"]["project"];
 export type Build = NonNullable<Outputs["projects"]["get"]["latestBuild"]>;
 export type BuildEvent = Outputs["builds"]["events"][number];
 export type BuildSummary = Outputs["builds"]["summaries"][number];
+export type ListedBuild = Outputs["builds"]["list"]["builds"][number];
 export type BuiltChange = Outputs["projects"]["get"]["changes"][number];
 export type Usage = Outputs["projects"]["get"]["usage"];
 export type TimeTotals = Outputs["projects"]["get"]["time"];

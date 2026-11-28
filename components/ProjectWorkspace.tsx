@@ -6,11 +6,12 @@ import { Designer } from "./Designer";
 import { Link } from "./Link";
 import { SiteStep } from "./SiteStep";
 import { StopButton } from "./StopButton";
+import { Versions } from "./Versions";
 
 import stepStyles from "./Step.module.css";
 import styles from "./ProjectWorkspace.module.css";
 
-export type ProjectView = "overview" | "changes" | "settings";
+export type ProjectView = "overview" | "changes" | "versions" | "settings";
 
 type Props = {
   readonly view: ProjectView;
@@ -23,6 +24,9 @@ type Props = {
   readonly hasIcon: boolean;
   readonly usage: Usage;
   readonly time: TimeTotals;
+  // The version numbers of what is live and what is being worked on.
+  readonly liveVersion: number | null;
+  readonly workingVersion: number | null;
   readonly request: string;
   readonly onRequestChange: (request: string) => void;
   readonly onStop: () => void;
@@ -41,11 +45,15 @@ export function ProjectWorkspace({
   hasIcon,
   usage,
   time,
+  liveVersion,
+  workingVersion,
   request,
   onRequestChange,
   onStop,
 }: Props) {
-  const designerView = view === "settings" ? null : view;
+  const designerView = view === "overview" || view === "changes" ? view : null;
+  // A finished build changes the versions, so the views that list them start again.
+  const latestKey = latestBuild && `${latestBuild.id} ${latestBuild.status}`;
 
   return (
     <>
@@ -57,6 +65,14 @@ export function ProjectWorkspace({
               aria-current={view === "overview" ? "page" : view === "changes" ? "true" : undefined}
             >
               {copy.project.views.designer}
+            </Link>
+          </li>
+          <li>
+            <Link
+              to={pathTo("projectVersions", { id: project.id })}
+              aria-current={view === "versions" ? "page" : undefined}
+            >
+              {copy.project.views.versions}
             </Link>
           </li>
           <li>
@@ -81,9 +97,22 @@ export function ProjectWorkspace({
           changes={changes}
           usage={usage}
           time={time}
+          liveVersion={liveVersion}
+          latestKey={latestKey}
           request={request}
           onRequestChange={onRequestChange}
           onStop={onStop}
+        />
+      )}
+
+      {view === "versions" && (
+        <Versions
+          key={latestKey}
+          project={project}
+          latestBuild={latestBuild}
+          latestBuildBy={latestBuildBy}
+          liveVersion={liveVersion}
+          workingVersion={workingVersion}
         />
       )}
 

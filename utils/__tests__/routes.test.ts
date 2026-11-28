@@ -47,6 +47,13 @@ describe("the route table", () => {
     expect(matchRoute("/usage/")?.route.name).toBe("usage");
   });
 
+  it("has the versions of a project, titled", () => {
+    const match = matchRoute("/projects/7/versions");
+    expect(match?.route.name).toBe("projectVersions");
+    expect(match?.route.title).toBe("Versions");
+    expect(pathTo("projectVersions", { id: 7 })).toBe("/projects/7/versions");
+  });
+
   it("matches nothing for an unknown address or an id that is not a number", () => {
     expect(matchRoute("/nowhere")).toBeNull();
     expect(matchRoute("/projects/abc")).toBeNull();
