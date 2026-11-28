@@ -40,6 +40,45 @@
   min-width: 0;
 }
 
+.switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-s) var(--space-m);
+  margin-top: var(--space-m);
+}
+
+.switch p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* The build's progress and the frame share one cell: switching never moves what is below. */
+.panels {
+  display: grid;
+}
+
+.panel {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition-property: opacity, visibility;
+  transition-duration: var(--duration-gentle);
+  transition-timing-function: var(--ease-gentle);
+}
+
+/* Hidden, a panel keeps its room (and the frame its loaded app) but cannot be seen or reached. */
+.panel[hidden] {
+  display: block;
+  visibility: hidden;
+  opacity: 0;
+}
+
+/* Stretches the progress card to the frame's height, so the cell does not shrink under it. */
+.progress,
+.progress[hidden] {
+  display: grid;
+}
+
 .cancel {
   margin-top: var(--space-m);
 }

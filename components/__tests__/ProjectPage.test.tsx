@@ -832,13 +832,16 @@ describe("ProjectPage designer", () => {
     expect(Number(frame.getAttribute("width"))).toBeLessThan(wide);
   });
 
-  it("keeps showing the live app while a change is built, saying so, and loads the new version after when asked to", async () => {
+  it("shows the live app while a change is built when asked, saying so, and loads the new version after when asked to", async () => {
     const state = {
       project: aProject({ status: "building", spec: SPEC, previewUrl: "http://localhost:8100" }),
       latestBuild: aBuild({ id: 8, kind: "change", request: "Add a logo" }),
       hasBeenLive: true,
     };
     renderWithApi(<ProjectPage id={7} />, projectServer(state));
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.designer.showApp })
+    );
     const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
     const title = copy.project.designer.frameTitle("Invoices");
     const before = within(app).getByTitle(title);
@@ -864,6 +867,101 @@ describe("ProjectPage designer", () => {
     expect(within(app).getByText(copy.project.designer.loading)).toBeVisible();
   });
 
+  it("shows a building change's progress in place of the app, and the app as it is now on request", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "building", spec: SPEC, previewUrl: "http://localhost:8100" }),
+        latestBuild: aBuild({ id: 8, kind: "change", request: "Add a logo" }),
+        summaries: [aSummary(1, "Adding the logo.")],
+        hasBeenLive: true,
+      })
+    );
+    const progress = await screen.findByRole("heading", { name: copy.project.changeTitle });
+    expect(progress).toBeVisible();
+    // One copy of the running build: the side column no longer repeats it.
+    expect(screen.getAllByRole("heading", { name: copy.project.changeTitle })).toHaveLength(1);
+    expect(await screen.findByText("Adding the logo.")).toBeVisible();
+    expect(screen.getByText("Add a logo")).toBeVisible();
+    expect(screen.queryByRole("region", { name: copy.project.designer.appTitle })).toBeNull();
+    expect(screen.queryByTitle(copy.project.designer.frameTitle("Invoices"))).not.toBeVisible();
+    // The page's one status line says a change is being built; nothing else announces it.
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(screen.getByRole("status")).toHaveTextContent(copy.project.appBuildingHint);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showApp }));
+    const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
+    expect(screen.queryByRole("heading", { name: copy.project.changeTitle })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showBuild }));
+    expect(screen.getByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
+  });
+
+  it("goes back to the app when the change is built, its final summary above until dismissed", async () => {
+    const state = {
+      project: aProject({ status: "building", spec: SPEC, previewUrl: "http://localhost:8100" }),
+      latestBuild: aBuild({ id: 8, kind: "change", request: "Add a logo" }),
+      summaries: [aSummary(1, "Adding the logo.")],
+      hasBeenLive: true,
+    };
+    renderWithApi(<ProjectPage id={7} />, projectServer(state));
+    expect(await screen.findByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
+
+    state.project = { ...state.project, status: "live" };
+    state.latestBuild = { ...state.latestBuild, status: "passed", finishedAt: new Date() };
+    state.summaries = [...state.summaries, aSummary(2, "The logo is on every screen.", true)];
+    const app = await screen.findByRole(
+      "region",
+      { name: copy.project.designer.appTitle },
+      { timeout: 4000 }
+    );
+    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
+    // The new version is loaded, not offered: the page's status line is the one announcement.
+    expect(within(app).queryByText(copy.project.designer.newVersion)).toBeNull();
+    expect(within(app).getByText(copy.project.designer.loading)).toBeVisible();
+    expect(screen.getByText(copy.status.live.hint)).toBeInTheDocument();
+    const built = screen.getByText(copy.project.designer.built);
+    expect(built).toBeVisible();
+    await waitFor(() =>
+      expect(built.closest("p")).toHaveTextContent("The logo is on every screen.")
+    );
+    // Nothing took the focus as the build ended.
+    expect(document.body).toHaveFocus();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.dismiss }));
+    expect(screen.queryByText(copy.project.designer.built)).toBeNull();
+  });
+
+  it("shows a failed change's result in place of the app, with a way to try it again", async () => {
+    renderWithApi(
+      <ProjectPage id={7} />,
+      projectServer({
+        project: aProject({ status: "failed", spec: SPEC, previewUrl: "http://localhost:8100" }),
+        latestBuild: aBuild({
+          kind: "change",
+          request: "Add a logo",
+          status: "failed",
+          error: "boom",
+          finishedAt: new Date(),
+        }),
+        hasBeenLive: true,
+      })
+    );
+    expect(await screen.findByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
+    expect(screen.getByText("boom")).toBeVisible();
+    expect(screen.queryByRole("region", { name: copy.project.designer.appTitle })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.retryTitle }));
+    expect(screen.getByLabelText(copy.project.changeLabel)).toHaveValue("Add a logo");
+    await waitFor(() => expect(screen.getByLabelText(copy.project.changeLabel)).toHaveFocus());
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showApp }));
+    expect(screen.getByRole("region", { name: copy.project.designer.appTitle })).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showResult }));
+    expect(screen.getByText("boom")).toBeVisible();
+  });
+
   it("says a rebuilt app appears when its build finishes, when there is no live version to show", async () => {
     renderWithApi(
       <ProjectPage id={7} />,
@@ -872,6 +970,9 @@ describe("ProjectPage designer", () => {
         latestBuild: aBuild({ kind: "change", request: "Bring it back" }),
         hasBeenLive: true,
       })
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.designer.showApp })
     );
     const app = await screen.findByRole("region", { name: copy.project.designer.appTitle });
     expect(within(app).getByText(copy.project.designer.buildingNoApp)).toBeVisible();
@@ -1041,14 +1142,16 @@ describe("ProjectPage designer", () => {
       })
     );
     expect(await screen.findByText(copy.project.appFailedHint)).toBeInTheDocument();
-    const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
-    expect(within(app).getByText(copy.project.designer.failed)).toBeVisible();
-    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
     expect(screen.getByRole("heading", { name: copy.project.changeTitle })).toBeVisible();
     expect(screen.getByText(copy.project.failureTitle)).toBeVisible();
     expect(screen.getByText("boom")).toBeVisible();
     expect(screen.getByText(copy.project.changeRetryIntro)).toBeVisible();
     expect(primaryButtons()).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showApp }));
+    const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
+    expect(within(app).getByText(copy.project.designer.failed)).toBeVisible();
+    expect(within(app).getByTitle(copy.project.designer.frameTitle("Invoices"))).toBeVisible();
   });
 
   it("stays in the designer when a later change is canceled, still showing the app from before it", async () => {
@@ -1073,6 +1176,7 @@ describe("ProjectPage designer", () => {
     expect(screen.queryByText(copy.status.failed.label)).toBeNull();
     expect(screen.getByText(copy.project.buildStatus.canceled)).toBeInTheDocument();
     expect(screen.queryByText(copy.project.failureTitle)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: copy.project.designer.showApp }));
     const app = screen.getByRole("region", { name: copy.project.designer.appTitle });
     expect(within(app).getByText(copy.project.designer.canceled)).toBeVisible();
     expect(within(app).queryByText(copy.project.designer.failed)).toBeNull();
@@ -1286,6 +1390,9 @@ describe("ProjectPage, the version being worked on", () => {
         hasBeenLive: true,
         unreleased: 1,
       })
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.project.designer.showApp })
     );
     const shown = await region();
     expect(within(shown).getByText(copy.project.release.ahead(1))).toBeVisible();
