@@ -84,6 +84,16 @@ describe("the entry frame", () => {
   });
 });
 
+describe("the invite-only pages", () => {
+  it.each(["/sign-up", "/sign-in"])(
+    "%s says what Schmeide does, for someone arriving from a forwarded link",
+    (path) => {
+      open(path, signedOut);
+      expect(screen.getByText(copy.entry.about)).toBeInTheDocument();
+    }
+  );
+});
+
 describe("the sign-up page", () => {
   it("explains that Schmeide is invite-only and links to the early-access form", () => {
     open("/sign-up", signedOut);
