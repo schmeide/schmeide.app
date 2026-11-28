@@ -64,6 +64,7 @@ export function SignInPage() {
         </p>
       )}
       {deleted && <p className={styles.notice}>{copy.signInPage.deleted}</p>}
+      <p className={styles.intro}>{copy.entry.about}</p>
       <p className={styles.intro}>{copy.signInPage.intro}</p>
       <div className={styles.column}>
         {problem && (

@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { copy } from "../data/copy";
-import { POLL_MS, useTRPC } from "../trpc";
+import { POLL_MS, useTRPC, type Build, type Project } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { pathTo } from "../utils/routes";
 import { appName } from "../utils/appName";
@@ -12,10 +12,22 @@ import { ProjectSetup } from "./ProjectSetup";
 import { ProjectWorkspace, type ProjectView } from "./ProjectWorkspace";
 import { useDraft } from "./useDraft";
 import { NotFoundPage } from "./NotFoundPage";
+import { Working } from "./Working";
 
 import styles from "./ProjectPage.module.css";
 
 type Props = { readonly id: number; readonly view?: ProjectView };
+
+// The page polls, and its status line shows a spinner, while the server is working on the project.
+const isWorking = (
+  project: Project | undefined,
+  latestBuild: Build | null | undefined,
+  stoppingAt: number | null
+) =>
+  project?.status === "spec_generating" ||
+  project?.status === "building" ||
+  latestBuild?.status === "running" ||
+  (project?.status === "live" && project.updatedAt.getTime() === stoppingAt);
 
 // One project, in one of two phases: setup (until its first build passes), then the app's home
 // with its views. `view` only matters in the second.
@@ -30,15 +42,8 @@ export function ProjectPage({ id, view = "overview" }: Props) {
     trpc.projects.get.queryOptions(
       { id },
       {
-        refetchInterval: ({ state }) => {
-          const project = state.data?.project;
-          const busy =
-            project?.status === "spec_generating" ||
-            project?.status === "building" ||
-            state.data?.latestBuild?.status === "running" ||
-            (project?.status === "live" && project.updatedAt.getTime() === stoppingAt);
-          return busy ? POLL_MS : false;
-        },
+        refetchInterval: ({ state }) =>
+          isWorking(state.data?.project, state.data?.latestBuild, stoppingAt) ? POLL_MS : false,
       }
     )
   );
@@ -96,6 +101,9 @@ export function ProjectPage({ id, view = "overview" }: Props) {
         className={styles.status}
         data-status={canceled ? "canceled" : project.status}
       >
+        {/* Beside the words rather than around them, so they are not replaced and announced
+            again when the spinner comes or goes. */}
+        {isWorking(project, latestBuild, stoppingAt) && <Working />}
         <strong>
           {copy.project.statusPrefix} {label}.
         </strong>{" "}

@@ -70,6 +70,15 @@ describe("ReadBack", () => {
     expect(calls).toContainEqual({ path: "readBack.write", input: { id: 7 } });
   });
 
+  it("shows a spinner beside the status while the account is written", async () => {
+    setup(null, { "readBack.write": () => new Promise(() => {}) });
+    await openReadBack();
+
+    const status = await screen.findByText(copy.readBack.writing);
+    expect(status).toHaveAttribute("role", "status");
+    expect(within(status).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("asks one question about a sentence marked wrong, and shows the account written again", async () => {
     const { calls } = setup(aReadBack(), {
       "readBack.correct": () =>

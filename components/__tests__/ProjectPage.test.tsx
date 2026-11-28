@@ -134,6 +134,8 @@ describe("ProjectPage", () => {
     renderWithApi(<ProjectPage id={7} />, projectServer({ project: aProject({ features: "a" }) }));
     expect(await screen.findByText(copy.status.draft.hint)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
+    // Nothing is being worked on, so the status line has no spinner.
+    expect(within(screen.getByRole("status")).queryByTestId("working")).toBeNull();
   });
 
   it("says the spec is being written while it is", async () => {
@@ -141,7 +143,12 @@ describe("ProjectPage", () => {
       <ProjectPage id={7} />,
       projectServer({ project: aProject({ status: "spec_generating" }) })
     );
-    expect(await screen.findByText(copy.project.specWriting)).toBeInTheDocument();
+    const writing = await screen.findByText(copy.project.specWriting);
+    expect(within(writing).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
+    // The status line moves too while the page polls, and still announces its words.
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(copy.status.spec_generating.label);
+    expect(within(status).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
   });
 
   it.each(["spec_ready", "live"] as const)(
@@ -836,6 +843,9 @@ describe("ProjectPage designer", () => {
     const title = copy.project.designer.frameTitle("Invoices");
     const before = within(app).getByTitle(title);
     expect(within(app).getByText(copy.project.designer.building)).toBeVisible();
+    expect(
+      within(within(app).getByText(copy.project.designer.building)).getByTestId("working")
+    ).toHaveAttribute("aria-hidden", "true");
     expect(
       within(app).getByRole("link", { name: new RegExp(copy.project.openLive) })
     ).toHaveAttribute("href", "http://localhost:8100");

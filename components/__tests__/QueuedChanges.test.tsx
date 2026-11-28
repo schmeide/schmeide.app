@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -99,6 +99,18 @@ describe("QueuedChanges", () => {
       );
     }
   );
+
+  it("shows it is starting the waiting changes inside the button", async () => {
+    renderWithApi(
+      <QueuedChanges project={aProject({ status: "failed" })} queued={[queuedChange]} />,
+      { "projects.buildWaiting": () => new Promise(() => {}) }
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.project.queueBuildNow }));
+
+    const starting = await screen.findByRole("button", { name: copy.project.queueStarting });
+    expect(within(starting).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
+  });
 
   it.each(["building", "live"] as const)(
     "does not offer to build the waiting changes when the app is %s",

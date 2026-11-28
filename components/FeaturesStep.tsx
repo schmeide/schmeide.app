@@ -12,6 +12,7 @@ import {
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 import styles from "./FeaturesStep.module.css";
@@ -179,7 +180,11 @@ export function FeaturesStep({ project, onEditingChange, specFailed, onUseInterv
             {save.isPending ? copy.project.saving : copy.project.saveFeatures}
           </button>
           <button type="submit" data-variant="primary" disabled={pending}>
-            {generate.isPending ? copy.project.startingSpec : copy.project.writeSpec}
+            {generate.isPending ? (
+              <Working>{copy.project.startingSpec}</Working>
+            ) : (
+              copy.project.writeSpec
+            )}
           </button>
           {reviewing && (
             <button

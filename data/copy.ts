@@ -47,6 +47,10 @@ export const copy = {
   entry: {
     // Read after the logo, so the logo link says where it goes.
     logoHint: ", back to schmeide.com",
+    // What Schmeide does, on the invite-only pages, for someone who arrives from a forwarded link.
+    // The same sentence as the description in index.html (utils/__tests__/indexHtml.test.ts).
+    about:
+      "Schmeide builds software for small businesses. We ask questions, show you designs, build only what you approve, and keep it running.",
   },
   // The name of each route in utils/routes.ts: its navigation label and its tab title.
   routes: {

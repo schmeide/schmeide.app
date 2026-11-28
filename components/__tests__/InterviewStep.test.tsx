@@ -111,6 +111,16 @@ describe("InterviewStep", () => {
     expect(plan(1)).toHaveTextContent(copy.interview.sectionStatus.sketched);
   });
 
+  it("shows a spinner beside the status while the first question is prepared", async () => {
+    setup(anInterview(), { "interview.start": () => new Promise(() => {}) });
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.interview.start }));
+
+    const status = await screen.findByText(copy.interview.starting);
+    expect(status).toHaveAttribute("role", "status");
+    expect(within(status).getByTestId("working")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("says why each question is asked, beside it", async () => {
     setup(anInterview({ current: WHO }));
 

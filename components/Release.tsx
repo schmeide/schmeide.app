@@ -4,6 +4,7 @@ import { useState } from "react";
 import { copy } from "../data/copy";
 import { useRefreshProjects, useTRPC, type Project } from "../trpc";
 import { ErrorNote } from "./ErrorNote";
+import { Working } from "./Working";
 
 import stepStyles from "./Step.module.css";
 
@@ -65,7 +66,11 @@ export function Release({ project, unreleased, notWorking = [] }: Props) {
                 }
                 disabled={pending}
               >
-                {promote.isPending ? copy.project.release.promoting : copy.project.release.promote}
+                {promote.isPending ? (
+                  <Working>{copy.project.release.promoting}</Working>
+                ) : (
+                  copy.project.release.promote
+                )}
               </button>
             )}
             {canDiscard && !confirming && (
@@ -90,9 +95,11 @@ export function Release({ project, unreleased, notWorking = [] }: Props) {
               onClick={() => promote.mutate({ id: project.id })}
               disabled={pending}
             >
-              {promote.isPending
-                ? copy.project.release.promoting
-                : copy.project.release.notWorkingYes}
+              {promote.isPending ? (
+                <Working>{copy.project.release.promoting}</Working>
+              ) : (
+                copy.project.release.notWorkingYes
+              )}
             </button>
             <button
               type="button"
@@ -118,9 +125,11 @@ export function Release({ project, unreleased, notWorking = [] }: Props) {
               onClick={() => discard.mutate({ id: project.id })}
               disabled={pending}
             >
-              {discard.isPending
-                ? copy.project.release.discarding
-                : copy.project.release.discardYes}
+              {discard.isPending ? (
+                <Working>{copy.project.release.discarding}</Working>
+              ) : (
+                copy.project.release.discardYes
+              )}
             </button>
             <button type="button" onClick={() => setConfirming(false)} disabled={pending} autoFocus>
               {copy.project.release.discardNo}
