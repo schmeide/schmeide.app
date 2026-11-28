@@ -398,16 +398,22 @@ export const planItems = pgTable("plan_items", {
 
 export const questionKind = pgEnum("question_kind", ["pick_one", "pick_many", "yes_no", "text"]);
 
+// The most a person writes at once: an answer in their own words, or a note.
+export const WORDS_MAX = 2000;
+
 // Every question can also be answered in the person's own words, or left to Schmeide.
 export const answerSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("choices"), values: z.array(z.string().max(200)).min(1).max(10) }),
   z.object({ type: z.literal("yes_no"), value: z.boolean() }),
-  z.object({ type: z.literal("text"), value: z.string().trim().min(1).max(2000) }),
+  z.object({ type: z.literal("text"), value: z.string().trim().min(1).max(WORDS_MAX) }),
   z.object({ type: z.literal("you_decide") }),
 ]);
 export type Answer = z.infer<typeof answerSchema>;
 
-// One row per question asked; `answer` is null while it waits for the person.
+// One row per question asked; `answer` is null while it waits for the person. A note the person
+// added on their own, outside any question, is a row too, so the trail keeps one order: `note` is
+// set, `text` is empty, and the note is the text answer. A note is not a question, so it never
+// counts against the question limit.
 export const interviewQuestions = pgTable("interview_questions", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id")
@@ -419,6 +425,7 @@ export const interviewQuestions = pgTable("interview_questions", {
   // One short line on why it is asked, so a pointed question reads as care, not as a quiz.
   why: varchar("why", { length: ITEM_MAX }).notNull().default(""),
   answer: jsonb("answer").$type<Answer>(),
+  note: boolean("note").notNull().default(false),
   askedAt: timestamp("asked_at", { withTimezone: true }).notNull().defaultNow(),
   answeredAt: timestamp("answered_at", { withTimezone: true }),
 });
@@ -603,6 +610,11 @@ export const answerQuestionSchema = z.object({
   id: projectId,
   questionId: createSelectSchema(interviewQuestions).shape.id,
   answer: answerSchema,
+});
+
+export const addNoteSchema = z.object({
+  id: projectId,
+  text: z.string().trim().min(1).max(WORDS_MAX),
 });
 
 export type Project = typeof projects.$inferSelect;

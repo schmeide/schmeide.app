@@ -34,3 +34,23 @@ not replace reading. Read the same owner's transcript before and after a change,
 business before the app, do later questions follow earlier answers, does it bring up what the owner would not, and
 does it notice contradictions? The end of each transcript lists the plan it built and the checklist points left
 open, which the spec states as assumptions.
+
+## Notes outside the questions
+
+At any point the owner can add a note under "Anything else?" (`interview.addNote`). The note joins the trail in order
+with the answers, and the prompt then asks for plan changes from it and keeps the waiting question unless the note
+settles it. The scripted owners only answer questions, so these cases are judged by hand: stop a plumber's interview
+partway, with a question waiting, send each note through the interviewer, and read the turn it returns.
+
+- **Adds to a section not asked about yet.** Early in the business stage: "My two vans each have a driver who should
+  see only their own jobs." A good turn adds to "who" and to "rules" for what each driver may see, and keeps the
+  waiting question.
+- **Contradicts an earlier answer.** After the owner said they take deposits: "Actually I don't take deposits any
+  more, people pay when it is done." A good turn updates or removes the deposit items rather than adding beside them.
+- **Answers the waiting question.** With "Who sends the invoices?" waiting: "I do all the invoicing myself." A good
+  turn adds that to the plan, marks the point it settles, and asks a new question, which takes the waiting one's place.
+- **Has nothing usable in it.** "Thanks, this is going well." A good turn changes nothing, marks nothing, and returns
+  no question, so the waiting one stays and the page says the plan did not change.
+
+Also send one of them after the interview is finished: the plan still changes, and a follow-up question comes only
+when the note opens something that would change what gets built.

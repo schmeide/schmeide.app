@@ -133,6 +133,38 @@ describe("interviewPrompt, asking like an expert", () => {
   });
 });
 
+describe("interviewPrompt, a note of their own", () => {
+  const noted = { ...input, trail: [...input.trail, { note: "Invoices must be in French" }] };
+
+  it("shows the note in order with the answers, without counting it as a question", () => {
+    const prompt = interviewPrompt({ ...noted, waiting: null });
+
+    expect(prompt).toContain(
+      "3. They added this themselves, not in answer to a question:\n   Invoices must be in French"
+    );
+    expect(prompt).toContain("(2 of at most 30)");
+    expect(prompt).toContain("The newest entry is a note they added themselves");
+  });
+
+  it("keeps the waiting question unless the note settles it", () => {
+    const prompt = interviewPrompt({
+      ...noted,
+      waiting: { text: "Who sends the reminders?", kind: "text", choices: [] },
+    });
+
+    expect(prompt).toContain('The question waiting for them is: "Who sends the reminders?"');
+    expect(prompt).toContain("Return null to keep it");
+  });
+
+  it("asks only about something new once no question is waiting", () => {
+    expect(interviewPrompt({ ...noted, waiting: null })).toContain("No question is waiting.");
+  });
+
+  it("says nothing about notes after an answer", () => {
+    expect(interviewPrompt(input)).not.toContain("The newest entry is a note");
+  });
+});
+
 describe("createInterviewer", () => {
   it("gives the model the project, the plan with its ids, and the answers so far", async () => {
     vi.stubEnv("SCHMEIDE_AUTH_SECRET", "secret");

@@ -119,6 +119,27 @@ describe("the API", () => {
     }
   });
 
+  it("refuses an empty or overlong note without asking the model", async () => {
+    const app = buildApp(deps);
+    const { cookie, tenantId } = await aSignedInPerson(app, deps);
+    const project = await createProject(db, { name: `api ${randomUUID()}`, tenantId });
+    const calls = interviewer.mock.calls.length;
+    const note = (text: string) =>
+      app.inject({
+        method: "POST",
+        url: "/trpc/interview.addNote",
+        headers: { cookie },
+        payload: { json: { id: project.id, text } },
+      });
+    try {
+      expect((await note("   ")).statusCode).toBe(400);
+      expect((await note("x".repeat(2001))).statusCode).toBe(400);
+      expect(interviewer.mock.calls).toHaveLength(calls);
+    } finally {
+      await app.close();
+    }
+  });
+
   it("answers SERVICE_UNAVAILABLE when the next question cannot be produced", async () => {
     const app = buildApp(deps);
     const { cookie, tenantId } = await aSignedInPerson(app, deps);

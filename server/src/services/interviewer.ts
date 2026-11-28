@@ -14,9 +14,9 @@ import {
   STAGES,
   currentStage,
   turnSchema,
-  type AnsweredQuestion,
   type Interviewer,
   type Stage,
+  type TrailEntry,
   type Turn,
 } from "./interview.ts";
 import { MAX_OPEN, writtenSchema, type ReadBackWriter, type Written } from "./readBack.ts";
@@ -97,13 +97,24 @@ const planText = (items: readonly PlanItem[]): string =>
     return `${section} (${SECTION_MEANING[section]}):\n${lines.join("\n") || "- nothing yet"}`;
   }).join("\n\n");
 
-const trailText = (trail: readonly AnsweredQuestion[]): string =>
+const trailText = (trail: readonly TrailEntry[]): string =>
   trail
-    .map(
-      ({ question, answer }, index) =>
-        `${index + 1}. ${question.text}\n   Answer: ${answerText(answer)}`
+    .map((entry, index) =>
+      "note" in entry
+        ? `${index + 1}. They added this themselves, not in answer to a question:\n   ${entry.note}`
+        : `${index + 1}. ${entry.question.text}\n   Answer: ${answerText(entry.answer)}`
     )
     .join("\n") || "None yet.";
+
+// What to do with a note: plan changes from it, and the question only when the note calls for one.
+const noteText = (waiting: Parameters<Interviewer>[0]["waiting"]): string =>
+  `The newest entry is a note they added themselves, outside the questions. Turn it into changes to the plan: add what it says to the section it belongs to, even one not asked about yet; when it contradicts an earlier answer or an item, the note is newer, so update or remove that item; mark any checklist point it settles. If nothing in it bears on the app, change nothing and mark nothing.
+
+${
+  waiting
+    ? `The question waiting for them is: "${waiting.text}" Return null to keep it. Return a new question only when the note already answers the waiting one or makes it pointless; the new one takes its place.`
+    : "No question is waiting. Return null, unless the note opens something new that would change what gets built; then ask about it."
+}`;
 
 export const interviewPrompt = ({
   project,
@@ -111,9 +122,12 @@ export const interviewPrompt = ({
   trail,
   depth,
   covered,
+  waiting,
 }: Parameters<Interviewer>[0]): string => {
   const stage = currentStage(covered);
   const limit = QUESTION_LIMITS[depth];
+  const asked = trail.filter((entry) => !("note" in entry)).length;
+  const afterNote = trail.length > 0 && "note" in trail[trail.length - 1];
   return `You are interviewing a small business owner about a web app they want built for them. They do not write software. You have spent years helping businesses like theirs, and you interview like it: you understand the business before the app, each question builds on what they told you, and you raise what such businesses usually need and often forget. You ask one question at a time and keep a short written plan of the app up to date from their answers.
 
 The app is called "${project.name}".${
@@ -130,7 +144,7 @@ The plan so far, by section, with each item's id in brackets:
 
 ${planText(items)}
 
-Questions already asked and how they were answered, oldest first (${trail.length} of at most ${limit}):
+Questions already asked and how they were answered, with any notes they added on their own, oldest first (${asked} of at most ${limit}):
 
 ${trailText(trail)}
 
@@ -145,10 +159,10 @@ ${
 }
 
 ${DEPTH_GUIDANCE[depth].replace("{limit}", String(limit))}
-
+${afterNote ? `\n${noteText(waiting)}\n` : ""}
 Return the next turn:
 
-- "add", "update", "remove": changes to the plan that follow from the newest answer, or from what they wrote if nothing has been asked yet. Each item is one short plain sentence about one thing. Use "later" for an item they said can wait. Refer to existing items by id. Do not repeat an item that is already in the plan. When the newest answer is "(left for you to decide)", choose a sensible, simple default for this kind of business and add it.
+- "add", "update", "remove": changes to the plan that follow from the newest answer or note, or from what they wrote if nothing has been asked yet. Each item is one short plain sentence about one thing. Use "later" for an item they said can wait. Refer to existing items by id. Do not repeat an item that is already in the plan. When the newest answer is "(left for you to decide)", choose a sensible, simple default for this kind of business and add it.
 - "covered": the ids of every checklist point the answers so far settle, including those already marked [x]. A point is settled when they have answered it, or left it to you and you added a default. Never mark a point for something they were not asked.
 - "question": the single most useful next question, or null when the checklist is settled, the question limit is near and nothing important is left, or further questions would not change what gets built.
 

@@ -5,6 +5,7 @@ import type { z } from "zod";
 import {
   acceptInviteSchema,
   accessChangeSchema,
+  addNoteSchema,
   adminListSchema,
   ADMIN_ROLE,
   answerQuestionSchema,
@@ -111,6 +112,7 @@ import {
 import { businessTime, usageSummary } from "./services/usageSummary.ts";
 import { deleteFile, listFiles, readFileIntoProposals, renameFile } from "./services/files.ts";
 import {
+  addNote,
   addPlanItem,
   answerQuestion,
   depthSchema,
@@ -730,6 +732,8 @@ export const appRouter = t.router({
     answer: onProject(answerQuestionSchema).mutation(({ ctx, input }) =>
       answerQuestion(ctx, input)
     ),
+    // Something the person adds outside the current question; it changes the plan, not the answers.
+    addNote: onProject(addNoteSchema).mutation(({ ctx, input }) => addNote(ctx, input)),
     addItem: onProject(newPlanItemSchema).mutation(({ ctx, input }) => addPlanItem(ctx.db, input)),
     updateItem: onProject(editPlanItemSchema).mutation(({ ctx, input }) =>
       updatePlanItem(ctx.db, input)

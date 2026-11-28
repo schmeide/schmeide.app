@@ -162,7 +162,9 @@ describe("correctReadBack", () => {
       }),
       answer: { type: "text", value: "Clients email me" },
     });
-    expect(call.trail.at(-1)?.question.text).toContain("A client calls.");
+    expect(call.trail.at(-1)).toMatchObject({
+      question: { text: expect.stringContaining("A client calls.") },
+    });
     expect(readBack.account?.steps[0].text).toBe("A client books online.");
     const items = await db.select().from(planItems).where(eq(planItems.projectId, project.id));
     expect(items).toContainEqual(
@@ -195,9 +197,9 @@ describe("correctReadBack", () => {
       answer: "14 days",
     });
 
-    expect(d.interviewer.mock.calls[0][0].trail.at(-1)?.question.text).toContain(
-      "Invoices are due in 30 days"
-    );
+    expect(d.interviewer.mock.calls[0][0].trail.at(-1)).toMatchObject({
+      question: { text: expect.stringContaining("Invoices are due in 30 days") },
+    });
     expect(readBack.open).toEqual([]);
   });
 

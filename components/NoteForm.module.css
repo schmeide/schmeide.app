@@ -1,0 +1,45 @@
+/* "Anything else?" sits under the question as a panel of its own, with a label, a hint and a
+   multi-line box, so it reads as a form to fill in, not a chat bar. */
+.note {
+  display: grid;
+  gap: var(--space-s);
+  min-width: 0;
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--color-border);
+}
+
+.toggle {
+  justify-self: start;
+}
+
+.body {
+  display: grid;
+  gap: var(--space-s);
+  min-width: 0;
+}
+
+.body p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Narrow screens open it on demand, so it does not push the question down. */
+.body:not([data-open]) {
+  display: none;
+}
+
+.label {
+  font-weight: 600;
+}
+
+/* Wide screens (keep in sync with --breakpoint-md, where the plan moves beside the question):
+   always open, so it stays in reach as the questions change. */
+@media (min-width: 960px) {
+  .toggle {
+    display: none;
+  }
+
+  .body:not([data-open]) {
+    display: grid;
+  }
+}

@@ -13,6 +13,7 @@ import {
 } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
+import { NoteForm } from "./NoteForm";
 import { AnswerForm, ITEM_MAX, ReadBackStep } from "./ReadBack";
 import { useDraft } from "./useDraft";
 import { Working } from "./Working";
@@ -62,9 +63,11 @@ function QuestionForm({ question, busy, focus, onAnswer }: QuestionProps) {
   const [words, setWords] = useDraft(`answer:${question.id}`);
   const [other, setOther] = useState(question.kind !== "text" && words !== "");
   const [missing, setMissing] = useState(false);
+  // Only as it appears: a note sent while it waits leaves focus with the note.
+  const focusOnMount = useRef(focus);
   useEffect(() => {
-    if (focus) heading.current?.focus();
-  }, [focus]);
+    if (focusOnMount.current) heading.current?.focus();
+  }, []);
 
   const many = question.kind === "pick_many";
   const choices = question.kind === "yes_no" ? [YES, NO] : question.choices;
@@ -664,6 +667,7 @@ export function InterviewStep({
   const answer = useMutation(trpc.interview.answer.mutationOptions({ onSuccess: store }));
   const restart = useMutation(trpc.interview.restart.mutationOptions({ onSuccess: store }));
   const setDepth = useMutation(trpc.interview.setDepth.mutationOptions({ onSuccess: store }));
+  const note = useMutation(trpc.interview.addNote.mutationOptions());
   const [depth, setChosenDepth] = useState<Depth>(interview.depth);
   const generate = useMutation(
     trpc.projects.generateSpec.mutationOptions({ onSettled: () => refresh() })
@@ -683,6 +687,8 @@ export function InterviewStep({
   const open = project.status === "draft" || (reviewing && editing);
   const started = interview.current !== null || interview.questions.length > 0;
   const thinking = start.isPending || answer.isPending || restart.isPending || setDepth.isPending;
+  // A note in flight holds everything else too, so the model never works from a stale trail.
+  const busy = thinking || note.isPending;
   const failure = answer.error ?? start.error ?? restart.error ?? setDepth.error;
   const unavailable = failure !== null && classifyError(failure) === "unavailable";
   const fresh = new Set(
@@ -702,6 +708,28 @@ export function InterviewStep({
   const onAnswer = (question: Question) => (given: Answer) => {
     remember();
     answer.mutate({ id: project.id, questionId: question.id, answer: given });
+  };
+  // Says what the note changed: added items are announced as for an answer; anything else is said.
+  const onNote = (text: string, sent: (changed: boolean) => void) => {
+    remember();
+    const before = interview.items;
+    note.mutate(
+      { id: project.id, text },
+      {
+        onSuccess: (next) => {
+          store(next);
+          const changed =
+            next.items.length !== before.length ||
+            next.items.some(
+              (item, index) => item.id !== before[index].id || item.text !== before[index].text
+            );
+          const added = next.items.some((item) => !before.some((was) => was.id === item.id));
+          if (!changed) setSaid(copy.interview.noteUnchanged);
+          else if (!added) setSaid(copy.interview.noteChanged);
+          sent(changed);
+        },
+      }
+    );
   };
   const onRestart = (need: string) => {
     remember();
@@ -747,7 +775,7 @@ export function InterviewStep({
                 need={project.need}
                 answers={interview.questions.length}
                 items={interview.items.length}
-                busy={thinking}
+                busy={busy}
                 onRestart={onRestart}
               />
             )}
@@ -776,7 +804,7 @@ export function InterviewStep({
                 )}
                 <button
                   type="button"
-                  disabled={thinking}
+                  disabled={busy}
                   onClick={() => setDepth.mutate({ id: project.id, depth: otherDepth })}
                 >
                   {copy.interview.switchDepth[otherDepth]}
@@ -787,7 +815,7 @@ export function InterviewStep({
               <QuestionForm
                 key={interview.current.id}
                 question={interview.current}
-                busy={thinking}
+                busy={busy}
                 focus={known !== null}
                 onAnswer={onAnswer(interview.current)}
               />
@@ -814,9 +842,18 @@ export function InterviewStep({
               <p>{interview.finished ? copy.interview.finished : copy.interview.paused}</p>
             )}
             {started && !interview.current && !interview.finished && !thinking && !unavailable && (
-              <button type="button" onClick={onStart}>
+              <button type="button" disabled={busy} onClick={onStart}>
                 {copy.interview.resume}
               </button>
+            )}
+            {started && (
+              <NoteForm
+                projectId={project.id}
+                busy={thinking}
+                sending={note.isPending}
+                error={note.error}
+                onSend={onNote}
+              />
             )}
           </div>
         )}
@@ -825,7 +862,7 @@ export function InterviewStep({
           interview={interview}
           fresh={fresh}
           editable={open}
-          busy={thinking}
+          busy={busy}
           onChange={onPlanChange}
         />
       </div>
@@ -835,7 +872,7 @@ export function InterviewStep({
           <dl>
             {interview.questions.map((question) => (
               <div key={question.id}>
-                <dt>{question.text}</dt>
+                <dt>{question.note ? copy.interview.noteAdded : question.text}</dt>
                 <dd>{question.answer && answerText(question.answer)}</dd>
               </div>
             ))}
@@ -848,7 +885,7 @@ export function InterviewStep({
             <button
               type="button"
               data-variant={interview.current ? undefined : "primary"}
-              disabled={thinking}
+              disabled={busy}
               onClick={onCheck}
             >
               {copy.readBack.open}

@@ -8,6 +8,7 @@ import {
   CHECKLIST,
   MAX_QUESTIONS,
   QUESTION_LIMITS,
+  addNote,
   addPlanItem,
   answerQuestion,
   getInterview,
@@ -455,6 +456,240 @@ describe("answerQuestion", () => {
     });
 
     expect(await findProject(db, project.id)).toMatchObject({ status: "draft", spec: null });
+  });
+});
+
+describe("addNote", () => {
+  // A started interview with one item in the plan and WHO waiting.
+  const startedWith = async () => {
+    const project = await newProject();
+    const { deps, interviewer } = scripted(
+      turn({
+        add: [{ section: "does", text: "Create an invoice", phase: "day_one" }],
+        question: WHO,
+      })
+    );
+    const started = await startInterview(deps, project.id);
+    return { project, deps, interviewer, started };
+  };
+  const questionRows = (projectId: number) =>
+    db.select().from(interviewQuestions).where(eq(interviewQuestions.projectId, projectId));
+
+  it("turns a note into the person's plan changes and keeps the waiting question", async () => {
+    const { project, deps, interviewer, started } = await startedWith();
+    const [create] = started.items;
+    interviewer.mockResolvedValueOnce({
+      turn: turn({
+        add: [{ section: "rules", text: "Invoices go out in French", phase: "day_one" }],
+        update: [{ id: create.id, text: "Create an invoice in French" }],
+        covered: ["rules.money"],
+      }),
+      usage: null,
+    });
+
+    const interview = await addNote(deps, {
+      id: project.id,
+      text: "  Invoices must be in French ",
+    });
+
+    expect(interviewer).toHaveBeenLastCalledWith({
+      project: expect.objectContaining({ id: project.id }),
+      items: started.items,
+      trail: [{ note: "Invoices must be in French" }],
+      depth: "thorough",
+      covered: [],
+      waiting: expect.objectContaining(WHO),
+    });
+    expect(interview.current).toEqual(started.current);
+    expect(interview.questions).toEqual([
+      expect.objectContaining({
+        note: true,
+        answer: { type: "text", value: "Invoices must be in French" },
+      }),
+    ]);
+    expect(interview.items.map((item) => [item.text, item.source])).toEqual([
+      ["Create an invoice in French", "schmeide"],
+      ["Invoices go out in French", "you"],
+    ]);
+    expect(interview.covered).toEqual(["rules.money"]);
+    expect(interview.finished).toBe(false);
+  });
+
+  it("hands the note to the interviewer in order with the answers", async () => {
+    const { project, deps, interviewer, started } = await startedWith();
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
+    await addNote(deps, { id: project.id, text: "Two staff share one login" });
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHEN }), usage: null });
+
+    await answerQuestion(deps, {
+      id: project.id,
+      questionId: started.current?.id ?? 0,
+      answer: { type: "choices", values: ["Just me"] },
+    });
+
+    expect(interviewer.mock.lastCall?.[0].trail).toEqual([
+      { note: "Two staff share one login" },
+      { question: expect.objectContaining(WHO), answer: { type: "choices", values: ["Just me"] } },
+    ]);
+  });
+
+  it("replaces the waiting question when the note settles it, without using up a question", async () => {
+    const { project, deps, interviewer, started } = await startedWith();
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHEN }), usage: null });
+
+    const interview = await addNote(deps, { id: project.id, text: "I send every invoice myself" });
+
+    expect(interview.current).toMatchObject({ ...WHEN, answer: null });
+    expect(interview.current?.id).not.toBe(started.current?.id);
+    const rows = await questionRows(project.id);
+    expect(rows.filter((row) => !row.note)).toHaveLength(1);
+    expect(rows.filter((row) => row.note)).toHaveLength(1);
+  });
+
+  it("stores nothing when the model fails, so the same note can be sent again", async () => {
+    const { project, deps, interviewer, started } = await startedWith();
+    interviewer.mockRejectedValueOnce(new InterviewUnavailableError("no answer"));
+    const input = { id: project.id, text: "Invoices must be in French" };
+
+    await expect(addNote(deps, input)).rejects.toBeInstanceOf(InterviewUnavailableError);
+
+    expect(await getInterview(db, project.id)).toEqual(started);
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
+    expect((await addNote(deps, input)).questions).toHaveLength(1);
+  });
+
+  it("keeps a note that changes nothing, and leaves a written spec alone", async () => {
+    const { project, deps, interviewer, started } = await startedWith();
+    await transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
+
+    const interview = await addNote(deps, { id: project.id, text: "Nice weather today" });
+
+    expect(interview.items).toEqual(started.items);
+    expect(interview.current).toEqual(started.current);
+    expect(interview.questions).toHaveLength(1);
+    expect(await findProject(db, project.id)).toMatchObject({ status: "spec_ready" });
+  });
+
+  it("throws the spec away when the note changes the plan", async () => {
+    const { project, deps, interviewer } = await startedWith();
+    await transition(db, project.id, ["draft"], { status: "spec_ready", spec: "## Features" });
+    interviewer.mockResolvedValueOnce({
+      turn: turn({ add: [{ section: "who", text: "Two staff", phase: "day_one" }] }),
+      usage: null,
+    });
+
+    await addNote(deps, { id: project.id, text: "Two staff use it too" });
+
+    expect(await findProject(db, project.id)).toMatchObject({ status: "draft", spec: null });
+  });
+
+  it("still changes the plan once the questions are finished, and may ask a follow-up", async () => {
+    const project = await newProject();
+    const { deps, interviewer } = scripted(turn());
+    expect((await startInterview(deps, project.id)).finished).toBe(true);
+    interviewer.mockResolvedValueOnce({
+      turn: turn({ add: [{ section: "who", text: "Two staff", phase: "day_one" }] }),
+      usage: null,
+    });
+
+    const quiet = await addNote(deps, { id: project.id, text: "Two staff use it too" });
+    expect(quiet).toMatchObject({ finished: true, current: null });
+    expect(quiet.items).toEqual([expect.objectContaining({ text: "Two staff", source: "you" })]);
+    expect(interviewer.mock.lastCall?.[0].waiting).toBeNull();
+
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: null });
+    const followUp = await addNote(deps, { id: project.id, text: "They share one login" });
+    expect(followUp).toMatchObject({ finished: false, current: expect.objectContaining(WHO) });
+  });
+
+  it("does not count against the question limit, and asks no follow-up past it", async () => {
+    const project = await newProject();
+    await db.insert(interviewQuestions).values(
+      Array.from({ length: QUESTION_LIMITS.quick - 1 }, (_, i) => ({
+        projectId: project.id,
+        text: `Question ${i + 1}`,
+        kind: "text" as const,
+        answer: { type: "text" as const, value: "yes" },
+        answeredAt: new Date(),
+      }))
+    );
+    const { deps, interviewer } = scripted(turn({ question: WHO }));
+    const started = await startInterview(deps, project.id, "quick");
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
+    await addNote(deps, { id: project.id, text: "One more thing" });
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHEN }), usage: null });
+    // Replacing the waiting question is not asking one more.
+    const replaced = await addNote(deps, { id: project.id, text: "And another" });
+    expect(replaced.current).toMatchObject(WHEN);
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: null });
+
+    const last = await answerQuestion(deps, {
+      id: project.id,
+      questionId: replaced.current?.id ?? 0,
+      answer: { type: "text", value: "Me" },
+    });
+
+    expect(started.current).not.toBeNull();
+    expect(last).toMatchObject({ finished: true, current: null });
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: null });
+    expect(await addNote(deps, { id: project.id, text: "Last thing" })).toMatchObject({
+      finished: true,
+      current: null,
+    });
+  });
+
+  it("records what the model call cost against the project", async () => {
+    const { project, deps, interviewer } = await startedWith();
+    interviewer.mockResolvedValueOnce({
+      turn: turn(),
+      usage: {
+        run: { projectId: project.id, buildId: null, runKind: "interview", durationMs: 4000 },
+        models: [
+          {
+            projectId: project.id,
+            buildId: null,
+            runKind: "interview",
+            model: "claude-note",
+            inputTokens: 1,
+            outputTokens: 2,
+            cacheReadTokens: 3,
+            cacheCreationTokens: 4,
+            costUsd: 0.02,
+          },
+        ],
+      },
+    });
+
+    await addNote(deps, { id: project.id, text: "Invoices must be in French" });
+
+    expect(await db.select().from(usage).where(eq(usage.projectId, project.id))).toEqual([
+      expect.objectContaining({ model: "claude-note", costUsd: 0.02 }),
+    ]);
+  });
+
+  it("refuses once the project is being built, without asking the model", async () => {
+    const { project, deps, interviewer } = await startedWith();
+    await transition(db, project.id, ["draft"], { status: "building" });
+
+    await expect(addNote(deps, { id: project.id, text: "Too late" })).rejects.toBeInstanceOf(
+      ConflictError
+    );
+    await expect(addNote(deps, { id: 2_000_000_000, text: "Nobody" })).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    expect(interviewer).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes when the questions start over", async () => {
+    const { project, deps, interviewer } = await startedWith();
+    interviewer.mockResolvedValueOnce({ turn: turn(), usage: null });
+    await addNote(deps, { id: project.id, text: "Invoices must be in French" });
+    interviewer.mockResolvedValueOnce({ turn: turn({ question: WHO }), usage: null });
+
+    expect(
+      (await restartInterview(deps, { id: project.id, need: "Book lessons" })).questions
+    ).toEqual([]);
   });
 });
 
