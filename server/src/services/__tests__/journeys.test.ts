@@ -143,7 +143,11 @@ describe("passedIn", () => {
 
 describe("journeyProblems", () => {
   const git = (cwd: string, ...args: string[]) =>
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd })
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd,
+      // The developer's own hooks and settings stay out of the fixture.
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    })
       .toString()
       .trim();
   const repo = () => {
