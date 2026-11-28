@@ -822,7 +822,8 @@ Three things, all in this repo, so they reach every build whatever the workspace
     (360px design width, 16px text in form controls, 44px tap targets), a pattern per kind of
     screen, and a checklist.
   - The design skills from [jakubkrehel/skills](https://github.com/jakubkrehel/skills), as
-    `schmeide:better-layout`, `schmeide:better-typography` and so on. Update them with
+    `schmeide:better-layout`, `schmeide:better-typography`, `schmeide:better-motion` and so on, but not
+    `upskill`, which is for a person, not the builder. Update them with
     `make skills/update REF=<commit> DEST=<this repo>/server/builder-plugin/skills` in
     home-schmeide; the commit is in `server/builder-plugin/skills/UPSTREAM_COMMIT`. Prettier and
     markdownlint skip them so they stay identical to upstream.
