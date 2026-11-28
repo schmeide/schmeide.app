@@ -542,9 +542,13 @@ export const todaySchema = z.object({
 });
 export type Today = z.infer<typeof todaySchema>;
 
+// An app's name, given when it is made or later (#89). Its slug stays the one it was made with.
+const projectName = z.string().trim().min(1).max(100);
+export const renameProjectSchema = z.object({ id: projectId, name: projectName });
+
 export const newProjectSchema = z
   .object({
-    name: z.string().trim().min(1).max(100).optional(),
+    name: projectName.optional(),
     need: z.string().trim().min(1).max(NEED_MAX).optional(),
     today: todaySchema.optional(),
   })

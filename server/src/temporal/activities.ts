@@ -3399,6 +3399,46 @@ export const createActivities = (
         .where(eq(projects.id, projectId));
     },
 
+    // Both copies again after stopDeployment, on what they ran and with their volumes, and no
+    // build: on the cluster each Deployment goes back to one replica; on this machine `make up`
+    // runs in the folder stopDeployment took it down in. Live once both answer.
+    async startDeployment(projectId: number): Promise<void> {
+      const project = await findProject(db, projectId);
+      const urls: Partial<Record<Copy, string>> = {};
+      for (const copy of COPIES) {
+        const { runner } = config;
+        if (runner) {
+          await runner.hosting.cluster.scale(copyPaths(project, copy).deployment, 1);
+          const url = copyUrl({ host: await hostOf(project), domain: runner.hosting.domain, copy });
+          await answers(url, 5);
+          urls[copy] = url;
+          continue;
+        }
+        const dir = await composeDir(project, copy);
+        if (!dir) continue;
+        const { composeProject } = copyOf(config.dataDir, project.slug, copy);
+        const port = webPortOf(project, copy);
+        const result = await run(
+          config.makeBin,
+          ["up", `COMPOSE_PROJECT_NAME=${composeProject}`, `WEB_PORT=${port}`],
+          { cwd: dir, env: appEnv(project, config.dataDir) }
+        );
+        if (result.code !== 0)
+          throw new Error(`make up failed (exit ${result.code}): ${result.output.slice(-2000)}`);
+        const url = `http://localhost:${port}`;
+        await answers(url, 3);
+        urls[copy] = url;
+      }
+      await db
+        .update(projects)
+        .set({
+          status: "live",
+          previewUrl: urls.production ?? null,
+          stagingUrl: urls.staging ?? null,
+        })
+        .where(and(eq(projects.id, projectId), eq(projects.status, "stopped")));
+    },
+
     // Both copies, with their volumes, and both folders.
     async removeProject(projectId: number): Promise<void> {
       const project = await findProject(db, projectId);

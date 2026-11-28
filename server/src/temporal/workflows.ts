@@ -18,11 +18,12 @@ const { generateSpec } = proxyActivities<Activities>({
   startToCloseTimeout: "10 minutes",
   heartbeatTimeout: "1 minute",
 });
-const { finishBuild, applySite, stopDeployment, removeProject } = proxyActivities<Activities>({
-  startToCloseTimeout: "10 minutes",
-  heartbeatTimeout: "1 minute",
-  retry: { maximumAttempts: 3 },
-});
+const { finishBuild, applySite, stopDeployment, startDeployment, removeProject } =
+  proxyActivities<Activities>({
+    startToCloseTimeout: "10 minutes",
+    heartbeatTimeout: "1 minute",
+    retry: { maximumAttempts: 3 },
+  });
 // The SDK throttles heartbeats to 80% of heartbeatTimeout, and cancellation only arrives with a
 // heartbeat, so a short timeout keeps cancellation prompt. Waiting for the cancellation to complete
 // means a canceled build is only marked canceled once its agent or make process has stopped.
@@ -210,6 +211,10 @@ export async function buildWorkflow(
 
 export async function stopWorkflow(projectId: number): Promise<void> {
   await stopDeployment(projectId);
+}
+
+export async function restartWorkflow(projectId: number): Promise<void> {
+  await startDeployment(projectId);
 }
 
 export async function deleteWorkflow(projectId: number): Promise<void> {

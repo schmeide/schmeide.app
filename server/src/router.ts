@@ -31,6 +31,7 @@ import {
   removeMemberSchema,
   renameAccountSchema,
   renameFileSchema,
+  renameProjectSchema,
   setFeaturesSchema,
   signInMethodIdSchema,
   sessions,
@@ -165,7 +166,9 @@ import {
   RollBackRefusedError,
   requestChange,
   setFeatures,
+  renameProject,
   setSite,
+  startProject,
   stopProject,
   type Deps,
 } from "./services/projects.ts";
@@ -712,6 +715,12 @@ export const appRouter = t.router({
       buildWaitingChanges(ctx, input.id)
     ),
     stop: building(projectIdSchema).mutation(({ ctx, input }) => stopProject(ctx, input.id)),
+    // Back online after `stop`, on what it ran, without a build; CONFLICT unless it is offline.
+    start: building(projectIdSchema).mutation(({ ctx, input }) => startProject(ctx, input.id)),
+    // The name only: the slug, and so the address, stays (#89).
+    rename: onProject(renameProjectSchema).mutation(({ ctx, input }) =>
+      renameProject(ctx.db, input)
+    ),
     delete: onProject(projectIdSchema).mutation(({ ctx, input }) => deleteProject(ctx, input.id)),
   }),
   // The guided questions that build a project's plan; see services/interview.ts.

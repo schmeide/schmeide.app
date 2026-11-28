@@ -1199,6 +1199,26 @@ describe("kubernetes mode", () => {
     expect(row).toMatchObject({ status: "stopped", previewUrl: null, stagingUrl: null });
   });
 
+  it("puts both copies back online by scaling them to one, and waits for them to answer", async () => {
+    const { config, hosting } = setup();
+    const { project } = await newBuild();
+    await transition(db, project.id, ["building"], { status: "stopped", host: "k-shop" });
+    const activities = createActivities(deps, config);
+
+    await new MockActivityEnvironment().run(activities.startDeployment, project.id);
+
+    expect(hosting.scaled.map(([path, replicas]) => [path.split("/").pop(), replicas])).toEqual([
+      [`app-${project.id}-staging`, 1],
+      [`app-${project.id}`, 1],
+    ]);
+    const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
+    expect(row).toMatchObject({
+      status: "live",
+      previewUrl: "https://k-shop.apps.example",
+      stagingUrl: "https://k-shop--staging.apps.example",
+    });
+  });
+
   it("removes every Job, Secret, and deploy key of a build when it finishes", async () => {
     const { config, kube, forgejo } = setup();
     const { project, build } = await newBuild();

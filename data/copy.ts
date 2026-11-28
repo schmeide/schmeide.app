@@ -713,7 +713,7 @@ export const copy = {
         "The last change did not finish, so this is the version being worked on from before it. To see what went wrong, press “Show what happened to the change”.",
       canceled: "You canceled this build, so this is the version being worked on from before it.",
       offline:
-        "Your app is offline, so there is nothing to show here. To bring it back, put a version live: this one, when it is offered below, or a change you request.",
+        "Your app is offline, so there is nothing to show here. To bring it back, put it back online from Settings, or put a version live: this one, when it is offered below, or a change you request.",
       buildsToStaging:
         "Your change is built into the version being worked on, for you to look at first. Your customers see it once you put it live.",
       noChanges: "No changes yet. The first change you request shows here while it is built.",
@@ -815,7 +815,7 @@ export const copy = {
     canceledHint: "You canceled this build. Request a change to build again.",
     retryTitle: "Try again",
     firstBuildTitle: "First build",
-    manageBusy: "You can delete the project once the build has finished.",
+    manageBusy: "You can delete the app once the build has finished.",
     // The stepper already numbers this step. A leading "1." reads as the first interview question.
     featuresTitle: "What your app should do",
     featuresIntro:
@@ -1042,14 +1042,35 @@ export const copy = {
       removeIcon: "Use the default icon",
       saved: "Saved.",
     },
-    manageTitle: "Manage",
+    name: {
+      title: "Name",
+      intro:
+        "What your app is called in Schmeide, and its page title unless you set one below. Its address stays the same.",
+      label: "App name",
+      save: "Save name",
+      saved: "Saved.",
+    },
+    offline: {
+      title: "Take the app offline",
+      intro:
+        "While your app is offline, anyone who opens its address gets an error page instead of your app. Everything stored in it is kept, and you can put it back online at any time.",
+      offTitle: "Your app is offline",
+      offIntro:
+        "Anyone who opens its address gets an error page instead of your app. Everything stored in it is kept. Putting it back online starts the versions it ran before, without building anything.",
+      start: "Put it back online",
+      starting: "Putting it back online… this can take a few minutes.",
+      started: "Back online.",
+    },
     cancelBuild: "Cancel the build",
     takeOffline: "Take the app offline",
     stopping: "Stopping…",
-    delete: "Delete project",
+    deleteTitle: "Delete this app",
+    delete: "Delete this app",
     deleteConfirm: (name: string) =>
       `Delete “${name}”? This removes your live app and the version being worked on, everything stored in both, their links, the code that was built, the spec, and the build history. This cannot be undone.`,
-    deleteYes: "Delete project",
+    deleteLabel: (name: string) => `To confirm, type ${name}`,
+    deleteMismatch: "That is not the name of this app. Type it exactly as shown.",
+    deleteYes: "Delete this app",
     deleteNo: "Cancel",
     deleting: "Deleting… this can take a few seconds.",
   },
@@ -1210,7 +1231,7 @@ export const copy = {
     },
     stopped: {
       label: "Offline",
-      hint: "Your app is offline. Put a version live to bring it back.",
+      hint: "Your app is offline. Put it back online from Settings, or put a version live.",
     },
   },
   errors: {
