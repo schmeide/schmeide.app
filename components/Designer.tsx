@@ -245,6 +245,7 @@ export function Designer({
                   ? copy.project.firstBuildTitle
                   : copy.project.changeTitle
               }
+              appUrl={project.previewUrl}
             />
           )}
           {project.status === "building" && (

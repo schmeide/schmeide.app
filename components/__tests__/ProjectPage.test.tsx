@@ -177,6 +177,24 @@ describe("ProjectPage", () => {
     expect(screen.getByLabelText(copy.project.requestLabel(2))).toHaveValue("b");
   });
 
+  it("offers to open the app to someone coming back after its first build finished", async () => {
+    renderWithApi(
+      <ProjectPage id={7} view="changes" />,
+      projectServer({
+        project: aProject({ status: "live", previewUrl: "http://localhost:8100" }),
+        latestBuild: aBuild({ status: "passed", finishedAt: new Date() }),
+        hasBeenLive: true,
+      })
+    );
+
+    const firstBuild = await screen.findByRole("region", { name: copy.project.firstBuildTitle });
+    expect(
+      within(firstBuild).getByRole("link", {
+        name: `${copy.project.openApp} ${copy.project.opensInNewTab}`,
+      })
+    ).toHaveAttribute("href", "http://localhost:8100");
+  });
+
   it("says when the page was out of date, and brings it up to date", async () => {
     const state = {
       project: aProject({ status: "live", previewUrl: "http://localhost:8100" }),
