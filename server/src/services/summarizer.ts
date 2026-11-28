@@ -54,7 +54,7 @@ export const plainText = (text: string): string => {
 
 const task = ({ outcome }: SummaryInput): string =>
   outcome === null
-    ? "Write one or two short sentences: what the builder is doing now, and what it has finished since your last update."
+    ? "Write one or two short sentences: what the builder is doing now, and what it has finished since your last update. Say only what was made or done since your last update. Do not mention whether anything is ready, live, or available to try, either way: the page already shows them that."
     : outcome.status === "passed"
       ? "The build finished and passed. Write two or three sentences on what changed in their app."
       : outcome.status === "canceled"
