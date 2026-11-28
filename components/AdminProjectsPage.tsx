@@ -36,6 +36,8 @@ export function AdminProjectsPage() {
   );
   const pages = list.data?.pages ?? [];
   const entries = pages.flatMap((page) => page.entries);
+  const lastBuilds = entries.flatMap(({ lastBuild }) => (lastBuild ? [lastBuild] : []));
+  const warned = lastBuilds.filter((build) => build.warned).length;
   // One read per page, so showing more never reads the earlier pages again.
   const resources = useQueries({
     queries: pages.map((page) =>
@@ -68,6 +70,11 @@ export function AdminProjectsPage() {
       <ErrorNote error={list.error} />
       {list.isPending && <p>{copy.loading}</p>}
       {list.isSuccess && entries.length === 0 && <p>{copy.hosting.empty}</p>}
+      {lastBuilds.length > 0 && (
+        <p className={styles.intro}>
+          {copy.hosting.withoutDesignSkills(warned, lastBuilds.length)}
+        </p>
+      )}
       {entries.length > 0 && (
         <AdminTable caption={copy.hosting.caption} columns={copy.hosting.columns}>
           {entries.map((project) => {
@@ -91,6 +98,15 @@ export function AdminProjectsPage() {
                       <time dateTime={project.lastBuild.startedAt.toISOString()}>
                         {day.format(project.lastBuild.startedAt)}
                       </time>
+                      {project.lastBuild.warned ? (
+                        <span className={styles.stacked}>{copy.hosting.noDesignSkills}</span>
+                      ) : (
+                        project.lastBuild.skills.length > 0 && (
+                          <span className={styles.stacked}>
+                            {copy.hosting.skills(project.lastBuild.skills)}
+                          </span>
+                        )
+                      )}
                     </>
                   ) : (
                     copy.hosting.neverBuilt

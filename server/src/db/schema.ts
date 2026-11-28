@@ -225,6 +225,10 @@ export const buildEventKind = pgEnum("build_event_kind", [
   "check",
   "deploy",
   "error",
+  // A Skill the builder ran, named by the message (#341).
+  "skill",
+  // Something worth knowing that does not fail the build.
+  "warning",
 ]);
 
 export const buildEvents = pgTable("build_events", {

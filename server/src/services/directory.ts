@@ -7,6 +7,7 @@ import type { Db } from "../db/client.ts";
 import {
   ADMIN_ROLE,
   approvedEmails,
+  buildEvents,
   builds,
   memberships,
   projects,
@@ -150,6 +151,17 @@ export const listHostedProjects = async (db: Db, query: ListQuery) => {
       kind: builds.kind,
       status: builds.status,
       startedAt: builds.startedAt,
+      // The skills it ran, and whether it was warned for running no design skill (#341). Spelled
+      // out, since drizzle leaves the outer builds.id unqualified inside a subquery.
+      skills: sql<
+        string[]
+      >`array(select distinct e.message from ${buildEvents} e where e.build_id = ${builds}.id and e.kind = 'skill' order by 1)`.as(
+        "skills"
+      ),
+      warned:
+        sql<boolean>`exists(select from ${buildEvents} e where e.build_id = ${builds}.id and e.kind = 'warning')`.as(
+          "warned"
+        ),
     })
     .from(builds)
     .where(ne(builds.status, "queued"))
@@ -164,7 +176,13 @@ export const listHostedProjects = async (db: Db, query: ListQuery) => {
       webPort: projects.webPort,
       stagingWebPort: sql`${projects.webPort} + ${STAGING_PORT_OFFSET}`.mapWith(Number),
       business: { id: tenants.id, name: tenants.name },
-      lastBuild: { kind: last.kind, status: last.status, startedAt: last.startedAt },
+      lastBuild: {
+        kind: last.kind,
+        status: last.status,
+        startedAt: last.startedAt,
+        skills: last.skills,
+        warned: last.warned,
+      },
     })
     .from(projects)
     .innerJoin(tenants, eq(tenants.id, projects.tenantId))

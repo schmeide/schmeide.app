@@ -554,7 +554,13 @@ const aHostedProject = (overrides: Partial<HostedProject> = {}): HostedProject =
   webPort: 8101,
   stagingWebPort: 18101,
   business: { id: 4, name: "Ada's bakery" },
-  lastBuild: { kind: "change", status: "passed", startedAt: created },
+  lastBuild: {
+    kind: "change",
+    status: "passed",
+    startedAt: created,
+    skills: ["schmeide:mobile-first", "schmeide:better-ui"],
+    warned: false,
+  },
   ...overrides,
 });
 
@@ -576,7 +582,7 @@ describe("AdminProjectsPage", () => {
       "Ada's bakery",
       copy.status.live.label,
       copy.hosting.ports(8101, 18101),
-      `${copy.project.buildStatus.passed}Nov 1, 2026`,
+      `${copy.project.buildStatus.passed}Nov 1, 2026${copy.hosting.skills(["schmeide:mobile-first", "schmeide:better-ui"])}`,
       "2",
       "3.0 MiB",
       "1.5%",
@@ -589,6 +595,31 @@ describe("AdminProjectsPage", () => {
     expect(calls.find(({ path }) => path === "admin.projects.resources")?.input).toEqual({
       ids: [7],
     });
+  });
+
+  it("flags a last build that changed the screens without a design skill, and counts them", async () => {
+    const warned = aHostedProject({
+      id: 8,
+      lastBuild: { kind: "change", status: "passed", startedAt: created, skills: [], warned: true },
+    });
+    renderWithApi(
+      <AdminProjectsPage />,
+      {
+        "admin.projects.list": () => ({
+          entries: [aHostedProject(), warned, aHostedProject({ id: 9, lastBuild: null })],
+          nextCursor: null,
+        }),
+        "admin.projects.resources": () => [],
+      },
+      admin
+    );
+    expect(await screen.findByText(copy.hosting.withoutDesignSkills(1, 2))).toBeInTheDocument();
+    const rows = within(await screen.findByRole("table"))
+      .getAllByRole("row")
+      .slice(1);
+    expect(cellsOf(rows[1])[4]).toBe(
+      `${copy.project.buildStatus.passed}Nov 1, 2026${copy.hosting.noDesignSkills}`
+    );
   });
 
   it("says unknown for figures that could not be read", async () => {

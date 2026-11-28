@@ -61,6 +61,7 @@ import {
   AGENT_ALLOWED_TOOLS,
   BUILDER_PLUGIN,
   GIT_CONFIG,
+  NO_DESIGN_SKILLS,
   buildPrompt,
   copiesToDrop,
   createActivities,
@@ -206,6 +207,7 @@ const fakeQuery = (calls: { prompt: string; options: Options }[], fail = false):
               name: "Edit",
               input: { file_path: join(params.options.cwd ?? "", "todos.ts") },
             },
+            { type: "tool_use", id: "3", name: "Skill", input: { skill: "schmeide:mobile-first" } },
           ],
         },
       } as SDKMessage;
@@ -281,6 +283,14 @@ describe("buildPrompt", () => {
       expect(prompt).toMatch(/stylesheet/);
     }
   );
+
+  it("names every design skill and ends with the interface review before committing", () => {
+    const prompt = buildPrompt("change", "## Features", "Add a due date");
+
+    expect(prompt).toContain("schmeide:better-ui");
+    expect(prompt).toContain("schmeide:better-colors");
+    expect(prompt).toMatch(/schmeide:better-accessibility[^]*schmeide:interface-review[^]*commit/);
+  });
 
   it.each(["initial", "change"] as const)(
     "gives a %s build the acceptance checks after the standing rules",
@@ -419,6 +429,13 @@ describe("build activities", () => {
         "$ make test",
       ])
     );
+    // A Skill call is its own kind of event, named by the skill (#341).
+    expect(await listEvents(db, build.id, 0)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "skill", message: "schmeide:mobile-first" }),
+      ])
+    );
+    expect(await messages(build.id)).not.toContain("Using Skill");
     expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([
       expect.objectContaining({
         runKind: "initial",
@@ -581,6 +598,40 @@ describe("build activities", () => {
       `migrations since ${base}\n`
     );
     expect((await getBuild(db, build.id)).additive).toBe(true);
+  });
+
+  it("warns, without failing, once, when a build changed the interface and ran no design skill", async () => {
+    const { config, dataDir } = setup();
+    const activities = createActivities(deps, config, fakeQuery([]));
+    const env = new MockActivityEnvironment();
+    const warnings = async (buildId: number) =>
+      (await listEvents(db, buildId, 0)).filter(({ kind }) => kind === "warning");
+    // The first build makes the interface, and its builder ran no skill.
+    const bare = await newBuild();
+    await env.run(activities.prepareWorkspace, bare.build.id);
+    expect(await env.run(activities.runChecks, bare.build.id)).toEqual({ ok: true, output: "" });
+    expect(await env.run(activities.runChecks, bare.build.id)).toEqual({ ok: true, output: "" });
+    expect(await warnings(bare.build.id)).toEqual([
+      expect.objectContaining({ message: NO_DESIGN_SKILLS }),
+    ]);
+    // A builder that ran a design skill is not warned about.
+    const skilled = await newBuild();
+    await env.run(activities.prepareWorkspace, skilled.build.id);
+    await env.run(activities.runAgent, { buildId: skilled.build.id });
+    await env.run(activities.runChecks, skilled.build.id);
+    expect(await warnings(skilled.build.id)).toEqual([]);
+    // Nor is a change that left the interface alone.
+    const change = await newBuild("change");
+    await env.run(activities.prepareWorkspace, change.build.id);
+    const workspace = join(dataDir, "projects", change.project.slug);
+    await db
+      .update(builds)
+      .set({ baseCommit: git(workspace, "rev-parse", "HEAD").trim() })
+      .where(eq(builds.id, change.build.id));
+    writeFileSync(join(workspace, ".gitignore"), "frontend/dist/\n");
+    writeFileSync(join(workspace, "server.ts"), "export {};\n");
+    await env.run(activities.runChecks, change.build.id);
+    expect(await warnings(change.build.id)).toEqual([]);
   });
 
   it("records additive as unknown for an app whose template cannot check its migrations", async () => {
