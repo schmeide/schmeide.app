@@ -292,6 +292,16 @@ describe("buildPrompt", () => {
     expect(prompt).toMatch(/schmeide:better-accessibility[^]*schmeide:interface-review[^]*commit/);
   });
 
+  it("sends motion to better-motion, and names only skills the builder plugin has", () => {
+    const prompt = buildPrompt("initial", "## Features", "Add a due date");
+    const skills = [...prompt.matchAll(/schmeide:([a-z-]+)/g)].map(([, name]) => name);
+
+    expect(skills).toContain("better-motion");
+    expect(
+      skills.filter((name) => !existsSync(join(BUILDER_PLUGIN, "skills", name, "SKILL.md")))
+    ).toEqual([]);
+  });
+
   it.each(["initial", "change"] as const)(
     "gives a %s build the acceptance checks after the standing rules",
     (kind) => {

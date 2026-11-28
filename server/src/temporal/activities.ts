@@ -380,6 +380,7 @@ const INTERFACE_RULES = `Interface:
 - Run the \`schmeide:mobile-first\` skill before you write or change any screen, and follow it. It gives you a starter stylesheet, exact sizes, and a checklist to finish on.
 - An app without a shared stylesheet is not finished. If this one has none, add it and bring every screen you touch up to the skill's rules.
 - Then use \`schmeide:better-layout\`, \`schmeide:better-typography\`, \`schmeide:better-writing\`, \`schmeide:better-ui\`, and \`schmeide:better-colors\` on the screens you built, and \`schmeide:better-accessibility\` for a last pass.
+- For any motion, use \`schmeide:better-motion\`.
 - Run \`schmeide:interface-review\` as the very last pass before you commit, and fix what it finds.
 - After the make targets pass, Schmeide checks the built app for phones: a viewport tag that allows zoom, a stylesheet, and no fixed width over ${NARROWEST_PHONE_PX}px outside a \`min-width\` media query.`;
 
@@ -391,6 +392,7 @@ const DESIGN_SKILLS = [
   "better-writing",
   "better-ui",
   "better-colors",
+  "better-motion",
   "better-accessibility",
   "interface-review",
 ].map((name) => `schmeide:${name}`);
