@@ -16,37 +16,67 @@ type Target =
 const sameTarget = (a: Target | null, b: Target): boolean =>
   a !== null && JSON.stringify(a) === JSON.stringify(b);
 
+// The longest plan item the server keeps (ITEM_MAX in server/src/db/schema.ts).
+export const ITEM_MAX = 300;
+
 type AnswerProps = {
   readonly label: string;
   readonly initial?: string;
   readonly submit: string;
   readonly busy: boolean;
+  readonly maxLength?: number;
+  // A plan item is one line, so Enter saves it instead of starting a new one.
+  readonly line?: boolean;
   readonly onSend: (text: string) => void;
   readonly onCancel: () => void;
 };
 
-// One short answer: a correction, an open point, or a new wording for something Schmeide chose.
-function AnswerForm({ label, initial = "", submit, busy, onSend, onCancel }: AnswerProps) {
+// One short answer: a correction, an open point, or a new wording for a plan item. Escape cancels.
+// While it is sent the words stay focused and read-only, so a failure keeps them in place.
+export function AnswerForm({
+  label,
+  initial = "",
+  submit,
+  busy,
+  maxLength = 2000,
+  line = false,
+  onSend,
+  onCancel,
+}: AnswerProps) {
   const fieldId = useId();
   const errorId = useId();
   const [words, setWords] = useState(initial);
   const [missing, setMissing] = useState(false);
   const onSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (busy) return;
     const text = words.trim();
     setMissing(!text);
     if (text) onSend(text);
   };
   return (
-    <form onSubmit={onSubmit} className={stepStyles.form} noValidate>
+    <form
+      onSubmit={onSubmit}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !busy) onCancel();
+      }}
+      className={stepStyles.form}
+      noValidate
+    >
       <label htmlFor={fieldId}>{label}</label>
       <textarea
         id={fieldId}
         rows={2}
-        maxLength={2000}
+        maxLength={maxLength}
         value={words}
         autoFocus
-        disabled={busy}
+        readOnly={busy}
+        onKeyDown={(event) => {
+          if (line && event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            event.currentTarget.form?.requestSubmit();
+          }
+        }}
         aria-invalid={missing}
         aria-describedby={missing ? errorId : undefined}
         onChange={(event) => {
@@ -228,6 +258,8 @@ export function ReadBackStep({ project, writing, onWriteSpec, onBack }: Props) {
                   initial={item.text}
                   submit={copy.readBack.save}
                   busy={busy}
+                  maxLength={ITEM_MAX}
+                  line
                   onSend={(text) => update.mutate({ id, itemId: item.id, text })}
                   onCancel={() => setChanging(null)}
                 />

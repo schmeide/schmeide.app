@@ -127,6 +127,25 @@
   overflow-wrap: anywhere;
 }
 
+/* An item's controls sit on their own line under it and wrap at narrow widths. The row gap keeps
+   wrapped hit targets from overlapping; the start margin lines the first label up with the item. */
+.itemActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-m) 0;
+  margin-block: var(--space-s);
+  margin-inline-start: calc(-1 * var(--space-s));
+}
+
+.add {
+  margin-top: var(--space-s);
+  margin-inline-start: calc(-1 * var(--space-s));
+}
+
+.section form {
+  margin-top: var(--space-s);
+}
+
 .sectionStatus {
   margin-left: var(--space-s);
   color: var(--color-muted);
