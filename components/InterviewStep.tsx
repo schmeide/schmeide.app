@@ -13,7 +13,7 @@ import {
 } from "../trpc";
 import { classifyError } from "../utils/apiError";
 import { ErrorNote } from "./ErrorNote";
-import { ReadBackStep } from "./ReadBack";
+import { AnswerForm, ITEM_MAX, ReadBackStep } from "./ReadBack";
 import { useDraft } from "./useDraft";
 
 import stepStyles from "./Step.module.css";
@@ -224,30 +224,221 @@ function DepthChoice({ depth, onChange }: DepthProps) {
 }
 
 type PlanProps = {
+  readonly projectId: number;
   readonly interview: Interview;
   // Ids of the items added by the latest answer.
   readonly fresh: ReadonlySet<number>;
+  // The interview is open, so the plan can be edited by hand; busy while a turn is in flight.
+  readonly editable: boolean;
+  readonly busy: boolean;
+  // Says what an edit changed; `added` is an item the person put in, which no answer added.
+  readonly onChange: (said: string, added?: number) => void;
 };
 
-// The plan the answers are building: four sections, each with how complete it is.
-function Plan({ interview, fresh }: PlanProps) {
+// How long a removed item can be put back; it waits while its Undo has focus.
+const UNDO_MS = 10_000;
+
+// The plan the answers are building: four sections, each with how complete it is. While the
+// interview is open each item can be reworded, removed or moved to later, and each section added
+// to. No model is asked; the interviewer reads the plan on its next turn.
+function Plan({ projectId, interview, fresh, editable, busy, onChange }: PlanProps) {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  const refresh = useRefreshProjects();
+  const prefix = useId();
+  const [rewording, setRewording] = useState<number | null>(null);
+  const [adding, setAdding] = useState<PlanItem["section"] | null>(null);
+  const [removed, setRemoved] = useState<PlanItem | null>(null);
+  const [holding, setHolding] = useState(false);
+  const update = useMutation(trpc.interview.updateItem.mutationOptions());
+  const move = useMutation(trpc.interview.updateItem.mutationOptions());
+  const remove = useMutation(trpc.interview.removeItem.mutationOptions());
+  const add = useMutation(trpc.interview.addItem.mutationOptions());
+  const undo = useMutation(trpc.interview.addItem.mutationOptions());
+  const saving =
+    busy ||
+    update.isPending ||
+    move.isPending ||
+    remove.isPending ||
+    add.isPending ||
+    undo.isPending;
+
+  // The control to focus once it is on screen and enabled: an item's Reword, or a section's Add.
+  const focusNext = useRef<string | null>(null);
+  useEffect(() => {
+    const target = focusNext.current && document.getElementById(focusNext.current);
+    if (target instanceof HTMLButtonElement && !target.disabled) {
+      target.focus();
+      focusNext.current = null;
+    }
+  });
+  useEffect(() => {
+    if (!removed || holding) return;
+    const timer = setTimeout(() => setRemoved(null), UNDO_MS);
+    return () => clearTimeout(timer);
+  }, [removed, holding]);
+
+  const itemControl = (id: number) => `${prefix}-item-${id}`;
+  const addControl = (section: string) => `${prefix}-add-${section}`;
+  // The edits return the item, not the interview, so the plan is patched in place.
+  const patch = (change: (items: Interview["items"]) => Interview["items"]) => {
+    queryClient.setQueryData(
+      trpc.interview.get.queryKey({ id: projectId }),
+      (old) => old && { ...old, items: change(old.items) }
+    );
+    // The first edit of a reviewed project sends it back to describing.
+    void refresh();
+  };
+  const put = (next: PlanItem) =>
+    patch((items) => items.map((each) => (each.id === next.id ? next : each)));
+  const begin = () => {
+    for (const mutation of [update, move, remove, add, undo]) mutation.reset();
+    setRewording(null);
+    setAdding(null);
+  };
+
+  const onReword = (item: PlanItem) => (text: string) =>
+    update.mutate(
+      { id: projectId, itemId: item.id, text },
+      {
+        onSuccess: (next) => {
+          put(next);
+          setRewording(null);
+          focusNext.current = itemControl(next.id);
+          onChange(copy.interview.reworded(next.text));
+        },
+      }
+    );
+  const onMove = (item: PlanItem) => {
+    begin();
+    const phase = item.phase === "later" ? "day_one" : "later";
+    move.mutate(
+      { id: projectId, itemId: item.id, phase },
+      {
+        onSuccess: (next) => {
+          put(next);
+          focusNext.current = itemControl(next.id);
+          onChange(
+            (phase === "later" ? copy.interview.movedLater : copy.interview.movedDayOne)(next.text)
+          );
+        },
+      }
+    );
+  };
+  const onRemove = (item: PlanItem, after: string) => {
+    begin();
+    remove.mutate(
+      { id: projectId, itemId: item.id },
+      {
+        onSuccess: (gone) => {
+          patch((items) => items.filter((each) => each.id !== gone.id));
+          setRemoved(gone);
+          focusNext.current = after;
+          onChange(copy.interview.removed(gone.text));
+        },
+      }
+    );
+  };
+  const putIn = (item: PlanItem, said: string) => {
+    patch((items) => [...items, item]);
+    focusNext.current = itemControl(item.id);
+    onChange(said, item.id);
+  };
+  const onUndo = (gone: PlanItem) => {
+    begin();
+    undo.mutate(
+      { id: projectId, section: gone.section, text: gone.text, phase: gone.phase },
+      {
+        onSuccess: (back) => {
+          setRemoved(null);
+          setHolding(false);
+          putIn(back, copy.interview.putBack(back.text));
+        },
+      }
+    );
+  };
+  const onAdd = (section: PlanItem["section"]) => (text: string) =>
+    add.mutate(
+      { id: projectId, section, text },
+      {
+        onSuccess: (item) => {
+          setAdding(null);
+          putIn(item, copy.interview.addedByYou(item.text));
+        },
+      }
+    );
+
   const tags = (item: PlanItem): readonly string[] => [
     ...(fresh.has(item.id) ? [copy.interview.tagNew] : []),
     ...(item.source === "schmeide" ? [copy.interview.tagSchmeide] : []),
     ...(item.phase === "later" ? [copy.interview.tagLater] : []),
   ];
 
+  const reading = (item: PlanItem, after: string) => (
+    <>
+      {item.text}
+      {tags(item).map((tag) => (
+        <span
+          key={tag}
+          className={styles.tag}
+          data-new={tag === copy.interview.tagNew || undefined}
+        >
+          {tag}
+        </span>
+      ))}
+      {editable && (
+        <div className={styles.itemActions}>
+          <button
+            type="button"
+            id={itemControl(item.id)}
+            className={stepStyles.mark}
+            aria-label={copy.interview.rewordName(item.text)}
+            disabled={saving}
+            onClick={() => {
+              begin();
+              setRewording(item.id);
+            }}
+          >
+            {copy.interview.reword}
+          </button>
+          <button
+            type="button"
+            className={stepStyles.mark}
+            aria-label={copy.interview.removeName(item.text)}
+            disabled={saving}
+            onClick={() => onRemove(item, after)}
+          >
+            {copy.interview.remove}
+          </button>
+          <button
+            type="button"
+            className={stepStyles.mark}
+            aria-label={(item.phase === "later"
+              ? copy.interview.moveDayOneName
+              : copy.interview.moveLaterName)(item.text)}
+            disabled={saving}
+            onClick={() => onMove(item)}
+          >
+            {item.phase === "later" ? copy.interview.moveDayOne : copy.interview.moveLater}
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   return (
     <section aria-labelledby="plan" className={styles.plan}>
       <h3 id="plan">{copy.interview.planTitle(interview.items.length)}</h3>
+      <ErrorNote error={move.error ?? remove.error ?? undo.error} />
       {SECTIONS.map((section) => {
         const items = interview.items.filter((item) => item.section === section);
         const given = section === "replaces";
-        if (given && items.length === 0) return null;
+        const name = copy.interview.sections[section];
+        if (given && items.length === 0 && removed?.section !== section) return null;
         return (
           <div key={section} className={styles.section}>
             <h4>
-              {copy.interview.sections[section]}{" "}
+              {name}{" "}
               {!given && (
                 <span className={styles.sectionStatus}>
                   {copy.interview.sectionStatus[interview.sections[section]]}
@@ -256,24 +447,85 @@ function Plan({ interview, fresh }: PlanProps) {
             </h4>
             {items.length ? (
               <ul>
-                {items.map((item) => (
+                {items.map((item, index) => (
                   <li key={item.id}>
-                    {item.text}
-                    {tags(item).map((tag) => (
-                      <span
-                        key={tag}
-                        className={styles.tag}
-                        data-new={tag === copy.interview.tagNew || undefined}
-                      >
-                        {tag}
-                      </span>
-                    ))}
+                    {rewording === item.id ? (
+                      <>
+                        <AnswerForm
+                          label={copy.interview.rewordName(item.text)}
+                          initial={item.text}
+                          submit={update.isPending ? copy.interview.saving : copy.interview.save}
+                          busy={saving}
+                          maxLength={ITEM_MAX}
+                          line
+                          onSend={onReword(item)}
+                          onCancel={() => {
+                            setRewording(null);
+                            focusNext.current = itemControl(item.id);
+                          }}
+                        />
+                        <ErrorNote error={update.error} />
+                      </>
+                    ) : (
+                      reading(
+                        item,
+                        items[index + 1] ? itemControl(items[index + 1].id) : addControl(section)
+                      )
+                    )}
                   </li>
                 ))}
               </ul>
             ) : (
               <p className={stepStyles.muted}>{copy.interview.sectionEmpty}</p>
             )}
+            {removed?.section === section && (
+              <p>
+                <span>{copy.interview.removed(removed.text)}</span>{" "}
+                <button
+                  type="button"
+                  className={stepStyles.mark}
+                  aria-label={copy.interview.undoName(removed.text)}
+                  disabled={saving}
+                  onFocus={() => setHolding(true)}
+                  onBlur={() => setHolding(false)}
+                  onClick={() => onUndo(removed)}
+                >
+                  {copy.interview.undo}
+                </button>
+              </p>
+            )}
+            {editable &&
+              (adding === section ? (
+                <>
+                  <AnswerForm
+                    label={copy.interview.addName(name)}
+                    submit={add.isPending ? copy.interview.adding : copy.interview.add}
+                    busy={saving}
+                    maxLength={ITEM_MAX}
+                    line
+                    onSend={onAdd(section)}
+                    onCancel={() => {
+                      setAdding(null);
+                      focusNext.current = addControl(section);
+                    }}
+                  />
+                  <ErrorNote error={add.error} />
+                </>
+              ) : (
+                <button
+                  type="button"
+                  id={addControl(section)}
+                  className={`${stepStyles.mark} ${styles.add}`}
+                  aria-label={copy.interview.addName(name)}
+                  disabled={saving}
+                  onClick={() => {
+                    begin();
+                    setAdding(section);
+                  }}
+                >
+                  {copy.interview.addSomething}
+                </button>
+              ))}
           </div>
         );
       })}
@@ -415,7 +667,16 @@ export function InterviewStep({
   const generate = useMutation(
     trpc.projects.generateSpec.mutationOptions({ onSettled: () => refresh() })
   );
-  const remember = () => setKnown(new Set(interview.items.map((item) => item.id)));
+  // What the latest edit of the plan changed, said until the next turn.
+  const [said, setSaid] = useState<string | null>(null);
+  const remember = () => {
+    setKnown(new Set(interview.items.map((item) => item.id)));
+    setSaid(null);
+  };
+  const onPlanChange = (message: string, addedId?: number) => {
+    setSaid(message);
+    if (addedId !== undefined) setKnown((was) => was && new Set([...was, addedId]));
+  };
 
   const reviewing = project.status === "spec_ready";
   const open = project.status === "draft" || (reviewing && editing);
@@ -472,9 +733,9 @@ export function InterviewStep({
       <h2 id="features" className={styles.stepTitle}>
         {copy.project.featuresTitle}
       </h2>
-      {/* One polite announcement per answer, so the plan's changes are heard as well as seen. */}
+      {/* One polite announcement per answer or edit, so the plan's changes are heard as well as seen. */}
       <p role="status" className={styles.announce}>
-        {added.length > 0 && copy.interview.added(added)}
+        {said ?? (added.length > 0 && copy.interview.added(added))}
       </p>
       <div className={styles.layout} data-open={open || undefined}>
         {open && (
@@ -558,7 +819,14 @@ export function InterviewStep({
             )}
           </div>
         )}
-        <Plan interview={interview} fresh={fresh} />
+        <Plan
+          projectId={project.id}
+          interview={interview}
+          fresh={fresh}
+          editable={open}
+          busy={thinking}
+          onChange={onPlanChange}
+        />
       </div>
       {interview.questions.length > 0 && (
         <details className={styles.answers}>

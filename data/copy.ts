@@ -1029,6 +1029,30 @@ export const copy = {
     tagSchmeide: "Schmeide chose this",
     tagLater: "Later",
     added: (items: readonly string[]) => `Added to your plan: ${items.join("; ")}`,
+    // Editing the plan by hand. Each visible label is the start of its accessible name.
+    reword: "Reword",
+    rewordName: (item: string) => `Reword “${item}”`,
+    remove: "Remove",
+    removeName: (item: string) => `Remove “${item}”`,
+    moveLater: "Move to later",
+    moveLaterName: (item: string) => `Move to later: “${item}”`,
+    moveDayOne: "Back to day one",
+    moveDayOneName: (item: string) => `Back to day one: “${item}”`,
+    addSomething: "Add something",
+    addName: (section: string) => `Add something to “${section}”`,
+    add: "Add",
+    adding: "Adding…",
+    save: "Save",
+    saving: "Saving…",
+    undo: "Undo",
+    undoName: (item: string) => `Undo removing “${item}”`,
+    // Said in the live region, and shown where a removed item was.
+    reworded: (item: string) => `Reworded: ${item}`,
+    removed: (item: string) => `Removed: ${item}`,
+    putBack: (item: string) => `Put back: ${item}`,
+    movedLater: (item: string) => `Moved to later: ${item}`,
+    movedDayOne: (item: string) => `Back to day one: ${item}`,
+    addedByYou: (item: string) => `Added: ${item}`,
     answersTitle: (count: number) => `Your answers (${count})`,
     answerYouDecide: "Left to Schmeide",
     needPlan:
@@ -1047,7 +1071,7 @@ export const copy = {
     restart: "Start the questions over",
     keepQuestions: "Keep these questions",
     discardWarning:
-      "Answering more questions can change your plan. If it does, the spec below is thrown away and written again from the new plan.",
+      "Answering more questions or editing your plan can change it. If it changes, the spec below is thrown away and written again from the new plan.",
   },
   // Said back to the owner after the questions and before the spec, so mistakes are caught here.
   readBack: {

@@ -1,9 +1,13 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
 import type { Interview } from "../../trpc";
 import { ProjectPage } from "../ProjectPage";
+import { ITEM_MAX } from "../ReadBack";
 import {
   anInterview,
   anItem,
@@ -402,5 +406,236 @@ describe("InterviewStep", () => {
     expect(screen.queryByText("Create an invoice")).toBeNull();
     expect(screen.queryByRole("group", { name: WHO.text })).toBeNull();
     expect(screen.queryByRole("button", { name: copy.project.writeSpec })).toBeNull();
+  });
+});
+
+describe("editing the plan", () => {
+  const INVOICE = anItem({ source: "schmeide" });
+  const LOGINS = anItem({ id: 22, text: "Staff logins" });
+  const button = (name: string) => screen.getByRole("button", { name });
+  // Heard in the live region.
+  const announced = (text: string) =>
+    expect(screen.getAllByRole("status").map((region) => region.textContent)).toContain(text);
+
+  it("keeps the item limit in step with the server's", () => {
+    const schema = readFileSync(resolve(__dirname, "../../server/src/db/schema.ts"), "utf8");
+    expect(schema).toContain(`export const ITEM_MAX = ${ITEM_MAX};`);
+  });
+
+  it("rewords an item in place: Enter saves, the item is the person's, and focus comes back to it", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [INVOICE] }), {
+      "interview.updateItem": (input) => anItem({ text: String(input.text) }),
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.interview.rewordName(INVOICE.text) })
+    );
+    const field = screen.getByRole("textbox", { name: copy.interview.rewordName(INVOICE.text) });
+    expect(field).toHaveFocus();
+    expect(field).toHaveValue(INVOICE.text);
+    expect(field).toHaveAttribute("maxlength", String(ITEM_MAX));
+    await userEvent.clear(field);
+    await userEvent.type(field, "Send an invoice by email{Enter}");
+
+    expect(
+      await screen.findByRole("button", {
+        name: copy.interview.rewordName("Send an invoice by email"),
+      })
+    ).toHaveFocus();
+    expect(calls).toContainEqual({
+      path: "interview.updateItem",
+      input: { id: 7, itemId: 21, text: "Send an invoice by email" },
+    });
+    expect(
+      within(plan(1)).getByText("Send an invoice by email").closest("li")
+    ).not.toHaveTextContent(copy.interview.tagSchmeide);
+    announced(copy.interview.reworded("Send an invoice by email"));
+    expect(calls.map((call) => call.path)).not.toContain("interview.answer");
+  });
+
+  it("cancels a rewording with Escape and keeps the words when it cannot be saved", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [INVOICE] }), {
+      "interview.updateItem": () => {
+        throw new ApiFailure("INTERNAL_SERVER_ERROR", "Database is down");
+      },
+    });
+    const reword = await screen.findByRole("button", {
+      name: copy.interview.rewordName(INVOICE.text),
+    });
+
+    await userEvent.click(reword);
+    await userEvent.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("textbox", { name: copy.interview.rewordName(INVOICE.text) })
+    ).toBeNull();
+    expect(button(copy.interview.rewordName(INVOICE.text))).toHaveFocus();
+
+    await userEvent.click(button(copy.interview.rewordName(INVOICE.text)));
+    const field = screen.getByRole("textbox", { name: copy.interview.rewordName(INVOICE.text) });
+    await userEvent.type(field, " today{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.errors.other);
+    expect(field).toHaveValue(`${INVOICE.text} today`);
+    expect(calls.filter((call) => call.path === "interview.updateItem")).toHaveLength(1);
+  });
+
+  it("removes an item at once, moves focus to the next one, and puts it back on Undo", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [INVOICE, LOGINS] }), {
+      "interview.removeItem": () => INVOICE,
+      "interview.addItem": (input) => anItem({ id: 40, text: String(input.text) }),
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.interview.removeName(INVOICE.text) })
+    );
+
+    expect(
+      await screen.findByRole("button", { name: copy.interview.rewordName(LOGINS.text) })
+    ).toHaveFocus();
+    expect(calls).toContainEqual({ path: "interview.removeItem", input: { id: 7, itemId: 21 } });
+    expect(within(plan(1)).queryByText(INVOICE.text)).toBeNull();
+    announced(copy.interview.removed(INVOICE.text));
+
+    await userEvent.click(button(copy.interview.undoName(INVOICE.text)));
+
+    expect(
+      await screen.findByRole("button", { name: copy.interview.rewordName(INVOICE.text) })
+    ).toHaveFocus();
+    expect(calls).toContainEqual({
+      path: "interview.addItem",
+      input: { id: 7, section: "does", text: INVOICE.text, phase: "day_one" },
+    });
+    announced(copy.interview.putBack(INVOICE.text));
+    expect(
+      screen.queryByRole("button", { name: copy.interview.undoName(INVOICE.text) })
+    ).toBeNull();
+  });
+
+  it("moves focus to the section's “Add something” when its last item is removed", async () => {
+    setup(anInterview({ current: WHO, items: [INVOICE] }), {
+      "interview.removeItem": () => INVOICE,
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.interview.removeName(INVOICE.text) })
+    );
+
+    expect(
+      await screen.findByRole("button", {
+        name: copy.interview.addName(copy.interview.sections.does),
+      })
+    ).toHaveFocus();
+    expect(within(plan(0)).getByText(copy.interview.removed(INVOICE.text))).toBeVisible();
+  });
+
+  it("stops offering Undo after a few seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setup(anInterview({ current: WHO, items: [INVOICE] }), {
+        "interview.removeItem": () => INVOICE,
+      });
+      await userEvent.click(
+        await screen.findByRole("button", { name: copy.interview.removeName(INVOICE.text) })
+      );
+      expect(
+        await screen.findByRole("button", { name: copy.interview.undoName(INVOICE.text) })
+      ).toBeVisible();
+
+      act(() => vi.advanceTimersByTime(10_000));
+
+      expect(
+        screen.queryByRole("button", { name: copy.interview.undoName(INVOICE.text) })
+      ).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("moves an item to later and back to day one", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [LOGINS] }), {
+      "interview.updateItem": (input) => ({ ...LOGINS, phase: input.phase }),
+    });
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: copy.interview.moveLaterName(LOGINS.text) })
+    );
+    const back = await screen.findByRole("button", {
+      name: copy.interview.moveDayOneName(LOGINS.text),
+    });
+    expect(back.closest("li")).toHaveTextContent(copy.interview.tagLater);
+    announced(copy.interview.movedLater(LOGINS.text));
+
+    await userEvent.click(back);
+
+    expect(
+      await screen.findByRole("button", { name: copy.interview.moveLaterName(LOGINS.text) })
+    ).toBeVisible();
+    expect(calls.filter((call) => call.path === "interview.updateItem")).toEqual([
+      { path: "interview.updateItem", input: { id: 7, itemId: 22, phase: "later" } },
+      { path: "interview.updateItem", input: { id: 7, itemId: 22, phase: "day_one" } },
+    ]);
+  });
+
+  it("adds the person's own item to an empty section", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [INVOICE] }), {
+      "interview.addItem": (input) => anItem({ id: 41, section: "who", text: String(input.text) }),
+    });
+    const who = copy.interview.addName(copy.interview.sections.who);
+
+    await userEvent.click(await screen.findByRole("button", { name: who }));
+    await userEvent.type(screen.getByRole("textbox", { name: who }), "Only the owner{Enter}");
+
+    const reword = await screen.findByRole("button", {
+      name: copy.interview.rewordName("Only the owner"),
+    });
+    expect(reword).toHaveFocus();
+    expect(calls).toContainEqual({
+      path: "interview.addItem",
+      input: { id: 7, section: "who", text: "Only the owner" },
+    });
+    expect(reword.closest("li")).not.toHaveTextContent(copy.interview.tagNew);
+    announced(copy.interview.addedByYou("Only the owner"));
+  });
+
+  it("holds the plan still while a turn is in flight", async () => {
+    setup(anInterview({ current: WHO, items: [INVOICE] }), {
+      "interview.answer": () => new Promise(() => undefined),
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.interview.youDecide }));
+
+    expect(button(copy.interview.rewordName(INVOICE.text))).toBeDisabled();
+    expect(button(copy.interview.removeName(INVOICE.text))).toBeDisabled();
+    expect(button(copy.interview.moveLaterName(INVOICE.text))).toBeDisabled();
+    expect(button(copy.interview.addName(copy.interview.sections.who))).toBeDisabled();
+  });
+
+  it("can be edited on a reviewed project being changed, which sends it back to describing", async () => {
+    const { state } = setup(
+      anInterview({
+        questions: [answered({ type: "you_decide" })],
+        finished: true,
+        items: [LOGINS],
+      }),
+      {
+        "interview.removeItem": () => {
+          state.project = aProject({ status: "draft" });
+          return LOGINS;
+        },
+      },
+      aProject({ status: "spec_ready", spec: "# Spec" })
+    );
+    expect(
+      await screen.findByRole("heading", { name: copy.project.specTitle })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: copy.interview.removeName(LOGINS.text) })
+    ).toBeNull();
+
+    await userEvent.click(button(copy.project.changeFeatures));
+    expect(screen.getByText(copy.interview.discardWarning)).toBeVisible();
+    await userEvent.click(button(copy.interview.removeName(LOGINS.text)));
+
+    await waitFor(() => expect(screen.queryByText(copy.interview.discardWarning)).toBeNull());
   });
 });
