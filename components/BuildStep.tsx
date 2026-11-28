@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { copy } from "../data/copy";
 import {
@@ -120,7 +120,8 @@ export function BuildStep({ build, title, by = null }: Props) {
   };
 
   // Follow the newest event inside the log, without scrolling the page, only while at the bottom.
-  useEffect(() => {
+  // A layout effect, so the log scrolls in the same commit that adds the line, before it paints.
+  useLayoutEffect(() => {
     if (pinnedAt === null) scrollToNewest();
   }, [events, showLog, pinnedAt]);
 
