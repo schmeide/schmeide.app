@@ -14,6 +14,7 @@ const table = {
   startExisting: { path: "/new/existing", access: "business" },
   project: { path: "/projects/:id", access: "business" },
   projectChanges: { path: "/projects/:id/changes", access: "business" },
+  projectVersions: { path: "/projects/:id/versions", access: "business" },
   projectSettings: { path: "/projects/:id/settings", access: "business" },
   usage: { path: "/usage", access: "business" },
   billing: { path: "/billing", access: "business" },

@@ -32,10 +32,12 @@ export type Handlers = Readonly<Record<string, (input: Input) => unknown>>;
 export type Call = { readonly path: string; readonly input: Input };
 
 // Thrown by a handler to answer with a tRPC error; no code means the server never answered.
+// `data` is what the server's error formatter adds, such as a refused roll back's copies.
 export class ApiFailure extends Error {
   constructor(
     readonly code: string | undefined,
-    message: string = code ?? "Failed to fetch"
+    message: string = code ?? "Failed to fetch",
+    readonly data: Input = {}
   ) {
     super(message);
   }
@@ -47,7 +49,7 @@ const toClientError = (error: unknown) =>
         error: {
           code: -32000,
           message: error.message,
-          data: { code: error.code, httpStatus: 400 },
+          data: { ...error.data, code: error.code, httpStatus: 400 },
         },
       })
     : TRPCClientError.from(error instanceof Error ? error : new Error(String(error)));
@@ -278,8 +280,14 @@ export const projectServer = (state: {
   latestBuildBy?: string | null;
   events?: BuildEvent[];
   summaries?: BuildSummary[];
-  // What builds.list answers: every build that started, newest first, in one page.
-  history?: readonly Build[];
+  // What builds.list answers: every build that started, newest first, in one page, with the
+  // version a release put live and who asked.
+  history?: readonly (Build & { readonly movedTo?: number | null; readonly by?: string | null })[];
+  // The version numbers of production's and staging's commits.
+  liveVersion?: number | null;
+  workingVersion?: number | null;
+  // builds.picture's data URL by build id; none answers null.
+  pictures?: Readonly<Record<number, string>>;
   usage?: Usage;
   time?: TimeTotals;
   interview?: Interview;
@@ -306,6 +314,8 @@ export const projectServer = (state: {
     latestBuildBy: state.latestBuildBy ?? null,
     usage: state.usage ?? noUsage,
     time: state.time ?? noTime,
+    liveVersion: state.liveVersion ?? null,
+    workingVersion: state.workingVersion ?? null,
   }),
   "builds.events": (input) =>
     (state.events ?? []).filter((event) => event.id > Number(input.afterId)),
@@ -314,9 +324,15 @@ export const projectServer = (state: {
   "projects.acceptance": () => state.staging ?? { buildId: null, features: [] },
   "builds.acceptance": (input) => state.results?.[Number(input.buildId)] ?? [],
   "builds.list": () => ({
-    builds: (state.history ?? []).map((build) => ({ ...build, costUsd: 0 })),
+    builds: (state.history ?? []).map((build) => ({
+      movedTo: null,
+      by: null,
+      ...build,
+      costUsd: 0,
+    })),
     nextCursor: null,
   }),
+  "builds.picture": (input) => state.pictures?.[Number(input.buildId)] ?? null,
 });
 
 // The server's side of sign-in: `session.get` answers whoever `state.session` says, and the

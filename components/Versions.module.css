@@ -1,0 +1,99 @@
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* One version: its picture beside what it is, stacked on a narrow screen. */
+.version {
+  display: grid;
+  gap: var(--space-s) var(--space-m);
+  padding: var(--space-m) 0;
+  border-top: 1px solid var(--color-border);
+  min-width: 0;
+}
+
+/* Keep in sync with --breakpoint-sm. */
+@media (min-width: 640px) {
+  .version {
+    grid-template-columns: 12rem minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.picture,
+.placeholder {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--color-border);
+}
+
+.placeholder {
+  aspect-ratio: 16 / 10;
+  background: var(--color-inset);
+}
+
+.picture[data-width="phone"],
+.placeholder[data-width="phone"] {
+  max-width: 10rem;
+}
+
+.placeholder[data-width="phone"] {
+  aspect-ratio: 390 / 844;
+}
+
+.about {
+  display: grid;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.about h3,
+.about p {
+  margin: 0;
+}
+
+.request {
+  overflow-wrap: anywhere;
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs) var(--space-m);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+/* A pill badge, as on the app list; the label text carries the meaning. */
+.badge {
+  padding: var(--space-xs) 0.75rem;
+  background: var(--color-inset);
+  color: var(--color-muted);
+  border-radius: var(--radius-badge);
+  font-size: var(--text-small);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge[data-badge="live"] {
+  background: var(--color-highlight);
+  color: var(--color-on-highlight);
+}
+
+/* A promote, throw-away or roll back between two versions: a small line. */
+.release {
+  padding: var(--space-s) 0;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: var(--text-small);
+  overflow-wrap: anywhere;
+}

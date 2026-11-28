@@ -50,35 +50,3 @@
 .toggle {
   justify-self: start;
 }
-
-.log {
-  max-height: 20rem;
-  overflow: auto;
-  overscroll-behavior: contain;
-  padding: var(--space-s) var(--space-m);
-  background: var(--color-inset);
-  border-radius: var(--radius-input);
-}
-
-.events {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-small);
-  overflow-wrap: anywhere;
-}
-
-.events li {
-  padding: var(--space-xs) 0;
-}
-
-.kind {
-  font-size: var(--text-label);
-  font-weight: 700;
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-}
-
-.events li[data-kind="error"] .kind {
-  color: var(--color-danger);
-}

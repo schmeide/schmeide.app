@@ -79,8 +79,19 @@ export function ProjectPage({ id, view = "overview" }: Props) {
     );
   }
 
-  const { project, latestBuild, latestBuildBy, queued, unreleased, changes, hasIcon, usage, time } =
-    query.data;
+  const {
+    project,
+    latestBuild,
+    latestBuildBy,
+    queued,
+    unreleased,
+    changes,
+    hasIcon,
+    usage,
+    time,
+    liveVersion,
+    workingVersion,
+  } = query.data;
   const onStop = () => setStoppingAt(project.updatedAt.getTime());
   // The project stays `failed` so a retry still starts, but a cancel is not a failure.
   const canceled = latestBuild?.status === "canceled";
@@ -122,6 +133,8 @@ export function ProjectPage({ id, view = "overview" }: Props) {
           hasIcon={hasIcon}
           usage={usage}
           time={time}
+          liveVersion={liveVersion}
+          workingVersion={workingVersion}
           request={request}
           onRequestChange={setRequest}
           onStop={onStop}

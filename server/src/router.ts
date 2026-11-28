@@ -211,7 +211,10 @@ const t = initTRPC.context<Context>().create({
   // A refused roll back names the copies of the information it can go back with instead.
   errorFormatter: ({ shape, error }) =>
     error.cause instanceof RollBackRefusedError
-      ? { ...shape, data: { ...shape.data, copies: error.cause.copies } }
+      ? {
+          ...shape,
+          data: { ...shape.data, copies: error.cause.copies, reason: error.cause.reason },
+        }
       : shape,
   isDev: process.env.SCHMEIDE_ENV === "development",
 });
@@ -688,7 +691,7 @@ export const appRouter = t.router({
       stagingResults(ctx.db, input.id)
     ),
     requestChange: building(changeRequestSchema).mutation(({ ctx, input }) =>
-      requestChange(ctx, input)
+      requestChange(ctx, { ...input, byUserId: ctx.person.id })
     ),
     // The deployed app's page title and icon (base64 PNG or ICO); see services/site.ts.
     setSite: building(siteSchema).mutation(({ ctx, input }) => setSite(ctx, input)),

@@ -77,6 +77,9 @@ describe("projects.rollBack", () => {
     expect(error.json.message).toBe(
       "Version 2 changed how your app stores its information, so version 1 cannot read it. You can go back to version 1 with the information from 12 November, 14:02 UTC."
     );
+    expect(error.json.data.reason).toBe(
+      "Version 2 changed how your app stores its information, so version 1 cannot read it."
+    );
     expect(error.json.data.copies).toEqual([
       { id: copy.id, version: 1, takenAt: "2026-11-12T14:02:00.000Z" },
     ]);

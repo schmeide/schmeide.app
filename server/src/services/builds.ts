@@ -1,5 +1,6 @@
 import type { query, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { and, asc, desc, eq, gt, isNotNull, lt, ne, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import {
@@ -8,6 +9,7 @@ import {
   buildEvents,
   builds,
   usage,
+  users,
   type Build,
   type BuildEvent,
   type BuildEventKind,
@@ -72,7 +74,16 @@ export const buildListSchema = projectIdSchema.extend({
 export type ListedBuild = Pick<
   Build,
   "id" | "kind" | "request" | "status" | "error" | "startedAt" | "finishedAt"
-> & { readonly costUsd: number };
+> & {
+  readonly costUsd: number;
+  readonly version: number | null;
+  // The version whose commit this build ran: a promote's or roll back's, the one it put live.
+  readonly movedTo: number | null;
+  // Who asked for it, when a person did and is still known.
+  readonly by: string | null;
+};
+
+const numbered = alias(builds, "numbered");
 
 // Every build that has started, with what it cost the customer; waiting changes are not history yet.
 export const listBuilds = async (
@@ -89,9 +100,15 @@ export const listBuilds = async (
       startedAt: builds.startedAt,
       finishedAt: builds.finishedAt,
       costUsd: sql<number>`coalesce(sum(${usage.costUsd}), 0)`.mapWith(Number),
+      version: builds.version,
+      movedTo: sql<
+        number | null
+      >`(select ${numbered.version} from ${builds} as "numbered" where ${numbered.projectId} = ${builds.projectId} and ${numbered.commit} = ${builds.commit} and ${numbered.version} is not null limit 1)`,
+      by: users.name,
     })
     .from(builds)
     .leftJoin(usage, and(eq(usage.buildId, builds.id), customerUsage))
+    .leftJoin(users, eq(users.id, builds.byUserId))
     .where(
       and(
         eq(builds.projectId, id),
@@ -99,7 +116,7 @@ export const listBuilds = async (
         cursor ? lt(builds.id, cursor) : undefined
       )
     )
-    .groupBy(builds.id)
+    .groupBy(builds.id, users.name)
     .orderBy(desc(builds.id))
     .limit(limit + 1);
   const page = rows.slice(0, limit);
