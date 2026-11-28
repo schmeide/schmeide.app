@@ -1594,6 +1594,13 @@ describe("the two copies", () => {
       `up ${live} ${first} ${production}`,
     ]);
     expect(restored()).toBe(readFileSync(then.path, "utf8"));
+    expect(await messages(rollback.id)).toEqual(
+      expect.arrayContaining([
+        "Copying your live app's information",
+        "Stopping your live app to put its information back",
+        "Emptying your live app's information and putting the copy back",
+      ])
+    );
     const [fresh] = await db
       .select()
       .from(databaseCopies)

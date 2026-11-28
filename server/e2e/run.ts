@@ -3,7 +3,7 @@
 // It signs in as an approved account it makes for the run and removes afterwards. Exits non-zero on failure. E2E_CONCURRENT=1 (set by `make e2e/fake`) builds two projects at once
 // and queues a change on the first while its build runs; the second then gets a page title and icon,
 // checked on the deployed app, is put live, and then goes back to its first version keeping a row
-// written to the live database after the change.
+// written to the live database after the change, and forward again restoring a copy of it.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -11,7 +11,7 @@ import { createTRPCClient, httpLink } from "@trpc/client";
 import { eq } from "drizzle-orm";
 import superjson from "superjson";
 import { createDb } from "../src/db/client.ts";
-import { tenants, users } from "../src/db/schema.ts";
+import { databaseCopies, tenants, users } from "../src/db/schema.ts";
 import type { AppRouter } from "../src/router.ts";
 import { approveEmail, removeApproval } from "../src/services/access.ts";
 
@@ -130,12 +130,16 @@ const liveSql = (slug: string, sql: string) =>
 
 // After the change is live: writes a row, puts the first version live keeping today's
 // information, and checks production serves the first version's page with the row still there.
+// Then changes the row and puts the change live again with the information from the copy taken
+// before that roll back, which restores it (#227): the row is back as it was.
 const checkRollBack = async (
   projectId: number,
   slug: string,
   first: { version: number; title: string }
 ) => {
   const log = logAs(projectId);
+  const { liveVersion: changed } = await api.projects.get.query({ id: projectId });
+  if (changed === null) throw new Error("the change that is live has no version");
   liveSql(
     slug,
     "CREATE TABLE e2e_marks (note text); INSERT INTO e2e_marks VALUES ('after the change')"
@@ -152,6 +156,25 @@ const checkRollBack = async (
   if (liveSql(slug, "SELECT note FROM e2e_marks") !== "after the change")
     throw new Error("the row written after the change is gone from the live app");
   log(`version ${first.version} is live again with its page title and today's information`);
+
+  const [copy] = await db
+    .select({ id: databaseCopies.id })
+    .from(databaseCopies)
+    .where(eq(databaseCopies.buildId, build.id));
+  if (!copy) throw new Error(`build ${build.id} recorded no copy of the live app's information`);
+  liveSql(slug, "UPDATE e2e_marks SET note = 'changed since the copy'");
+  const back = await api.projects.rollBack.mutate({
+    id: projectId,
+    version: changed,
+    withInformationFrom: copy.id,
+  });
+  log(
+    `build ${back.build.id} puts version ${changed} live with the information from copy ${copy.id}`
+  );
+  await waitForBuild(projectId, back.build.id);
+  if (liveSql(slug, "SELECT note FROM e2e_marks") !== "after the change")
+    throw new Error("the live app's information was not restored from the copy");
+  log(`version ${changed} is live again with the information from copy ${copy.id}`);
 };
 
 const expectSite = async (projectId: number, url: string, applied: boolean) => {
