@@ -223,10 +223,24 @@ export const aQuestion = (overrides: Partial<Question> = {}): Question => ({
   kind: "pick_one",
   choices: ["Just me", "Me and my staff"],
   answer: null,
+  note: false,
   askedAt: at,
   answeredAt: null,
   ...overrides,
 });
+
+// Something the person added on their own, as the trail holds it.
+export const aNote = (id: number, text: string): Question =>
+  aQuestion({
+    id,
+    text: "",
+    why: "",
+    kind: "text",
+    choices: [],
+    note: true,
+    answer: { type: "text", value: text },
+    answeredAt: at,
+  });
 
 export const anItem = (overrides: Partial<PlanItem> = {}): PlanItem => ({
   id: 21,

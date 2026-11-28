@@ -281,6 +281,13 @@
       "when": 1795850883622,
       "tag": "0039_build_event_skill_warning",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795855513665,
+      "tag": "0040_interview_notes",
+      "breakpoints": true
     }
   ]
 }

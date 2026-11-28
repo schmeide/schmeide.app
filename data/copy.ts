@@ -1129,6 +1129,22 @@ export const copy = {
     addedByYou: (item: string) => `Added: ${item}`,
     answersTitle: (count: number) => `Your answers (${count})`,
     answerYouDecide: "Left to Schmeide",
+    // A note of the person's own, outside the question waiting.
+    noteLabel: "Anything else?",
+    noteHint:
+      "Something we have not asked about, or that you remembered later. It goes into your plan and does not answer the question.",
+    noteOpen: "Add something else",
+    noteSend: "Add to my plan",
+    noteSending: "Adding it to your plan…",
+    noteEmpty: "Write what you want to add, then press “Add to my plan”.",
+    noteFailed:
+      "That could not be added just now. Your words are still here; press “Add to my plan” to try again.",
+    noteUnchanged:
+      "That did not change your plan. It is kept with your answers. To put it in the plan yourself, press “Add something” under the section it belongs to.",
+    noteToPlan: "Go to your plan",
+    noteChanged: "Your plan was changed to match what you added.",
+    // How a note reads in the list of answers.
+    noteAdded: "You added",
     needPlan:
       "Your plan needs at least one thing under “What it does”. Answer a question first, or press “Write it myself”.",
     changeNeed: "Change what you asked for",

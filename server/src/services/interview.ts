@@ -158,15 +158,21 @@ export type AnsweredQuestion = {
   readonly question: Pick<Question, "text" | "kind" | "choices">;
   readonly answer: Answer;
 };
+// Something the person added on their own, outside any question.
+export type Note = { readonly note: string };
+export type TrailEntry = AnsweredQuestion | Note;
 
 // Asks the model for the next turn. Throws InterviewUnavailableError when it cannot.
 export type Interviewer = (input: {
   readonly project: Pick<Project, "id" | "name" | "need" | "features">;
   readonly items: readonly PlanItem[];
-  readonly trail: readonly AnsweredQuestion[];
+  // Answers and notes, oldest first.
+  readonly trail: readonly TrailEntry[];
   readonly depth: InterviewDepth;
   // Checklist points already settled.
   readonly covered: readonly string[];
+  // Given only for a note: the question waiting for an answer, which the note may settle.
+  readonly waiting?: Pick<Question, "text" | "kind" | "choices"> | null;
 }) => Promise<{ readonly turn: Turn; readonly usage: RunUsage | null }>;
 
 export type InterviewDeps = { readonly db: Db; readonly interviewer: Interviewer };
@@ -175,7 +181,7 @@ export type SectionStatus = "not_started" | "sketched" | "ready";
 
 export type Interview = {
   readonly items: readonly PlanItem[];
-  // Answered questions, oldest first.
+  // Answered questions and the person's notes (`note`), oldest first.
   readonly questions: readonly Question[];
   // The question waiting for an answer, if any.
   readonly current: Question | null;
@@ -241,10 +247,23 @@ export const getInterview = async (db: Db, id: number): Promise<Interview> => {
   };
 };
 
-export const trailOf = (interview: Interview): readonly AnsweredQuestion[] =>
-  interview.questions.flatMap((question) =>
-    question.answer ? [{ question, answer: question.answer }] : []
-  );
+export const trailOf = (interview: Interview): readonly TrailEntry[] =>
+  interview.questions.flatMap((question): TrailEntry[] => {
+    const { answer } = question;
+    if (!answer) return [];
+    return question.note && answer.type === "text"
+      ? [{ note: answer.value }]
+      : [{ question, answer }];
+  });
+
+// Questions asked so far, waiting one included. Notes are not questions.
+const questionsAsked = async (db: Db, projectId: number): Promise<number> => {
+  const [{ asked }] = await db
+    .select({ asked: count() })
+    .from(interviewQuestions)
+    .where(and(eq(interviewQuestions.projectId, projectId), eq(interviewQuestions.note, false)));
+  return asked;
+};
 
 // Applies a turn's changes to the plan inside `tx`, and says whether anything changed.
 export const applyPlanChanges = async (
@@ -278,29 +297,37 @@ export const applyPlanChanges = async (
 };
 
 // Applies one model turn inside `tx`. Items the model adds on its own are marked as Schmeide's;
-// items that follow from something the person said are theirs.
+// items that follow from something the person said are theirs. After a note, a question still
+// waiting is replaced only by a new one the turn asks, which takes its place rather than adding to
+// the count; a note that asks nothing leaves the interview waiting, paused or finished as it was.
 const applyTurn = async (
   tx: Db,
   projectId: number,
   turn: Turn,
-  source: PlanItem["source"]
+  source: PlanItem["source"],
+  afterNote = false
 ): Promise<void> => {
   const changed = await applyPlanChanges(tx, projectId, turn, source);
-  const [{ asked }] = await tx
-    .select({ asked: count() })
-    .from(interviewQuestions)
-    .where(eq(interviewQuestions.projectId, projectId));
+  const asked = await questionsAsked(tx, projectId);
   const [current] = await tx
-    .select({ depth: interviews.depth, covered: interviews.covered })
+    .select({ depth: interviews.depth, covered: interviews.covered, finished: interviews.finished })
     .from(interviews)
     .where(eq(interviews.projectId, projectId));
-  const next = asked < QUESTION_LIMITS[current?.depth ?? "thorough"] ? turn.question : null;
+  const [waiting] = await tx
+    .select({ id: interviewQuestions.id })
+    .from(interviewQuestions)
+    .where(and(eq(interviewQuestions.projectId, projectId), isNull(interviewQuestions.answer)));
+  const next =
+    waiting || asked < QUESTION_LIMITS[current?.depth ?? "thorough"] ? turn.question : null;
+  if (next && waiting)
+    await tx.delete(interviewQuestions).where(eq(interviewQuestions.id, waiting.id));
   if (next) await tx.insert(interviewQuestions).values({ ...next, projectId });
   // Points stay settled once they are; only names on the checklist are kept.
   const covered = CHECKLIST.map((point) => point.id).filter(
     (id) => current?.covered.includes(id) || turn.covered.includes(id)
   );
-  const state = { covered, finished: next === null };
+  const finished = next === null && (afterNote ? !waiting && (current?.finished ?? false) : true);
+  const state = { covered, finished };
   await tx
     .insert(interviews)
     .values({ projectId, ...state })
@@ -323,10 +350,7 @@ export const setInterviewDepth = async (
   input: { readonly id: number; readonly depth: InterviewDepth }
 ): Promise<Interview> => {
   await editableProject(db, input.id);
-  const [{ asked }] = await db
-    .select({ asked: count() })
-    .from(interviewQuestions)
-    .where(eq(interviewQuestions.projectId, input.id));
+  const asked = await questionsAsked(db, input.id);
   const [state] = await db.select().from(interviews).where(eq(interviews.projectId, input.id));
   const finished = (state?.finished ?? false) && asked >= QUESTION_LIMITS[input.depth];
   await db
@@ -423,12 +447,41 @@ const fits = (question: Question, answer: Answer): boolean => {
   }
 };
 
-// The model is asked first and the answer stored with its turn in one step, so a failed model call
-// leaves the question open and the same answer can be sent again.
-export const answerQuestion = async (
+// One more entry of the trail, an answer or a note. The model is asked first and the entry stored
+// (by `store`) with its turn in one step, so a failed model call stores nothing and the same words
+// can be sent again.
+const takeTurn = async (
   { db, interviewer }: InterviewDeps,
+  project: Project,
+  interview: Interview,
+  entry: TrailEntry,
+  source: PlanItem["source"],
+  store: (tx: Db) => Promise<void>
+): Promise<Interview> => {
+  const afterNote = "note" in entry;
+  const { turn, usage } = await interviewer({
+    project,
+    items: interview.items,
+    trail: [...trailOf(interview), entry],
+    depth: interview.depth,
+    covered: interview.covered,
+    ...(afterNote ? { waiting: interview.current } : {}),
+  });
+  await recordUsage(db, usage);
+  await db.transaction(async (transaction) => {
+    const tx = transaction as unknown as Db;
+    await lockProject(tx, project.id);
+    await store(tx);
+    await applyTurn(tx, project.id, turn, source, afterNote);
+  });
+  return getInterview(db, project.id);
+};
+
+export const answerQuestion = async (
+  deps: InterviewDeps,
   input: { readonly id: number; readonly questionId: number; readonly answer: Answer }
 ): Promise<Interview> => {
+  const { db } = deps;
   const project = await editableProject(db, input.id);
   const interview = await getInterview(db, input.id);
   const [question] = await db
@@ -442,26 +495,44 @@ export const answerQuestion = async (
   if (!fits(question, input.answer)) {
     throw new ConflictError("That answer does not fit the question");
   }
-  const { turn, usage } = await interviewer({
+  const source = input.answer.type === "you_decide" ? "schmeide" : "you";
+  return takeTurn(
+    deps,
     project,
-    items: interview.items,
-    trail: [...trailOf(interview), { question, answer: input.answer }],
-    depth: interview.depth,
-    covered: interview.covered,
+    interview,
+    { question, answer: input.answer },
+    source,
+    async (tx) => {
+      const [answered] = await tx
+        .update(interviewQuestions)
+        .set({ answer: input.answer, answeredAt: new Date() })
+        .where(and(eq(interviewQuestions.id, question.id), isNull(interviewQuestions.answer)))
+        .returning({ id: interviewQuestions.id });
+      if (!answered) throw new ConflictError("That question has already been answered");
+    }
+  );
+};
+
+// Something the person adds on their own, outside the question waiting. It does not answer or skip
+// that question; the model turns it into plan changes, all of them the person's, and may replace
+// the waiting question if the note settles it. It works once the questions are finished too.
+export const addNote = async (
+  deps: InterviewDeps,
+  input: { readonly id: number; readonly text: string }
+): Promise<Interview> => {
+  const project = await editableProject(deps.db, input.id);
+  const interview = await getInterview(deps.db, input.id);
+  const note = input.text.trim();
+  return takeTurn(deps, project, interview, { note }, "you", async (tx) => {
+    await tx.insert(interviewQuestions).values({
+      projectId: input.id,
+      text: "",
+      kind: "text",
+      note: true,
+      answer: { type: "text", value: note },
+      answeredAt: new Date(),
+    });
   });
-  await recordUsage(db, usage);
-  await db.transaction(async (transaction) => {
-    const tx = transaction as unknown as Db;
-    await lockProject(tx, input.id);
-    const [answered] = await tx
-      .update(interviewQuestions)
-      .set({ answer: input.answer, answeredAt: new Date() })
-      .where(and(eq(interviewQuestions.id, question.id), isNull(interviewQuestions.answer)))
-      .returning({ id: interviewQuestions.id });
-    if (!answered) throw new ConflictError("That question has already been answered");
-    await applyTurn(tx, input.id, turn, input.answer.type === "you_decide" ? "schmeide" : "you");
-  });
-  return getInterview(db, input.id);
 };
 
 // Direct edits to the plan. An item the person adds or changes is theirs from then on.

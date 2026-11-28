@@ -104,6 +104,7 @@ const everyCall = (id: number, buildId: number): Readonly<Record<string, unknown
   "interview.restart": { id, need: "Take over" },
   "interview.setDepth": { id, depth: "quick" },
   "interview.answer": { id, questionId: 1, answer: { type: "text", value: "Take over" } },
+  "interview.addNote": { id, text: "Take over" },
   "interview.addItem": { id, section: "does", text: "Take over" },
   "interview.updateItem": { id, itemId: 1, text: "Take over" },
   "interview.removeItem": { id, itemId: 1 },

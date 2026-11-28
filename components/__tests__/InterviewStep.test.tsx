@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { copy } from "../../data/copy";
@@ -11,6 +11,7 @@ import { ITEM_MAX } from "../ReadBack";
 import {
   anInterview,
   anItem,
+  aNote,
   ApiFailure,
   aProject,
   aQuestion,
@@ -647,5 +648,202 @@ describe("editing the plan", () => {
     await userEvent.click(button(copy.interview.removeName(LOGINS.text)));
 
     await waitFor(() => expect(screen.queryByText(copy.interview.discardWarning)).toBeNull());
+  });
+});
+
+describe("adding something else", () => {
+  const FRENCH = anItem({ id: 22, section: "rules", text: "Invoices go out in French" });
+  const NOTE = "Invoices must be in French";
+  const box = () => screen.getByRole("textbox", { name: copy.interview.noteLabel });
+  const findBox = () => screen.findByRole("textbox", { name: copy.interview.noteLabel });
+  const send = () => screen.getByRole("button", { name: copy.interview.noteSend });
+  const announced = (text: string) =>
+    expect(screen.getAllByRole("status").map((region) => region.textContent)).toContain(text);
+  const withNote = (overrides: Partial<Interview> = {}) =>
+    anInterview({ current: WHO, items: [anItem()], questions: [aNote(30, NOTE)], ...overrides });
+
+  it("sends a note without answering the question, clears the box, and announces what it added", async () => {
+    const { calls } = setup(anInterview({ current: WHO, items: [anItem()] }), {
+      "interview.addNote": () => withNote({ items: [anItem(), FRENCH] }),
+    });
+
+    await userEvent.type(await findBox(), NOTE);
+    await userEvent.click(send());
+
+    await waitFor(() => expect(box()).toHaveValue(""));
+    expect(calls).toContainEqual({ path: "interview.addNote", input: { id: 7, text: NOTE } });
+    expect(calls.map((call) => call.path)).not.toContain("interview.answer");
+    expect(screen.getByRole("group", { name: WHO.text })).toBeVisible();
+    announced(copy.interview.added([FRENCH.text]));
+    expect(within(plan(2)).getByText(FRENCH.text).closest("li")).toHaveTextContent(
+      copy.interview.tagNew
+    );
+    await userEvent.click(screen.getByText(copy.interview.answersTitle(1)));
+    expect(screen.getByText(copy.interview.noteAdded)).toBeInTheDocument();
+    expect(screen.getByText(NOTE)).toBeInTheDocument();
+  });
+
+  it("announces a changed plan when the note added nothing new", async () => {
+    setup(anInterview({ current: WHO, items: [anItem()] }), {
+      "interview.addNote": () =>
+        withNote({ items: [anItem({ text: "Create an invoice in French" })] }),
+    });
+
+    await userEvent.type(await findBox(), NOTE);
+    await userEvent.click(send());
+
+    await waitFor(() => expect(box()).toHaveValue(""));
+    expect(screen.getAllByRole("status").map((region) => region.textContent)).toContain(
+      copy.interview.noteChanged
+    );
+  });
+
+  it("moves to the new question when the note settled the one waiting", async () => {
+    setup(anInterview({ current: WHO, items: [anItem()] }), {
+      "interview.addNote": () => withNote({ current: DUE }),
+    });
+
+    await userEvent.type(await findBox(), "I send every invoice myself");
+    await userEvent.click(send());
+
+    expect(await screen.findByRole("heading", { name: DUE.text })).toHaveFocus();
+  });
+
+  it("says nothing changed, keeps the note with the answers, and points at adding it by hand", async () => {
+    setup(anInterview({ current: WHO, items: [anItem()] }), {
+      "interview.addNote": () => withNote(),
+    });
+
+    await userEvent.type(await findBox(), NOTE);
+    await userEvent.click(send());
+
+    // Shown beside the box, and heard in the live region.
+    expect(await screen.findAllByText(copy.interview.noteUnchanged)).toHaveLength(2);
+    announced(copy.interview.noteUnchanged);
+    expect(screen.getByRole("link", { name: copy.interview.noteToPlan })).toHaveAttribute(
+      "href",
+      "#plan"
+    );
+    expect(box()).toHaveValue("");
+    expect(screen.getByText(copy.interview.answersTitle(1))).toBeInTheDocument();
+  });
+
+  it("says it is adding the note and holds the box and the question while it is sent", async () => {
+    setup(anInterview({ current: WHO }), { "interview.addNote": () => new Promise(() => {}) });
+
+    await userEvent.type(await findBox(), NOTE);
+    await userEvent.click(send());
+
+    const sending = await screen.findByRole("button", { name: copy.interview.noteSending });
+    expect(sending).toHaveAttribute("aria-disabled", "true");
+    expect(sending).toHaveFocus();
+    expect(box()).toHaveAttribute("readonly");
+    expect(screen.getByRole("button", { name: copy.interview.continue })).toBeDisabled();
+  });
+
+  it("keeps the words and lets them send again when the note could not be added", async () => {
+    const { calls } = setup(anInterview({ current: WHO }), {
+      "interview.addNote": () => {
+        throw new ApiFailure("SERVICE_UNAVAILABLE", "The model run failed");
+      },
+    });
+
+    await userEvent.type(await findBox(), NOTE);
+    await userEvent.click(send());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(copy.interview.noteFailed);
+    expect(box()).toHaveValue(NOTE);
+    await userEvent.click(send());
+    await waitFor(() =>
+      expect(calls.filter((call) => call.path === "interview.addNote")).toHaveLength(2)
+    );
+  });
+
+  it("asks for words before sending an empty note, beside the box", async () => {
+    const { calls } = setup(anInterview({ current: WHO }));
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.interview.noteSend }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(copy.interview.noteEmpty);
+    expect(box()).toHaveAttribute("aria-invalid", "true");
+    expect(box()).toHaveFocus();
+    expect(box()).toHaveAccessibleDescription(
+      `${copy.interview.noteHint} ${copy.interview.noteEmpty}`
+    );
+    expect(calls.map((call) => call.path)).not.toContain("interview.addNote");
+  });
+
+  it("keeps unsent words when the page comes back, up to the length of an answer", async () => {
+    setup(anInterview({ current: WHO }));
+    await userEvent.type(await findBox(), NOTE);
+    expect(box()).toHaveAttribute("maxlength", "2000");
+    cleanup();
+
+    setup(anInterview({ current: WHO }));
+
+    expect(await findBox()).toHaveValue(NOTE);
+  });
+
+  it("opens from “Add something else” on a narrow screen", async () => {
+    setup(anInterview({ current: WHO }));
+
+    const open = await screen.findByRole("button", { name: copy.interview.noteOpen });
+    expect(open).toHaveAttribute("aria-expanded", "false");
+    await userEvent.click(open);
+
+    expect(open).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(open.getAttribute("aria-controls") ?? "")).toContainElement(
+      box()
+    );
+  });
+
+  it("is there while the next question is prepared, with sending held until it is", async () => {
+    setup(anInterview({ current: WHO }), { "interview.answer": () => new Promise(() => {}) });
+
+    await userEvent.click(await screen.findByRole("button", { name: copy.interview.youDecide }));
+
+    expect(box()).toBeEnabled();
+    expect(send()).toBeDisabled();
+  });
+
+  it.each([
+    ["paused", anInterview({ questions: [answered({ type: "you_decide" })] })],
+    ["finished", anInterview({ questions: [answered({ type: "you_decide" })], finished: true })],
+  ])("is there when the questions are %s", async (_, interview) => {
+    setup(interview);
+
+    expect(await findBox()).toBeInTheDocument();
+  });
+
+  it("is there while a reviewed project is changed", async () => {
+    setup(
+      anInterview({ questions: [answered({ type: "you_decide" })], finished: true }),
+      {},
+      aProject({ status: "spec_ready", spec: "# Spec" })
+    );
+    await screen.findByRole("heading", { name: copy.project.specTitle });
+    expect(screen.queryByRole("textbox", { name: copy.interview.noteLabel })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: copy.project.changeFeatures }));
+
+    expect(box()).toBeInTheDocument();
+  });
+
+  it("is not there before the questions start", async () => {
+    setup(anInterview());
+
+    await screen.findByRole("button", { name: copy.interview.start });
+    expect(screen.queryByRole("textbox", { name: copy.interview.noteLabel })).toBeNull();
+  });
+
+  it("is gone once the app is being built", async () => {
+    setup(
+      anInterview({ current: WHO, questions: [answered({ type: "you_decide" })] }),
+      {},
+      aProject({ status: "building" })
+    );
+
+    expect(await screen.findByRole("list", { name: copy.project.setup.label })).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: copy.interview.noteLabel })).toBeNull();
   });
 });
