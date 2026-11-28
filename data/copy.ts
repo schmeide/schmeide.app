@@ -226,6 +226,11 @@ export const copy = {
     ports: (live: number, staging: number) => `${live} live, ${staging} being worked on`,
     neverBuilt: "Never built",
     empty: "No app matches.",
+    // The design skills each last build ran (#341), and the ones that changed screens without any.
+    skills: (names: readonly string[]) => `Skills: ${names.join(", ")}`,
+    noDesignSkills: "Changed the screens without a design skill",
+    withoutDesignSkills: (count: number, of: number) =>
+      `${count} of the ${of} last builds shown changed the screens without a design skill.`,
   },
   // What hosted apps take up, on the hosted apps page and a business's page.
   resources: {
@@ -965,6 +970,8 @@ export const copy = {
       check: "Checking",
       deploy: "Publishing",
       error: "Problem",
+      skill: "Skill",
+      warning: "Warning",
     },
     phase: {
       step: "Getting your project ready.",
@@ -973,6 +980,8 @@ export const copy = {
       deploy: "Putting your app online.",
       error:
         "The builder hit a problem and is working past it. Watch the steps below; if the build stops, it says what went wrong and how to try again.",
+      skill: "The builder is writing your app.",
+      warning: "Checking that everything works.",
     },
     openStaging: "Open the version being worked on",
     openLive: "Open your live app",

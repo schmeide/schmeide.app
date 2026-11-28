@@ -387,6 +387,7 @@ const agentLines = (pushed: string): readonly string[] => [
       content: [
         { type: "text", text: "Writing the to-do service." },
         { type: "tool_use", id: "1", name: "Edit", input: { file_path: "/work/app/todos.ts" } },
+        { type: "tool_use", id: "2", name: "Skill", input: { skill: "schmeide:better-ui" } },
       ],
     },
   }),
@@ -467,6 +468,11 @@ describe("kubernetes mode", () => {
         "Editing todos.ts",
         "Agent finished: success, 2 turns, $0.25",
         `Pushed ${"a".repeat(12)} to staging`,
+      ])
+    );
+    expect(await listEvents(db, build.id, 0)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "skill", message: "schmeide:better-ui" }),
       ])
     );
     expect(await db.select().from(usage).where(eq(usage.buildId, build.id))).toEqual([

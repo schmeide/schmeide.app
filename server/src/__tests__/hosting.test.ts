@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
-import { builds } from "../db/schema.ts";
+import { buildEvents, builds } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { createProject } from "../services/projects.ts";
 import {
@@ -65,11 +65,21 @@ describe("listing projects", () => {
     const owner = await aSignedInPerson(app, deps, { name: "Olive" });
     const name = `Invoices ${randomUUID().slice(0, 8)}`;
     const project = await createProject(db, { name, tenantId: owner.tenantId });
-    await db.insert(builds).values([
-      { projectId: project.id, kind: "initial", request: "", status: "passed" },
-      { projectId: project.id, kind: "change", request: "", status: "failed" },
-      // Waiting changes have not run, so they are not the last build.
-      { projectId: project.id, kind: "change", request: "", status: "queued" },
+    const [, last] = await db
+      .insert(builds)
+      .values([
+        { projectId: project.id, kind: "initial", request: "", status: "passed" },
+        { projectId: project.id, kind: "change", request: "", status: "failed" },
+        // Waiting changes have not run, so they are not the last build.
+        { projectId: project.id, kind: "change", request: "", status: "queued" },
+      ])
+      .returning();
+    // The skills the last build ran, each once, and whether it was warned for running none (#341).
+    await db.insert(buildEvents).values([
+      { buildId: last.id, kind: "skill", message: "schmeide:mobile-first" },
+      { buildId: last.id, kind: "skill", message: "schmeide:better-ui" },
+      { buildId: last.id, kind: "skill", message: "schmeide:mobile-first" },
+      { buildId: last.id, kind: "warning", message: "No design skill" },
     ]);
 
     const page = (await callApi(app, "admin.projects.list", { search: name }, admin.cookie))
@@ -83,7 +93,13 @@ describe("listing projects", () => {
         webPort: project.webPort,
         stagingWebPort: project.webPort + 10_000,
         business: { id: owner.tenantId, name: "Olive’s business" },
-        lastBuild: { kind: "change", status: "failed", startedAt: expect.any(String) },
+        lastBuild: {
+          kind: "change",
+          status: "failed",
+          startedAt: expect.any(String),
+          skills: ["schmeide:better-ui", "schmeide:mobile-first"],
+          warned: true,
+        },
       },
     ]);
   });

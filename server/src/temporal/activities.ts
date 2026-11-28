@@ -19,7 +19,7 @@ import { pipeline } from "node:stream/promises";
 import { query as sdkQuery, type Options, type SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Context } from "@temporalio/activity";
 import { ApplicationFailure, CancelledFailure } from "@temporalio/common";
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { pickModel, type ModelRouting, type RoutedKind } from "../agentModel.ts";
 import type { Db } from "../db/client.ts";
 import {
@@ -51,6 +51,7 @@ import {
 import { deleteRun, followRun, startRun, sweepRuns, type Position } from "../kube/runs.ts";
 import {
   agentRuns,
+  buildEvents,
   buildFiles,
   builds,
   databaseCopies,
@@ -378,9 +379,25 @@ const INTERFACE_RULES = `Interface:
 - The customer is not technical, and most people will open the app on a phone. Design every screen for a ${DESIGN_WIDTH_PX}px-wide phone first, then let it use the room on wider screens.
 - Run the \`schmeide:mobile-first\` skill before you write or change any screen, and follow it. It gives you a starter stylesheet, exact sizes, and a checklist to finish on.
 - An app without a shared stylesheet is not finished. If this one has none, add it and bring every screen you touch up to the skill's rules.
-- Then use \`schmeide:better-layout\`, \`schmeide:better-typography\`, and \`schmeide:better-writing\` on the screens you built, and \`schmeide:better-accessibility\` for a last pass.
+- Then use \`schmeide:better-layout\`, \`schmeide:better-typography\`, \`schmeide:better-writing\`, \`schmeide:better-ui\`, and \`schmeide:better-colors\` on the screens you built, and \`schmeide:better-accessibility\` for a last pass.
 - For any motion, use \`schmeide:better-motion\`.
+- Run \`schmeide:interface-review\` as the very last pass before you commit, and fix what it finds.
 - After the make targets pass, Schmeide checks the built app for phones: a viewport tag that allows zoom, a stylesheet, and no fixed width over ${NARROWEST_PHONE_PX}px outside a \`min-width\` media query.`;
+
+// The skills INTERFACE_RULES names; a build that changes the interface without any is warned about.
+const DESIGN_SKILLS = [
+  "mobile-first",
+  "better-layout",
+  "better-typography",
+  "better-writing",
+  "better-ui",
+  "better-colors",
+  "better-motion",
+  "better-accessibility",
+  "interface-review",
+].map((name) => `schmeide:${name}`);
+export const NO_DESIGN_SKILLS =
+  "The builder changed the interface without running any design skill";
 
 const STANDING_RULES = `Standing rules:
 - Read AGENTS.md first and follow it. The stack is fixed.
@@ -1930,6 +1947,17 @@ export const createActivities = (
               (await runner.forgejo.fileAt(org, repo, commit, "Makefile")) ?? ""
             )
           );
+          await warnWithoutDesignSkills(build, async (base) => {
+            let changed: readonly string[] = [];
+            await onClone(runner, project, buildId, async (dir, env) => {
+              const diff = await run("git", ["diff", "--name-only", base, "HEAD"], {
+                cwd: dir,
+                env,
+              });
+              changed = diff.output.split("\n").filter(Boolean);
+            });
+            return changed;
+          });
           return { ok: true, output: "" };
         } finally {
           await endJob(runner, project, name);
@@ -2362,6 +2390,30 @@ export const createActivities = (
     const changed = await run("git", ["diff", "--name-only", base], options);
     const added = await run("git", ["ls-files", "--others", "--exclude-standard"], options);
     return [...changed.output.split("\n"), ...added.output.split("\n")].filter(Boolean);
+  };
+
+  // After the checks pass (#341), once: a build that changed the interface, as the first build
+  // always does, and ran none of the design skills. A warning, not a failure, for now.
+  const warnWithoutDesignSkills = async (
+    build: Build,
+    changed: (base: string) => Promise<readonly string[]>
+  ) => {
+    const [seen] = await db
+      .select({ id: buildEvents.id })
+      .from(buildEvents)
+      .where(
+        and(
+          eq(buildEvents.buildId, build.id),
+          or(
+            and(eq(buildEvents.kind, "skill"), inArray(buildEvents.message, DESIGN_SKILLS)),
+            and(eq(buildEvents.kind, "warning"), eq(buildEvents.message, NO_DESIGN_SKILLS))
+          )
+        )
+      )
+      .limit(1);
+    if (seen) return;
+    if (build.baseCommit !== null && !touchesInterface(await changed(build.baseCommit))) return;
+    await event(build.id, "warning", NO_DESIGN_SKILLS);
   };
 
   // Passing checks that included check/migrations prove the build only added to the database.
@@ -2909,6 +2961,11 @@ export const createActivities = (
           await event(input.buildId, "agent", `Agent started (${message.model})`);
         } else if (message.type === "assistant") {
           for (const block of message.message.content) {
+            if (block.type === "tool_use" && block.name === "Skill") {
+              const { skill } = block.input as { skill?: unknown };
+              await event(input.buildId, "skill", String(skill));
+              continue;
+            }
             const line =
               block.type === "text"
                 ? block.text.trim() && truncate(block.text)
@@ -3031,6 +3088,7 @@ export const createActivities = (
       await event(buildId, "check", JOURNEYS_UNCHANGED);
       await recordDependencies(db, buildId, await appDependencies(workspaceOf(project)));
       await recordAdditive(buildId, additive);
+      await warnWithoutDesignSkills(build, (base) => changedSince(project, base));
       return { ok: true, output: "" };
     },
 
