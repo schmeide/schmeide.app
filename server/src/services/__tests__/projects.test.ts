@@ -468,6 +468,25 @@ describe("project state machine", () => {
     expect(build).toMatchObject({ kind: "change", request: "add due dates" });
   });
 
+  it("records who asked for a change", async () => {
+    const { deps } = fakeWorkflows();
+    const ready = await specReady();
+    await transition(db, ready.id, ["spec_ready"], { status: "live" });
+    const [person] = await db
+      .insert(users)
+      .values({ id: randomUUID(), name: "Ann", email: `${randomUUID()}@example.com` })
+      .returning();
+
+    const { build } = await requestChange(deps, {
+      id: ready.id,
+      request: "add due dates",
+      byUserId: person.id,
+    });
+    await finishBuild(db, build.id);
+
+    expect(build.byUserId).toBe(person.id);
+  });
+
   it("stop cancels a running build, or takes a deployment down", async () => {
     const { deps, workflows, cancel } = fakeWorkflows();
     const ready = await specReady();

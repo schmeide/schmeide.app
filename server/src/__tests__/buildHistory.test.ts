@@ -1,7 +1,8 @@
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.ts";
 import { createDb } from "../db/client.ts";
-import { builds, usage, versionPictures, type NewUsage } from "../db/schema.ts";
+import { builds, usage, users, versionPictures, type NewUsage } from "../db/schema.ts";
 import type { AppContext } from "../router.ts";
 import { createProject } from "../services/projects.ts";
 import { aSignedInPerson, callApi, testAuth } from "./testAuth.ts";
@@ -34,6 +35,9 @@ type Listed = {
   readonly startedAt: string;
   readonly finishedAt: string | null;
   readonly costUsd: number;
+  readonly version: number | null;
+  readonly movedTo: number | null;
+  readonly by: string | null;
 };
 type Page = { readonly builds: readonly Listed[]; readonly nextCursor: number | null };
 
@@ -121,6 +125,43 @@ describe("builds.list", () => {
     ).data as Page;
     expect(second.builds.map((build) => build.id)).toEqual([initial.id]);
     expect(second.nextCursor).toBeNull();
+  });
+
+  it("names each version, the version a release put live, and who asked", async () => {
+    const owner = await aSignedInPerson(app, deps, { name: "Ann" });
+    const [ann] = await db.select({ id: users.id }).from(users).where(eq(users.email, owner.email));
+    const project = await createProject(db, { name: "Versions", tenantId: owner.tenantId });
+    const commit = (n: number) => String(n).padStart(40, "0");
+    await db.insert(builds).values([
+      { projectId: project.id, kind: "initial", request: "spec", status: "passed" },
+      {
+        projectId: project.id,
+        kind: "change",
+        request: "Add a menu",
+        status: "passed",
+        commit: commit(2),
+        version: 2,
+        byUserId: ann.id,
+      },
+      {
+        projectId: project.id,
+        kind: "promote",
+        request: "Put the version being worked on live",
+        status: "passed",
+        commit: commit(2),
+        byUserId: ann.id,
+      },
+    ]);
+
+    const page = (await callApi(app, "builds.list", { id: project.id }, owner.cookie)).data as Page;
+
+    expect(
+      page.builds.map(({ kind, version, movedTo, by }) => ({ kind, version, movedTo, by }))
+    ).toEqual([
+      { kind: "promote", version: null, movedTo: 2, by: "Ann" },
+      { kind: "change", version: 2, movedTo: 2, by: "Ann" },
+      { kind: "initial", version: null, movedTo: null, by: null },
+    ]);
   });
 
   it("answers NOT_FOUND for another business's project", async () => {

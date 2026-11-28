@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +23,7 @@ import {
   buildDependencies,
   buildFiles,
   builds,
+  databaseCopies,
   files,
   projectAcceptance,
   projects,
@@ -37,6 +39,7 @@ import { appendEvent, getBuild, listEvents } from "../../services/builds.ts";
 import type { Forgejo } from "../../services/forgejo.ts";
 import type { AppDatabases } from "../../services/appDatabases.ts";
 import { createProject, transition } from "../../services/projects.ts";
+import { copyOf } from "../../services/resources.ts";
 import {
   ATTACHMENTS_REFUSED,
   GIT_CONFIG,
@@ -1097,6 +1100,42 @@ describe("kubernetes mode", () => {
     expect(hosting.databases.has(`app_${project.id}_staging`)).toBe(true);
     const [row] = await db.select().from(projects).where(eq(projects.id, project.id));
     expect(row.stagingCommit).toBe(live);
+  });
+
+  it("promotes without copying the live app's database, and says so", async () => {
+    const { config, forgejo, root } = setup();
+    const { project, build } = await newBuild();
+    const activities = createActivities(deps, config);
+    const env = new MockActivityEnvironment();
+    await env.run(activities.prepareWorkspace, build.id);
+    const repo = forgejo.bare(`t${project.tenantId}`, project.slug);
+    builderCommit(root, repo);
+    await env.run(activities.deploy, build.id);
+    await db.update(builds).set({ release: "promoted" }).where(eq(builds.id, build.id));
+    const next = builderCommit(root, repo);
+    await env.run(activities.deploy, build.id);
+    // Another worker, with no checkout of the app on its disk, runs the promote.
+    for (const copy of ["staging", "production"] as const)
+      rmSync(copyOf(config.dataDir, project.slug, copy).dir, { recursive: true, force: true });
+    const [promote] = await db
+      .insert(builds)
+      .values({
+        projectId: project.id,
+        kind: "promote",
+        request: "",
+        status: "running",
+        commit: next,
+      })
+      .returning();
+
+    await env.run(activities.release, promote.id);
+
+    expect(await messages(promote.id)).toContain(
+      "The live app's information is not copied on the cluster yet"
+    );
+    expect(
+      await db.select().from(databaseCopies).where(eq(databaseCopies.projectId, project.id))
+    ).toEqual([]);
   });
 
   it("pushes a passed build's version ref, and keeps it after a discard", async () => {

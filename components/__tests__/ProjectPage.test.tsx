@@ -736,6 +736,7 @@ describe("ProjectPage designer", () => {
     const views = await screen.findByRole("navigation", { name: copy.project.views.label });
     expect(links(views)).toEqual([
       ["Designer", "/projects/7", "true"],
+      ["Versions", "/projects/7/versions", null],
       ["Settings", "/projects/7/settings", null],
     ]);
     expect(

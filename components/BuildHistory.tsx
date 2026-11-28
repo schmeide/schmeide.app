@@ -6,7 +6,8 @@ import { copy } from "../data/copy";
 import type { AppRouter } from "../server/src/router.ts";
 import { useTRPC } from "../trpc";
 import { formatCost, formatDuration } from "../utils/usage";
-import { requestText, useBuildEvents } from "./BuildStep";
+import { BuildLog } from "./BuildLog";
+import { requestText } from "./BuildStep";
 import { ErrorNote } from "./ErrorNote";
 import { FeatureResults } from "./FeatureResults";
 
@@ -16,22 +17,6 @@ import styles from "./BuildHistory.module.css";
 type PastBuild = inferRouterOutputs<AppRouter>["builds"]["list"]["builds"][number];
 
 const when = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" });
-
-// A finished build's log, fetched only once it is opened.
-function PastLog({ build }: { readonly build: PastBuild }) {
-  const events = useBuildEvents(build);
-  return events.length === 0 ? (
-    <p className={stepStyles.muted}>{copy.project.logEmpty}</p>
-  ) : (
-    <ol className={styles.events}>
-      {events.map((event) => (
-        <li key={event.id} data-kind={event.kind}>
-          <span className={styles.kind}>{copy.project.eventKind[event.kind]}</span> {event.message}
-        </li>
-      ))}
-    </ol>
-  );
-}
 
 // Which features worked in a past build's version (#357), fetched only once it is opened.
 function PastFeatures({ build }: { readonly build: PastBuild }) {
@@ -50,7 +35,6 @@ function PastFeatures({ build }: { readonly build: PastBuild }) {
 const TESTED_KINDS: readonly PastBuild["kind"][] = ["initial", "change"];
 
 function PastBuildItem({ build }: { readonly build: PastBuild }) {
-  const [open, setOpen] = useState(false);
   const [featuresOpen, setFeaturesOpen] = useState(false);
   const id = useId();
   const tested = build.status === "passed" && TESTED_KINDS.includes(build.kind);
@@ -78,19 +62,7 @@ function PastBuildItem({ build }: { readonly build: PastBuild }) {
       {build.status === "failed" && build.error && (
         <pre className={styles.error}>{build.error}</pre>
       )}
-      <button
-        type="button"
-        className={styles.toggle}
-        aria-expanded={open}
-        aria-controls={`${id}-log`}
-        aria-describedby={`${id}-request`}
-        onClick={() => setOpen((shown) => !shown)}
-      >
-        {copy.project.history.showLog}
-      </button>
-      <div id={`${id}-log`} hidden={!open} className={styles.log} tabIndex={0}>
-        {open && <PastLog build={build} />}
-      </div>
+      <BuildLog build={build} describedBy={`${id}-request`} />
       {tested && (
         <>
           <button
